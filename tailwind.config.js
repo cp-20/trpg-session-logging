@@ -1,0 +1,75 @@
+/** @type {import('tailwindcss').Config} */
+import daisyui from "daisyui";
+
+export default {
+  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ["Noto Sans JP", "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", "sans-serif"],
+      },
+    },
+  },
+  plugins: [daisyui],
+  daisyui: {
+    logs: false,
+    themes: [
+      {
+        takufu: {
+          primary: "#0e7490",
+          "primary-content": "#e0f7fa",
+          secondary: "#78716c",
+          "secondary-content": "#fafaf9",
+          accent: "#0e7490",
+          "accent-content": "#e0f7fa",
+          neutral: "#1c1917",
+          "neutral-content": "#e7e5e4",
+          "base-100": "#ffffff",
+          "base-200": "#fafaf9",
+          "base-300": "#e7e5e4",
+          "base-content": "#1c1917",
+          info: "#0e7490",
+          "info-content": "#e0f7fa",
+          success: "#047857",
+          "success-content": "#ecfdf5",
+          warning: "#b45309",
+          "warning-content": "#fffbeb",
+          error: "#b91c1c",
+          "error-content": "#fef2f2",
+          "--rounded-box": "0.5rem",
+          "--rounded-btn": "0.375rem",
+          "--rounded-badge": "0.25rem",
+          "--border-btn": "1px",
+        },
+      },
+      {
+        takufuDark: {
+          primary: "#22d3ee",
+          "primary-content": "#0c0a19",
+          secondary: "#a8a29e",
+          "secondary-content": "#0c0a19",
+          accent: "#22d3ee",
+          "accent-content": "#0c0a19",
+          neutral: "#1c1917",
+          "neutral-content": "#e7e5e4",
+          "base-100": "#0c0a19",
+          "base-200": "#1c1917",
+          "base-300": "#292524",
+          "base-content": "#e7e5e4",
+          info: "#22d3ee",
+          "info-content": "#0c0a19",
+          success: "#6ee7b7",
+          "success-content": "#0c0a19",
+          warning: "#fbbf24",
+          "warning-content": "#0c0a19",
+          error: "#f87171",
+          "error-content": "#0c0a19",
+          "--rounded-box": "0.5rem",
+          "--rounded-btn": "0.375rem",
+          "--rounded-badge": "0.25rem",
+          "--border-btn": "1px",
+        },
+      },
+    ],
+  },
+};

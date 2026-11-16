@@ -1,0 +1,18 @@
+{
+  "roomName": "old_mansion",
+  "createdAt": 1794831600000,
+  "messages": [
+    { "id": "m001", "name": "夜霜", "text": "——1972年、廃講義棟。始まりの鐘が鳴る。", "createdAt": 1794831600000, "channel": "main" },
+    { "id": "m002", "name": "遠沢澄花", "text": "（目星）教室の黒板、まだ新しい。", "createdAt": 1794831720000, "channel": "main", "extend": { "roll": { "cmd": "CC<=70 目星", "skill": "目星", "dice": [ { "faces": 100, "value": 61 } ], "result": "成功" } } },
+    { "id": "m003", "name": "白瀬怜", "text": "（聞き耳）窓の外に足音が……する？", "createdAt": 1794831840000, "channel": "main", "extend": { "roll": { "cmd": "CC<=55 聞き耳", "skill": "聞き耳", "dice": [ { "faces": 100, "value": 98 } ], "result": "ファンブル" } } },
+    { "id": "m004", "name": "夜霜", "text": "◆ シーン終了。廊下へ移動。", "createdAt": 1794832200000, "channel": "main" },
+    { "id": "m005", "name": "夜霜", "text": "【導入】1972年以来、夜間は立入禁止。", "createdAt": 1794831660000, "channel": "info" },
+    { "id": "m006", "name": "そら", "text": "休憩3分どうぞ", "createdAt": 1794834000000, "channel": "chat" },
+    { "id": "m007", "name": "カイ", "text": "戻った。サンキュー", "createdAt": 1794834180000, "channel": "chat" },
+    { "id": "m008", "name": "夜霜", "text": "【シークレット】黒板に文字を書いたのは、1972年に消えた教員。", "createdAt": 1794832500000, "channel": "tab_3" },
+    { "id": "m009", "name": "夜霜", "text": "【シークレット】柚希が振り返ると、廊下の先に白い服。", "createdAt": 1794832620000, "channel": "tab_3" },
+    { "id": "m010", "name": "如月柚希", "text": "（回避）逃げよう。先に出口へ！", "createdAt": 1794832800000, "channel": "main", "extend": { "roll": { "cmd": "CC<=56 回避", "skill": "回避", "dice": [ { "faces": 100, "value": 12 } ], "result": "クリティカル" } } },
+    { "id": "m011", "name": "遠沢澄花", "text": "（図書館）1972年の卒業文集を調べる", "createdAt": 1794833400000, "channel": "main", "extend": { "roll": { "cmd": "CC<=65 図書館", "skill": "図書館", "dice": [ { "faces": 100, "value": 44 } ], "result": "成功" } } },
+    { "id": "m012", "name": "夜霜", "text": "——END「後夜祭」。全員生還。", "createdAt": 1794834600000, "channel": "main" }
+  ]
+}

@@ -1,0 +1,146 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   卓譜 デザインシステム
+   原則: 近接・整列・反復・対比
+   アニメーション: katashin の satisfying UI animation 原則
+   ============================================================ */
+
+:root {
+  font-size: 15px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 120ms;
+  --dur-normal: 200ms;
+}
+
+body {
+  background: var(--fallback-b2, oklch(var(--b2) / 1));
+  color: var(--fallback-bc, oklch(var(--bc) / 1));
+  font-family: "Noto Sans JP", "Hiragino Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- アニメーション ---------- */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.anim-page > :first-child {
+  animation: fade-up var(--dur-normal) var(--ease-out) both;
+}
+
+.stagger > * {
+  animation: fade-up var(--dur-normal) var(--ease-out) both;
+}
+.stagger > *:nth-child(2) { animation-delay: 50ms; }
+.stagger > *:nth-child(3) { animation-delay: 100ms; }
+.stagger > *:nth-child(n+4) { animation-delay: 150ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-page > :first-child, .stagger > * { animation: none !important; }
+}
+
+/* ---------- ボタン ---------- */
+.btn {
+  transition: transform var(--dur-fast) cubic-bezier(0.34, 1.56, 0.64, 1),
+    background-color var(--dur-fast) ease, border-color var(--dur-fast) ease;
+}
+/* hover では動かさない(join 等のボタングループでズレるため)。
+   押下時のみ、わずかに縮めて触っている感覚を出す */
+.btn:active:not(:disabled) { transform: scale(0.97); }
+.btn:disabled { transform: none; }
+
+/* ---------- カード ---------- */
+.card {
+  transition: border-color var(--dur-fast) ease, box-shadow var(--dur-normal) var(--ease-out);
+}
+
+/* ---------- モーダル ---------- */
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.94) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.modal > .modal-box { animation: modal-in var(--dur-normal) var(--ease-out) both; }
+
+/* ---------- メッセージ行 ---------- */
+.msg {
+  @apply flex gap-2.5 px-1.5 py-1 rounded-lg text-[13.5px] leading-relaxed items-start;
+  transition: background-color 100ms ease;
+}
+.msg:hover { background: oklch(var(--b3) / 0.4); }
+.msg .who { @apply flex-none w-24 shrink-0 font-bold text-[12.5px] flex flex-col gap-0 overflow-hidden; }
+.msg .who .kind { @apply text-[9.5px] font-bold tracking-wider opacity-50; }
+.msg .time { @apply text-[10.5px] text-base-content/40 ml-2 flex-none; font-variant-numeric: tabular-nums; }
+.msg .body { @apply flex-1 min-w-0 break-words whitespace-pre-wrap; }
+
+/* ---------- ロール行 ---------- */
+.rollrow {
+  @apply flex items-center gap-3 px-2.5 py-1.5 my-0.5 rounded-lg bg-base-200/50 text-[13px];
+  font-variant-numeric: tabular-nums;
+  transition: background-color 100ms ease;
+}
+.rollrow:hover { background: oklch(var(--b3) / 0.6); }
+.rollrow .cmd { @apply font-semibold text-[12.5px]; }
+.rollrow .dice { @apply text-base-content/50 text-[12px] font-mono; }
+
+/* ---------- 本文行 ---------- */
+.noterow {
+  @apply flex items-start gap-2.5 px-2 py-1.5 my-0.5 rounded-lg text-[13px] text-base-content/60;
+}
+
+/* ---------- 日付区切り ---------- */
+.daysep { @apply flex items-center gap-3 my-3 first:mt-0; }
+.daysep::before, .daysep::after { content: ""; @apply h-px flex-1 bg-base-300; }
+
+/* ---------- タイムライン ---------- */
+.tl { @apply relative pl-6; }
+.tl::before { content: ""; @apply absolute left-2 top-2 bottom-2 w-0.5 bg-base-300; }
+.tlitem { @apply relative py-2.5; }
+.tlitem::before {
+  content: ""; @apply absolute -left-[19px] top-4 w-2.5 h-2.5 rounded-full bg-base-100 border-2 border-primary;
+}
+
+/* ---------- ステップ ---------- */
+.steps { @apply flex gap-2 mb-5; }
+.step-pill { @apply flex-1 h-1 rounded-full bg-base-300 relative transition-colors duration-200; }
+.step-pill.on { @apply bg-primary; }
+
+/* ---------- ドロップゾーン ---------- */
+.drop {
+  @apply border-2 border-dashed border-base-300 rounded-xl py-10 px-5 text-center bg-base-200/30 transition-all duration-200;
+  transition-timing-function: var(--ease-out);
+}
+.drop.hot { @apply border-primary bg-primary/10 scale-[1.01]; }
+
+/* ---------- タブ ---------- */
+.tabs { @apply flex gap-0 border-b border-base-300 mb-4 flex-wrap; }
+.tabs .tab {
+  @apply px-4 py-2.5 text-[13px] font-semibold text-base-content/60 border-b-2 border-transparent -mb-px
+    transition-colors duration-150;
+}
+.tabs .tab:hover { @apply text-base-content/80; }
+.tabs .tab.tab-active { @apply text-primary border-primary; }
+
+/* ---------- ページ遷移 ---------- */
+main > :first-child {
+  animation: fade-up var(--dur-normal) var(--ease-out) both;
+}
+
+/* ---------- スクロールバー ---------- */
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-thumb { background: oklch(var(--bc) / 0.15); border-radius: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* ---------- ページ ---------- */
+.page { @apply max-w-5xl; }

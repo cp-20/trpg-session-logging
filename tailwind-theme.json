@@ -1,0 +1,35 @@
+{
+  "daisyui": {
+    "logs": false,
+    "themes": [
+      {
+        "takufu": {
+          "primary": "#31456A",
+          "primary-content": "#FBF9F4",
+          "secondary": "#6B5B3E",
+          "secondary-content": "#FBF9F4",
+          "accent": "#C73E3A",
+          "accent-content": "#FBF9F4",
+          "neutral": "#26221A",
+          "neutral-content": "#FBF9F4",
+          "base-100": "#FBF9F4",
+          "base-200": "#F3EFE4",
+          "base-300": "#E0D9C8",
+          "base-content": "#26221A",
+          "info": "#31456A",
+          "info-content": "#FBF9F4",
+          "success": "#13734B",
+          "success-content": "#FBF9F4",
+          "warning": "#8A551B",
+          "warning-content": "#FBF9F4",
+          "error": "#B3402E",
+          "error-content": "#FBF9F4",
+          "--rounded-box": "0.125rem",
+          "--rounded-btn": "0.125rem",
+          "--rounded-badge": "0.125rem",
+          "--border-btn": "1px"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,82 @@
+rules_version = '2';
+
+// 卓譜 (Takufu) — Firestore セキュリティルール v1
+//
+// 認可の基本方針(plan.md):
+//  - サインイン済み(uid != null)のみ読み書き
+//  - ログの本文は伏せ字済みのものだけを保存し、シークレットは保存しない(クライアント契約)
+//  - 閲覧可否の最終判断は将来 Worker/Rules で行う。この v1 は「書き込みは所有者のみ、
+//    読み取りは認証済みまで」を最小境界とする
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function uid() {
+      return request.auth.uid;
+    }
+    function isOwner(doc) {
+      return signedIn() && doc.ownerId == uid();
+    }
+    function isParticipant(doc) {
+      return signedIn() && doc.players[uid()] != null;
+    }
+
+    // セッション(ログ)メタデータ
+    match /sessions/{sessionId} {
+      // 読み取り: 所有者・参加者、または共有範囲が公開のもの
+      // (members/passed の细粒度判定はアプリ側ゲート+将来のWorkerに委譲)
+      allow get: if isOwner(resource.data) || isParticipant(resource.data) || resource.data.scope == "public";
+      allow list: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.ownerId == uid()
+        && request.resource.data.scope in ["members", "passed", "public"];
+      // 変更は所有者のみ。共有範囲・参加者の改変は所有者か本人が行える
+      allow update: if isOwner(resource.data);
+      allow delete: if isOwner(resource.data);
+
+      // ログ本文(zstd済みのJSONを chunks に分割して保存する想定)
+      match /logBody/{docId} {
+        allow read: if isOwner(get(/databases/$(database)/documents/sessions/$(sessionId)));
+        allow write: if isOwner(get(/databases/$(database)/documents/sessions/$(sessionId)));
+      }
+
+      // 参加者ドキュメント(将来の participants コレクション)
+      match /participants/{uid} {
+        // 本人は自分の参加状態(hidden/unlink)を変更できる
+        allow read: if isOwner(get(/databases/$(database)/documents/sessions/$(sessionId))) || request.auth.uid == uid;
+        allow create: if isOwner(get(/databases/$(database)/documents/sessions/$(sessionId)))
+          || request.auth.uid == uid;
+        allow update: if isOwner(get(/databases/$(database)/documents/sessions/$(sessionId))) || request.auth.uid == uid;
+        allow delete: if isOwner(get(/databases/$(database)/documents/sessions/$(sessionId))) || request.auth.uid == uid;
+      }
+    }
+
+    // キャラクター(ユーザー帰属)
+    match /characters/{characterId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.ownerId == uid();
+      allow update, delete: if signedIn() && resource.data.ownerId == uid();
+    }
+
+    // シナリオカタログ(メタデータのみ・追加自由/編集は作者)
+    match /scenarios/{scenarioId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if signedIn() && resource.data.claimedBy == uid();
+    }
+
+    // ユーザープロフィール
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && userId == uid();
+      allow update, delete: if signedIn() && userId == uid();
+    }
+
+    // 単一writer/期待リビジョン競合などの操作ログ(将来)
+    match /audit/{docId} {
+      allow read, write: if signedIn();
+    }
+  }
+}
