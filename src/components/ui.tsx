@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import type { Character, User, Provider } from "../types";
 import { IconListDetails, IconGoogle, IconDiscord, IconBrandX, IconX, IconBooks, IconFilter, IconLock } from "./icons";
 /* BOOTH / TALTO はアイコンセットに無いため、公式のアイコンアセット(64px)を同梱して使う */
@@ -39,10 +40,11 @@ export function Tag({
 
 /* ---------- アバター ---------- */
 export function Avatar({ u, size = 26 }: { u: User; size?: number }) {
+  if (u.image) return <img src={u.image} alt={u.name} width={size} height={size} referrerPolicy="no-referrer" className="rounded-full object-cover shrink-0" />;
   return (
     <span
       className="inline-flex items-center justify-center font-extrabold text-white flex-none shrink-0"
-      style={{ background: u.color, width: size, height: size, fontSize: size * 0.44, borderRadius: 2 }}
+      style={{ background: u.color, width: size, height: size, fontSize: size * 0.44, borderRadius: "50%" }}
       title={u.name}
     >
       {u.name[0]}
@@ -283,9 +285,9 @@ export function PageHead({
   return (
     <div className="mb-5">
       {back && (
-        <a className="btn btn-ghost btn-xs px-0 mb-1" href={back.to}>
+        <Link className="btn btn-ghost btn-xs px-0 mb-1" to={back.to}>
           ← {back.label}
-        </a>
+        </Link>
       )}
       <div className="flex items-start gap-3 flex-wrap">
         <div className="flex-1 min-w-0">

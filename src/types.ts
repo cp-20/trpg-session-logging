@@ -6,6 +6,9 @@ export interface LinkedAccount {
   status: AccountStatus;
   externalId?: string;
   verifiedAt?: string;
+  displayName?: string;
+  email?: string;
+  username?: string;
 }
 
 export interface User {
@@ -14,6 +17,8 @@ export interface User {
   color: string;
   accounts: LinkedAccount[];
   bio?: string;
+  email?: string;
+  image?: string;
 }
 
 export interface SystemDef {
