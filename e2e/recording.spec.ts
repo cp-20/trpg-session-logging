@@ -17,7 +17,7 @@ test("手入力の日付を変更でき、戻っても入力を失わず、不�
   await expect(page.getByLabel("実施日 2", { exact: true })).toHaveValue("2026-10-11");
   await page.getByLabel("実施日 2", { exact: true }).fill("2026-10-10");
   await page.getByRole("button", { name: "内容と参加者の確認へ進む" }).click({ force: true });
-  await expect(page.getByRole("alert")).toContainText("実施日を重複しない日付で入力");
+  await expect(page.getByRole("alert").filter({ hasText: "実施日を重複しない日付で入力" })).toBeVisible();
   await expect(page.getByRole("button", { name: "記録する", exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 

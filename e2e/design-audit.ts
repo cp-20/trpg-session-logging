@@ -10,6 +10,7 @@ import type { Page } from "@playwright/test";
 
 /** デモ環境で巡回する画面 */
 export const AUDIT_ROUTES = [
+  "/",
   "/sessions",
   "/sessions/s02",
   "/sessions/s02?tab=log",
@@ -52,7 +53,8 @@ export interface AuditIssue {
 export async function enterDemo(page: Page): Promise<void> {
   await page.goto("/");
   await page.getByRole("button", { name: /サンプルデータをそのまま見る/ }).click();
-  await page.waitForURL(/\/sessions/);
+  // デモに入るとホーム（/）に移る
+  await page.getByRole("navigation", { name: "メイン" }).first().waitFor();
 }
 
 export async function auditPage(page: Page, opts: { dark?: boolean } = {}): Promise<AuditIssue[]> {

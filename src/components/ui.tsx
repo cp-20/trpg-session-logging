@@ -4,7 +4,7 @@
  */
 import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link } from "../lib/router";
 import { getJapaneseHolidayName } from "../lib/holidays";
 import { todayStr } from "../lib/format";
 import type { Scope, SystemDef } from "../types";
@@ -438,7 +438,7 @@ export function PageHead({
       {back && (
         <Link
           className="-ml-1.5 mb-2 inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 text-sm font-medium text-ink2 transition-colors hover:text-base-content"
-          to={back.to as never}
+          to={back.to}
         >
           <IconChevronLeft width={16} height={16} aria-hidden />
           {back.label}

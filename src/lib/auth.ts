@@ -19,8 +19,8 @@ export function getTakufuAuth() {
   const app = getFirebaseApp();
   if (!app) return null;
   const auth = getAuth(app);
-  if (import.meta.env.VITE_FIREBASE_USE_EMULATORS === "true" && !emulatorConnected) {
-    connectAuthEmulator(auth, import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_URL || "http://127.0.0.1:9099", {
+  if (process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATORS === "true" && !emulatorConnected) {
+    connectAuthEmulator(auth, process.env.NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_URL || "http://127.0.0.1:9099", {
       disableWarnings: true,
     });
     emulatorConnected = true;

@@ -3,7 +3,6 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const LOLIPOP_PROJECT = "01M7JCJVR7GCWGXR5MD32MZ22G";
@@ -69,24 +68,96 @@ function runCmd(command: string, args: string[], cwd = ROOT): void {
   }
 }
 
+/** LOLIPOP! Deploy Now のビルド設定。Next.js の standalone 出力をサーバーとして動かす */
+const DEPLOY_BUILD = {
+  framework: "next",
+  install: "npx -y pnpm@12.11.2 install --frozen-lockfile",
+  build: "npx -y pnpm@12.11.2 run build",
+  output: ".next/standalone",
+};
+/** ビルド時に埋め込む公開設定（Firebase のブラウザ用設定は秘密ではない）。値は .env.local から読む */
+const PUBLIC_ENV_KEYS = [
+  "NEXT_PUBLIC_FIREBASE_API_KEY",
+  "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN",
+  "NEXT_PUBLIC_FIREBASE_PROJECT_ID",
+  "NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET",
+  "NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID",
+  "NEXT_PUBLIC_FIREBASE_APP_ID",
+  "NEXT_PUBLIC_FIREBASE_DATABASE_ID",
+];
+
+function readEnvLocal(): Record<string, string> {
+  const out: Record<string, string> = {};
+  const path = join(ROOT, ".env.local");
+  if (!existsSync(path)) return out;
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+    const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
+    if (m) out[m[1]!] = m[2]!;
+  }
+  return out;
+}
+
+/**
+ * ソース一式（Git 管理下のファイルだけ。.env* と node_modules は送らない）を Deploy Now に送り、
+ * クラウドでインストールとビルドをさせる。`--setup` でビルド設定と公開環境変数も揃える。
+ */
 async function cmdDeploy(args: string[]): Promise<void> {
-  if (!args.includes("--prebuilt")) {
-    runCmd("pnpm", ["run", "build"]);
-  }
-  if (!existsSync(join(ROOT, "dist/index.html"))) {
-    throw new Error("Build dist/index.html before deploying.");
-  }
   const cli = resolveLolipopCli();
+  const lolipop = (cmdArgs: string[], cwd = ROOT) => runCmd(process.execPath, [cli, ...cmdArgs], cwd);
+  if (args.includes("--setup")) {
+    lolipop([
+      "build-config",
+      "update",
+      "--project",
+      LOLIPOP_PROJECT,
+      "--framework",
+      DEPLOY_BUILD.framework,
+      "--install",
+      DEPLOY_BUILD.install,
+      "--build",
+      DEPLOY_BUILD.build,
+      "--output",
+      DEPLOY_BUILD.output,
+    ]);
+    const env = readEnvLocal();
+    const existing = execFileSync(
+      process.execPath,
+      [cli, "env", "list", "--project", LOLIPOP_PROJECT, "--json"],
+      {
+        encoding: "utf8",
+      },
+    );
+    for (const key of PUBLIC_ENV_KEYS) {
+      const value = env[key];
+      if (!value) throw new Error(`${key} is missing in .env.local`);
+      const verb = existing.includes(`"${key}"`) ? "update" : "create";
+      lolipop(["env", verb, key, value, "--project", LOLIPOP_PROJECT]);
+    }
+  }
+  const files = execFileSync("git", ["ls-files", "-co", "--exclude-standard"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  })
+    .split("\n")
+    .filter((f) => f && !f.startsWith(".env") && existsSync(join(ROOT, f)));
   const staging = mkdtempSync(join(tmpdir(), "takufu-deploy-"));
   try {
-    cpSync(join(ROOT, "dist"), staging, { recursive: true });
-    runCmd(cli, ["deploy", "--project", LOLIPOP_PROJECT, "--json"], staging);
+    for (const f of files) cpSync(join(ROOT, f), join(staging, f), { recursive: true });
+    lolipop(["deploy", "--project", LOLIPOP_PROJECT, "--json"], staging);
     console.log(
-      `Check status: ${cli} project show --project ${LOLIPOP_PROJECT} --json\nSite: https://takufu.lolipop-now.app`,
+      `Check status: node ${cli} project show --project ${LOLIPOP_PROJECT} --json\nSite: https://takufu.lolipop-now.app`,
     );
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }
+}
+
+/** next build の後に、standalone 出力へ静的ファイル（public / .next/static）を入れる */
+function cmdStandalone(): void {
+  const out = join(ROOT, ".next/standalone");
+  if (!existsSync(out)) throw new Error("Run next build with output: standalone first.");
+  cpSync(join(ROOT, "public"), join(out, "public"), { recursive: true });
+  cpSync(join(ROOT, ".next/static"), join(out, ".next/static"), { recursive: true });
 }
 
 async function cmdRules(args: string[]): Promise<void> {
@@ -211,6 +282,7 @@ async function cmdFirebase(args: string[]): Promise<void> {
  * 使い方: node scripts/ops.ts review [http://127.0.0.1:5173] [--only=/calendar,/tables]
  */
 async function cmdReview(args: string[]): Promise<void> {
+  const { chromium } = await import("playwright");
   const { AUDIT_ROUTES, auditPage } = await import("../e2e/design-audit.ts");
   const baseUrl = args.find((a) => a.startsWith("http")) ?? "http://127.0.0.1:5173";
   const only = args
@@ -240,7 +312,7 @@ async function cmdReview(args: string[]): Promise<void> {
     await page.goto("/");
     await page.screenshot({ path: join(outDir, `${mode.name}-signin.png`), fullPage: true });
     await page.getByRole("button", { name: /サンプルデータをそのまま見る/ }).click();
-    await page.waitForURL(/\/sessions/);
+    await page.getByRole("navigation", { name: "メイン" }).first().waitFor();
     lines.push(`## ${mode.name}`, "");
     for (const route of AUDIT_ROUTES) {
       if (only && !only.some((o) => route.startsWith(o))) continue;
@@ -286,6 +358,9 @@ switch (subcmd) {
   case "review":
     await cmdReview(rest);
     break;
+  case "standalone":
+    cmdStandalone();
+    break;
   default:
-    throw new Error("Usage: node scripts/ops.ts <deploy|rules|firebase|review>");
+    throw new Error("Usage: node scripts/ops.ts <deploy [--setup]|rules|firebase|review|standalone>");
 }

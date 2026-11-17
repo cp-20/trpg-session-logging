@@ -7,7 +7,9 @@ test("ココフォリアの実データを画像付きで取り込み、失敗�
   await page.getByRole("button", { name: "キャラシートを取り込む" }).click({ force: true });
   await page.getByLabel(/キャラクターデータ/).fill("not-json");
   await page.getByRole("button", { name: "内容を確認", exact: true }).click({ force: true });
-  await expect(page.getByRole("alert")).toContainText("キャラクターを読み取れませんでした");
+  await expect(
+    page.getByRole("alert").filter({ hasText: "キャラクターを読み取れませんでした" }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "取り込む", exact: true })).toHaveCount(0);
   const image =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cC20AAAAASUVORK5CYII=";

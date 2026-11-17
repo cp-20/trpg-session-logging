@@ -190,6 +190,8 @@ export interface Prefs {
   hideSelfOnShare: boolean;
   onboardingDone?: boolean;
   busyDates?: string[];
+  /** カレンダー購読リンクのトークン（作成済みのときだけ） */
+  calendarFeedToken?: string;
 }
 
 export type Availability = "ok" | "maybe" | "ng";

@@ -5,13 +5,16 @@ import {
   calendarSubscribeLinks,
   canConfirmPoll,
   computeEndTime,
+  daysBetween,
   eventDurationMinutes,
   groupBy,
   monthCells,
+  myScheduleView,
   parseBusyDates,
   pollCandidates,
   pollMemberIds,
   quickWeekendDates,
+  relativeDayLabel,
   shiftYearMonth,
   unansweredCount,
 } from "./schedule";
@@ -134,5 +137,59 @@ describe("購読リンク", () => {
       "https://calendar.google.com/calendar/render?cid=" +
         encodeURIComponent("webcal://example.com/feed/abc"),
     );
+  });
+});
+
+describe("近い予定の言い方", () => {
+  it("今日・あす・あとN日、2週間より先は出さない", () => {
+    expect(daysBetween("2026-11-30", "2026-12-02")).toBe(2);
+    expect(relativeDayLabel("2026-11-18", "2026-11-18")).toBe("今日");
+    expect(relativeDayLabel("2026-11-18", "2026-11-19")).toBe("あす");
+    expect(relativeDayLabel("2026-11-18", "2026-11-21")).toBe("あと3日");
+    expect(relativeDayLabel("2026-11-18", "2026-12-02")).toBeNull();
+    expect(relativeDayLabel("2026-11-18", "2026-11-17")).toBeNull();
+  });
+});
+
+describe("自分に関係する予定", () => {
+  const ev = (over: Partial<TableEvent>): TableEvent => ({
+    id: "e",
+    tableId: "t1",
+    title: "x",
+    status: "confirmed",
+    date: "2026-11-20",
+    startTime: "21:00",
+    endTime: "24:00",
+    responses: {},
+    createdBy: "u_b",
+    ...over,
+  });
+  const base = {
+    me: "u_a",
+    tables: { t1: { id: "t1", name: "卓", ownerId: "u_b", memberIds: ["u_a", "u_b"], createdAt: "" } },
+    logs: {},
+  } as unknown as Pick<State, "tables" | "events" | "logs" | "me">;
+  it("返事待ち・これから・記録がまだに分け、他人の卓は含めない", () => {
+    const view = myScheduleView(
+      {
+        ...base,
+        events: {
+          a: ev({ id: "a" }),
+          b: ev({ id: "b", date: "2026-11-10" }),
+          c: ev({
+            id: "c",
+            status: "poll",
+            candidates: [
+              { id: "k", date: "2026-11-25", startTime: "21:00", endTime: "24:00", responses: {} },
+            ],
+          }),
+          d: ev({ id: "d", tableId: "other" }),
+        },
+      },
+      "2026-11-18",
+    );
+    expect(view.upcoming.map((e) => e.id)).toEqual(["a"]);
+    expect(view.unrecorded.map((e) => e.id)).toEqual(["b"]);
+    expect(view.pollsNeedingReply.map((e) => e.id)).toEqual(["c"]);
   });
 });

@@ -144,3 +144,62 @@ export function calendarSubscribeLinks(feedUrl: string): { feed: string; apple: 
     google: `https://calendar.google.com/calendar/render?cid=${encodeURIComponent(apple)}`,
   };
 }
+
+/** a から b まで何日あるか（同じ日は 0、過去は負） */
+export function daysBetween(a: string, b: string): number {
+  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
+}
+
+/** 近い予定の言い方。2 週間より先は日付で足りるので出さない */
+export function relativeDayLabel(today: string, date: string): string | null {
+  const d = daysBetween(today, date);
+  if (d === 0) return "今日";
+  if (d === 1) return "あす";
+  if (d > 1 && d <= 13) return `あと${d}日`;
+  return null;
+}
+
+/** 終わったのに記録がない予定を「記録がまだ」と促す期間 */
+export const UNRECORDED_LOOKBACK_DAYS = 30;
+
+/**
+ * 自分に関係する予定の見え方（ホームとカレンダーで共用）。
+ * 卓の予定 + 自分が作った・返事した個人の予定を、返事待ち・これから・記録がまだ、に分ける。
+ */
+export function myScheduleView(
+  state: Pick<State, "tables" | "events" | "logs" | "me">,
+  today: string,
+): {
+  pollsNeedingReply: TableEvent[];
+  upcoming: TableEvent[];
+  unrecorded: TableEvent[];
+} {
+  const myTableIds = new Set(
+    Object.values(state.tables)
+      .filter((t) => t.memberIds.includes(state.me) || t.ownerId === state.me)
+      .map((t) => t.id),
+  );
+  const mine = Object.values(state.events ?? {})
+    .filter((ev) =>
+      ev.tableId ? myTableIds.has(ev.tableId) : ev.createdBy === state.me || Boolean(ev.responses[state.me]),
+    )
+    .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+  const confirmed = mine.filter((ev) => ev.status !== "poll");
+  const myLogs = Object.values(state.logs).filter(
+    (l) => l.ownerId === state.me || Boolean(l.players[state.me]),
+  );
+  const from = addDays(today, -UNRECORDED_LOOKBACK_DAYS);
+  return {
+    pollsNeedingReply: mine.filter((ev) => ev.status === "poll" && unansweredCount(ev, state.me) > 0),
+    upcoming: confirmed.filter((ev) => ev.date >= today),
+    unrecorded: confirmed
+      .filter((ev) => ev.date < today && ev.date >= from)
+      .filter(
+        (ev) =>
+          !myLogs.some(
+            (l) => l.dates.includes(ev.date) && (!ev.tableId || !l.tableId || l.tableId === ev.tableId),
+          ),
+      )
+      .reverse(),
+  };
+}

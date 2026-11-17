@@ -3,24 +3,22 @@ import { getFirestore, connectFirestoreEmulator, type Firestore } from "firebase
 
 /**
  * Firebase 接続。
- * - 設定は .env.local(VITE_FIREBASE_*)から読む。未設定なら null を返し、
+ * - 設定は .env.local(NEXT_PUBLIC_FIREBASE_*)から読む。未設定なら null を返し、
  *   アプリはモック(localStorage)運用で動き続ける。
- * - ログ本文は名前付きデータベース `takufu`(VITE_FIREBASE_DATABASE_ID)に分離する。
+ * - ログ本文は名前付きデータベース `takufu`(NEXT_PUBLIC_FIREBASE_DATABASE_ID)に分離する。
  *   (default) DB を作らない運用のため、Firestore 呼び出しは必ず DB ID を明示する。
  */
 
-const env = import.meta.env as Record<string, string | undefined>;
-
 export const firebaseConfig = {
-  apiKey: env.VITE_FIREBASE_API_KEY ?? "",
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN ?? "",
-  projectId: env.VITE_FIREBASE_PROJECT_ID ?? "",
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET ?? "",
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? "",
-  appId: env.VITE_FIREBASE_APP_ID ?? "",
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "",
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ?? "",
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "",
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ?? "",
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ?? "",
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID ?? "",
 };
 
-export const FIRESTORE_DATABASE_ID = env.VITE_FIREBASE_DATABASE_ID || "takufu";
+export const FIRESTORE_DATABASE_ID = process.env.NEXT_PUBLIC_FIREBASE_DATABASE_ID || "takufu";
 
 /** Firebase が設定されているか(Settings の状態表示にも使う) */
 export const isFirebaseConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
@@ -40,11 +38,11 @@ export function getTakufuFirestore(): Firestore | null {
   if (!a) return null;
   if (!fs) {
     fs = getFirestore(a, FIRESTORE_DATABASE_ID);
-    if (import.meta.env.VITE_FIREBASE_USE_EMULATORS === "true")
+    if (process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATORS === "true")
       connectFirestoreEmulator(
         fs,
-        import.meta.env.VITE_FIRESTORE_EMULATOR_HOST || "127.0.0.1",
-        Number(import.meta.env.VITE_FIRESTORE_EMULATOR_PORT || 8080),
+        process.env.NEXT_PUBLIC_FIRESTORE_EMULATOR_HOST || "127.0.0.1",
+        Number(process.env.NEXT_PUBLIC_FIRESTORE_EMULATOR_PORT || 8080),
       );
   }
   return fs;

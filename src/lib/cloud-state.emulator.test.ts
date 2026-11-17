@@ -19,7 +19,7 @@ import {
   deleteSharedCharacter,
 } from "./cloud-state";
 
-it.skipIf(import.meta.env.VITE_FIREBASE_USE_EMULATORS !== "true")(
+it.skipIf(process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATORS !== "true")(
   "persists a large workspace with conflict detection and enforces sharing through the actual SDK",
   async () => {
     const auth = getTakufuAuth()!;

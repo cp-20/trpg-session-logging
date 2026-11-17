@@ -101,6 +101,9 @@ function classStrings(line: string): string[] {
   return out;
 }
 
+// 画面は src/lib/router.tsx 経由でルーティングする（Next.js への依存を 1 か所に閉じる）
+const NEXT_NAV_IMPORT_RE = /from\s+"next\/(?:navigation|link|router)"/;
+
 // 主要ナビはサイドバーと下部タブ。ドロワーには戻さない
 const DRAWER_NAV_RE = /\b(?:drawer-toggle|drawer-side|lg:drawer-open)\b/;
 
@@ -188,7 +191,7 @@ function checkNoJsFiles(violations: Violation[]): void {
 }
 
 function checkNoRawSelect(violations: Violation[]): void {
-  for (const subDir of ["src/pages", "src/components"]) {
+  for (const subDir of ["src/screens", "src/components", "src/app"]) {
     for (const filePath of walkFiles(path.join(ROOT_DIR, subDir))) {
       if (!filePath.endsWith(".tsx") && !filePath.endsWith(".ts")) {
         continue;
@@ -213,8 +216,8 @@ function checkSrcRules(violations: Violation[]): void {
       continue;
     }
     const rel = toRel(filePath);
-    const isPage = rel.startsWith("src/pages/");
-    const isComponentOrPage = rel.startsWith("src/pages/") || rel.startsWith("src/components/");
+    const isPage = rel.startsWith("src/screens/") || rel.startsWith("src/app/");
+    const isComponentOrPage = isPage || rel.startsWith("src/components/");
     const isIconsFile = rel === "src/components/icons.tsx" || rel === "src/components/icons.ts";
     const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
 
@@ -312,7 +315,7 @@ function checkSrcRules(violations: Violation[]): void {
         });
       }
 
-      if (rel.startsWith("src/pages/") && !rel.includes(".test.") && HARDCODED_KP_PREFIX_RE.test(line)) {
+      if (isPage && !rel.includes(".test.") && HARDCODED_KP_PREFIX_RE.test(line)) {
         violations.push({
           file: rel,
           line: lineNumber,
@@ -361,12 +364,7 @@ function checkSrcRules(violations: Violation[]): void {
             });
           }
         }
-        if (
-          !isPrimitiveFile &&
-          rel.startsWith("src/pages/") &&
-          /(?:className|style)=/.test(line) &&
-          HEX_COLOR_RE.test(line)
-        ) {
+        if (!isPrimitiveFile && isPage && /(?:className|style)=/.test(line) && HEX_COLOR_RE.test(line)) {
           violations.push({
             file: rel,
             line: lineNumber,
@@ -397,6 +395,18 @@ function checkSrcRules(violations: Violation[]): void {
             message: `"${RESERVED_DEF_RE.exec(line)![1]}" duplicates a shared primitive; import it from src/components/ui.tsx or identity.tsx (extend it there if needed).`,
           });
         }
+      }
+
+      if (
+        (rel.startsWith("src/screens/") || rel.startsWith("src/components/")) &&
+        NEXT_NAV_IMPORT_RE.test(line)
+      ) {
+        violations.push({
+          file: rel,
+          line: lineNumber,
+          message:
+            "Screens and components must route through src/lib/router.tsx, not next/navigation or next/link directly.",
+        });
       }
 
       if (HEAVY_WEIGHT_RE.test(line)) {
@@ -514,13 +524,13 @@ function checkButtonHoverAndTimelineRules(violations: Violation[]): void {
 }
 
 function checkPagesCohesion(violations: Violation[]): void {
-  const pagesDir = path.join(ROOT_DIR, "src/pages");
-  const pageFiles = walkFiles(pagesDir);
+  const pagesDir = path.join(ROOT_DIR, "src/screens");
+  const pageFiles = walkFiles(pagesDir).filter((f) => !f.includes(".test."));
   if (pageFiles.length > MAX_PAGE_FILES) {
     violations.push({
       file: toRel(pagesDir),
       line: 1,
-      message: `src/pages/ has ${pageFiles.length} files (max ${MAX_PAGE_FILES}); consolidate pages.`,
+      message: `src/screens/ has ${pageFiles.length} files (max ${MAX_PAGE_FILES}); consolidate screens.`,
     });
   }
 }

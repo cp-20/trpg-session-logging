@@ -3,8 +3,8 @@
  */
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import boothIconUrl from "../assets/booth-icon.png";
-import taltoIconUrl from "../assets/talto-icon.png";
+const boothIconUrl = "/booth-icon.png";
+const taltoIconUrl = "/talto-icon.png";
 import type { Character, MsgKind, Provider, State, User } from "../types";
 import { IconBrandX, IconDiscord, IconGoogle, IconSearch, IconUpload, IconUserPlus, IconX } from "./icons";
 import { Select } from "./ui";

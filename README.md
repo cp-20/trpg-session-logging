@@ -1,11 +1,11 @@
 # 卓譜 (Takufu)
 
-TRPGのセッションログ・探索者・卓の記録を管理するWebアプリケーション（Vite + React + TypeScript + daisyUI + Firebase）。
+TRPGのセッションログ・探索者・卓の記録を管理するWebアプリケーション（Next.js + React + TypeScript + daisyUI + Firebase）。
 
 ```sh
 pnpm install
 cp .env.example .env.local
-pnpm run dev
+pnpm run dev            # http://127.0.0.1:5173 （画面にコメントを残すレビューは ?review=1 を一度開く）
 ```
 
 ## 検証・開発コマンド
@@ -24,7 +24,7 @@ pnpm run gen:data       # モックデータ (src/data/generated.json) の再生
 ```sh
 pnpm run check:firebase # Firebase Auth プロバイダ・許可ドメイン確認
 pnpm run deploy:rules   # Firestore ルール (takufu データベース) のデプロイ
-pnpm run deploy         # Lolipop (takufu.lolipop-now.app) へのビルド＆デプロイ
+pnpm run deploy         # LOLIPOP! Deploy Now (takufu.lolipop-now.app) へソースを送り、クラウドでビルド
 ```
 
 UI を触るときは [DESIGN.md](DESIGN.md)（規則）と [docs/design-feedback.md](docs/design-feedback.md)（過去の指摘と検査の対応）を、運用は [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) を参照してください。

@@ -16,6 +16,18 @@
 
 ## 置き場所
 
-- 画面: `src/pages`（13 ファイルまで。関連する画面は 1 ファイルにまとめる）。
+- 画面: `src/screens`（13 ファイルまで。関連する画面は 1 ファイルにまとめる）。URL は `src/app`（Next.js App Router）に置き、各 `page.tsx` は画面を 1 行で呼ぶだけにする。
+- ルーティングは `src/lib/router.tsx` を使い、画面から `next/navigation` を直接使わない。
+- サーバー側の処理（カレンダー購読など）は `src/app/api` に置く。
 - 書式・日付計算・取り込みなどフレームワークに依存しない処理: `src/lib`（単体テストを付ける）。
 - すべて TypeScript。`.js` / `.mjs` / `.cjs` は置かない。
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

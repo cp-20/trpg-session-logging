@@ -1,11 +1,14 @@
-import type { ComponentType, SVGProps } from "react";
-import { Link, Outlet, useRouterState } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
+import type { ComponentType, ReactNode, SVGProps } from "react";
+import { buildFeedIcs, publishFeed } from "../lib/calendar-feed";
+import { Link, usePathname } from "../lib/router";
 import { download, todayStr } from "../lib/time";
 import { useStore } from "../store";
 import {
   IconAlert,
   IconBooks,
   IconCalendar,
+  IconHome,
   IconIdBadge,
   IconListDetails,
   IconPlus,
@@ -19,6 +22,7 @@ type NavItem = { to: string; label: string; short: string; Icon: ComponentType<S
 
 /** 主要な行き先。デスクトップはサイドバー、モバイルは下部タブで同じ並びを使う */
 const NAV: NavItem[] = [
+  { to: "/", label: "ホーム", short: "ホーム", Icon: IconHome },
   { to: "/sessions", label: "セッション", short: "記録", Icon: IconListDetails },
   { to: "/calendar", label: "カレンダー", short: "予定", Icon: IconCalendar },
   { to: "/tables", label: "卓", short: "卓", Icon: IconUsersGroup },
@@ -27,8 +31,8 @@ const NAV: NavItem[] = [
 ];
 
 function useActive() {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  return (to: string) => pathname === to || pathname.startsWith(`${to}/`);
+  const pathname = usePathname();
+  return (to: string) => (to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(`${to}/`));
 }
 
 function SaveBanners() {
@@ -158,7 +162,7 @@ function Sidebar() {
   const me = state.users[state.me]!;
   return (
     <aside className="hidden lg:flex sticky top-0 h-screen w-60 shrink-0 flex-col border-r border-base-300 bg-base-100 px-3 py-5">
-      <Link to="/sessions" className="flex items-center gap-2 px-3 pb-5" aria-label="卓譜 ホーム">
+      <Link to="/" className="flex items-center gap-2 px-3 pb-5" aria-label="卓譜 ホーム">
         <LogoMark size={24} className="text-primary" />
         <span className="text-lg font-bold tracking-tight">卓譜</span>
         {!authUser && (
@@ -176,7 +180,7 @@ function Sidebar() {
           return (
             <Link
               key={to}
-              to={to as never}
+              to={to}
               aria-current={active ? "page" : undefined}
               className={cx(
                 "flex items-center gap-3 rounded-lg px-3 h-10 text-sm transition-colors",
@@ -196,7 +200,7 @@ function Sidebar() {
         <SyncStatus />
         <div className="flex items-center gap-1">
           <Link
-            to={`/users/${state.me}` as never}
+            to={`/users/${state.me}`}
             className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-2 transition-colors hover:bg-base-200"
           >
             <Avatar u={me} size={32} />
@@ -226,7 +230,7 @@ function MobileTopBar() {
   const me = state.users[state.me]!;
   return (
     <header className="lg:hidden sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-base-300 bg-base-100/95 px-4 backdrop-blur">
-      <Link to="/sessions" className="flex items-center gap-2" aria-label="卓譜 ホーム">
+      <Link to="/" className="flex items-center gap-2" aria-label="卓譜 ホーム">
         <LogoMark size={22} className="text-primary" />
         <span className="text-base font-bold tracking-tight">卓譜</span>
       </Link>
@@ -253,13 +257,13 @@ function MobileTabBar() {
       className="lg:hidden fixed inset-x-0 bottom-0 z-30 border-t border-base-300 bg-base-100/95 backdrop-blur"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
-      <ul className="mx-auto grid max-w-lg grid-cols-5">
+      <ul className="mx-auto grid max-w-lg grid-cols-6">
         {NAV.map(({ to, short, Icon }) => {
           const active = isActive(to);
           return (
             <li key={to}>
               <Link
-                to={to as never}
+                to={to}
                 aria-current={active ? "page" : undefined}
                 className={cx(
                   "flex h-14 flex-col items-center justify-center gap-0.5 text-xs transition-colors",
@@ -277,7 +281,34 @@ function MobileTabBar() {
   );
 }
 
-export function Shell() {
+/**
+ * カレンダー購読リンクを作ってあれば、確定した予定が変わるたびに配信用の文書を書き直す。
+ * 生成時刻（DTSTAMP）だけの違いでは書き込まない。
+ */
+function CalendarFeedSync() {
+  const { state, authUser } = useStore();
+  const token = state.prefs.calendarFeedToken;
+  const ics = authUser && token ? buildFeedIcs(state, todayStr()) : null;
+  const last = useRef<string | null>(null);
+  useEffect(() => {
+    if (!authUser || !token || !ics) return;
+    const key = `${token}:${ics.replace(/^DTSTAMP:.*$/gm, "")}`;
+    if (last.current === key) return;
+    const t = window.setTimeout(() => {
+      publishFeed(token, authUser.uid, ics)
+        .then(() => {
+          last.current = key;
+        })
+        .catch(() => {
+          /* 次の変更で再試行する。購読側は前回の内容を表示し続ける */
+        });
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [authUser, token, ics]);
+  return null;
+}
+
+export function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen">
       <Sidebar />
@@ -286,10 +317,11 @@ export function Shell() {
         <main className="mx-auto w-full max-w-5xl flex-1 px-4 pb-28 pt-6 sm:px-8 sm:pt-8 lg:pb-16">
           <SaveBanners />
           <OnboardingBanner />
-          <Outlet />
+          {children}
         </main>
       </div>
       <MobileTabBar />
+      <CalendarFeedSync />
     </div>
   );
 }

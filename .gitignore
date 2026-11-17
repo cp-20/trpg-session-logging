@@ -7,3 +7,5 @@ playwright-report/
 .firebase/
 .impeccable/review/
 .live-review/
+.next/
+next-env.d.ts

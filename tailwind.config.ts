@@ -2,7 +2,7 @@ import daisyui from "daisyui";
 import type { Config } from "tailwindcss";
 
 const config: Config & { daisyui?: Record<string, unknown> } = {
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       fontFamily: {

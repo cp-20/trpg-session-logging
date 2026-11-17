@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
   use: {
-    // CI ではビルド成果物(preview)を検証する。ローカルは既存サーバを再利用
+    // CI では本番ビルドを検証する。ローカルは起動中の開発サーバー（pnpm dev）を使う
     baseURL: process.env.CI ? "http://127.0.0.1:4178" : "http://127.0.0.1:5173",
     browserName: "chromium",
     trace: "retain-on-failure",
@@ -12,13 +12,13 @@ export default defineConfig({
   },
   webServer: process.env.CI
     ? {
-        command: "npm run build && npm run preview -- --host 127.0.0.1 --port 4178 --strictPort",
+        command: "pnpm run build && pnpm exec next start -H 127.0.0.1 -p 4178",
         url: "http://127.0.0.1:4178",
         reuseExistingServer: false,
         timeout: 120_000,
       }
     : {
-        command: "npm run dev -- --host 127.0.0.1 --port 5173 --strictPort",
+        command: "pnpm run dev",
         url: "http://127.0.0.1:5173",
         reuseExistingServer: true,
         timeout: 30_000,

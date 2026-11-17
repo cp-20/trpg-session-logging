@@ -28,7 +28,7 @@ for (const mode of MODES) {
   });
 }
 
-test("モバイルでは下部タブ、デスクトップではサイドバーで同じ 5 か所へ移動できる", async ({ page }) => {
+test("モバイルでは下部タブ、デスクトップではサイドバーで同じ 6 か所へ移動できる", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await enterDemo(page);
   const tabs = page.getByRole("navigation", { name: "メイン" });
@@ -40,6 +40,7 @@ test("モバイルでは下部タブ、デスクトップではサイドバー�
   await page.goto("/sessions");
   const side = page.getByRole("navigation", { name: "メイン" });
   await expect(side.getByRole("link")).toHaveText([
+    "ホーム",
     "セッション",
     "カレンダー",
     "卓",
