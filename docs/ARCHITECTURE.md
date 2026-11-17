@@ -5,9 +5,11 @@ Kimi K3.1 Pro に「アーキテクチャ」「ライブラリ・テスト」「
 
 ## 現在のスタック
 
-- Vite5 + React18 + TS + Tailwind3 + daisyUI4(カスタムテーマ `takufu`) + react-router-dom v6(**HashRouter**)
-- 状態: Context(`src/store.tsx`)+localStorage 永続化(zod による復元検証 + デバウンス書き込み + unload フラッシュ)
-- テスト: Vitest(+RTL) / Playwright(e2e) / scripts/smoke.mjs(全ルート巡回)
+- Vite + React 19 + TypeScript + Tailwind 3 + daisyUI 4（テーマ `takufu` / `takufuDark`）+ TanStack Router（履歴ベース）
+- 状態: Context（`src/store.tsx`）+ localStorage / Firestore 永続化（zod による復元検証）
+- UI: `src/components/ui.tsx`（デザインシステム）と `src/components/identity.tsx`（人・キャラクター表示）。規則は DESIGN.md
+- テスト: Vitest（+RTL）/ Playwright（e2e、`e2e/design-audit.ts` による全画面のデザイン検査を含む）
+- 以下の記録は 2026-11 前半時点の判断。ルーターとスモーク検査の記述は当時のもの
 
 ## 採用したもの
 

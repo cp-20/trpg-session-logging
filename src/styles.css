@@ -2,122 +2,353 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ============================================================
-   卓譜 デザインシステム
-   原則: 近接・整列・反復・対比
-   アニメーション: katashin の satisfying UI animation 原則
-   ============================================================ */
-
 :root {
-  font-size: 15px;
+  font-size: 16px;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --dur-fast: 120ms;
+  --dur-fast: 150ms;
   --dur-normal: 200ms;
 }
 
+html,
 body {
   background: var(--fallback-b2, oklch(var(--b2) / 1));
+}
+body {
+  min-height: 100vh;
   color: var(--fallback-bc, oklch(var(--bc) / 1));
   font-family: "Noto Sans JP", "Hiragino Sans", sans-serif;
   -webkit-font-smoothing: antialiased;
+  font-feature-settings: "palt" 0;
+  line-height: 1.6;
 }
 
-/* ---------- ボタン ---------- */
+/* ============================================================
+ * ボタン: 3段階の階層だけを使う
+ *   .btn-primary  画面の主操作（1画面に1つ）
+ *   .btn          副操作（枠線つき）
+ *   .btn-quiet    低優先度の操作（塗りのみ。枠線なしでもボタンと分かる面を持つ）
+ * ホバーで色を反転させない。押下時だけわずかに縮む。
+ * ============================================================ */
 .btn {
-  /* daisyUI の button-pop も止める。出現ではなく操作に応答する。 */
   animation: none;
-  transition: transform var(--dur-fast) ease-out,
-    background-color var(--dur-fast) ease, border-color var(--dur-fast) ease,
+  font-weight: 600;
+  min-height: 2.5rem;
+  height: 2.5rem;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  gap: 0.375rem;
+  font-size: 0.875rem;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  transition:
+    transform var(--dur-fast) ease-out,
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
     color var(--dur-fast) ease;
 }
-/* hover では動かさない(join 等のボタングループでズレるため)。
-   押下時のみ、わずかに縮めて触っている感覚を出す */
-.btn:active:not(:disabled) { transform: scale(0.985); }
-.btn:disabled { transform: none; }
+.btn-sm {
+  min-height: 2.25rem;
+  height: 2.25rem;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  font-size: 0.8125rem;
+}
+.btn-xs {
+  min-height: 1.75rem;
+  height: 1.75rem;
+  padding-left: 0.6rem;
+  padding-right: 0.6rem;
+  font-size: 0.75rem;
+}
+.btn-primary svg {
+  stroke-width: 2.3;
+}
+.btn[aria-haspopup="listbox"],
+.btn[aria-haspopup="listbox"]:active {
+  --btn-focus-scale: 1;
+  transform: none !important;
+}
+.btn:active:not(:disabled):not([aria-haspopup="listbox"]):not(.no-press) {
+  transform: scale(0.98);
+}
+.btn:disabled {
+  transform: none;
+}
 
-/* ---------- カード ---------- */
+@layer components {
+  .card-interactive {
+    @apply card border border-base-300 bg-base-100;
+    transition:
+      border-color var(--dur-fast) ease,
+      box-shadow var(--dur-fast) ease;
+  }
+  .card-interactive:hover {
+    border-color: oklch(var(--bc) / 0.22);
+    box-shadow: 0 2px 10px rgba(34, 28, 23, 0.06);
+  }
+}
+
+/* 副ボタン: daisyUI の .btn より詳細度を上げて、枠線を確実に見せる */
+.btn:not(.btn-primary):not(.btn-error):not(.btn-success):not(.btn-warning):not(.btn-circle):not(
+    .btn-ghost
+  ):not(.btn-quiet),
+.btn.btn-outline {
+  background-color: oklch(var(--b1));
+  /* 静止時の枠は控えめに、ホバーで枠だけをはっきりさせる（面の色はほぼ変えない） */
+  border: 1px solid oklch(var(--bc) / 0.13);
+  color: oklch(var(--bc));
+}
+
+.btn.btn-quiet {
+  background-color: oklch(var(--bc) / 0.06);
+  border: 1px solid transparent;
+  color: oklch(var(--bc) / 0.85);
+}
+.btn.btn-quiet:hover,
+.btn.btn-quiet:focus-visible {
+  background-color: oklch(var(--bc) / 0.1);
+  border-color: transparent;
+  color: oklch(var(--bc));
+}
+/* 危険操作: 文字色だけで示し、塗りで強調しない */
+.btn-danger {
+  color: oklch(var(--er)) !important;
+}
+
+.btn:not(.btn-primary):not(.btn-error):not(.btn-success):not(.btn-warning):not(.btn-circle):not(
+    .btn-ghost
+  ):not(.btn-quiet):hover,
+.btn:not(.btn-primary):not(.btn-error):not(.btn-success):not(.btn-warning):not(.btn-circle):not(
+    .btn-ghost
+  ):not(.btn-quiet):focus-visible,
+.btn-outline:hover,
+.btn-outline:focus-visible {
+  background-color: color-mix(in oklch, oklch(var(--b1)) 96%, oklch(var(--bc))) !important;
+  border-color: oklch(var(--bc) / 0.34) !important;
+  color: oklch(var(--bc)) !important;
+}
+
+/* アイコンだけのボタン（44px 四方の当たり判定） */
+.icon-btn {
+  @apply inline-flex size-10 shrink-0 items-center justify-center rounded-lg text-base-content/70 transition-colors;
+}
+.icon-btn:hover {
+  @apply bg-base-200 text-base-content;
+}
+
+/* ---------- 入力 ---------- */
+.input,
+.textarea {
+  border-color: oklch(var(--bc) / 0.16);
+  background-color: oklch(var(--b1));
+  font-size: 0.9375rem;
+}
+.input {
+  height: 2.5rem;
+  min-height: 2.5rem;
+}
+.input:focus,
+.input:focus-within,
+.textarea:focus {
+  outline: 2px solid oklch(var(--p) / 0.35);
+  outline-offset: 0;
+  border-color: oklch(var(--p) / 0.7);
+}
+.input::placeholder,
+.textarea::placeholder {
+  color: oklch(var(--bc) / 0.42);
+}
+
+/* ============================================================
+ * 面: 「1枚の面」と「行の並び」の2種類だけ
+ *   .surface        内容をまとめる面（入れ子にしない）
+ *   .list           区切り線つきの行リスト（.surface の中で使う）
+ * ============================================================ */
+.card,
+.surface {
+  background-color: oklch(var(--b1) / 1);
+  border: 1px solid oklch(var(--b3) / 1);
+  border-radius: var(--rounded-box, 0.75rem);
+}
 .card {
-  transition: border-color var(--dur-fast) ease, box-shadow var(--dur-normal) var(--ease-out);
+  box-shadow: none;
 }
 
-/* ---------- メッセージ行 ---------- */
-.msg {
-  @apply flex gap-2.5 px-1.5 py-1 rounded-lg text-[13.5px] leading-relaxed items-start;
-  transition: background-color 100ms ease;
+.list > * + * {
+  border-top: 1px solid oklch(var(--b3) / 1);
 }
-.msg:hover { background: oklch(var(--b3) / 0.4); }
-.msg .who { @apply flex-none w-24 shrink-0 font-bold text-[12.5px] flex flex-col gap-0 overflow-hidden; }
-.msg .who .kind { @apply text-[9.5px] font-bold tracking-wider opacity-50; }
-.msg .time { @apply text-[10.5px] text-base-content/40 ml-2 flex-none; font-variant-numeric: tabular-nums; }
-.msg .body { @apply flex-1 min-w-0 break-words whitespace-pre-wrap; }
+
+.row-interactive {
+  transition: background-color var(--dur-fast) ease;
+}
+.row-interactive:hover {
+  background-color: oklch(var(--b2) / 0.6);
+}
+.row-interactive:first-child {
+  border-top-left-radius: var(--rounded-box, 0.75rem);
+  border-top-right-radius: var(--rounded-box, 0.75rem);
+}
+.row-interactive:last-child {
+  border-bottom-left-radius: var(--rounded-box, 0.75rem);
+  border-bottom-right-radius: var(--rounded-box, 0.75rem);
+}
+
+/* メタ情報の並び。折り返しても行頭に区切り記号が残らないよう、記号ではなく間隔で区切る */
+.meta {
+  @apply flex flex-wrap items-center gap-y-0.5 text-sm text-ink2;
+  column-gap: 0.875rem;
+}
+
+/* 小見出し（セクション内の分類ラベル） */
+.eyebrow {
+  @apply text-xs font-bold text-ink2;
+  letter-spacing: 0.04em;
+}
+
+/* ---------- セッションログ行 ---------- */
+.msg {
+  @apply flex gap-3 px-3 py-2.5 rounded-lg text-sm sm:text-base leading-relaxed items-start;
+  transition: background-color 120ms ease;
+}
+.msg:hover {
+  background: oklch(var(--b2) / 0.6);
+}
+.msg .who {
+  @apply flex-none w-24 sm:w-32 shrink-0 font-bold text-sm flex flex-col gap-0.5 overflow-hidden pt-0.5;
+}
+.msg .who .kind {
+  @apply text-xs font-medium text-base-content/55;
+}
+.msg .time {
+  @apply text-xs text-base-content/50 ml-2 flex-none pt-1;
+  font-variant-numeric: tabular-nums;
+}
+.msg .body {
+  @apply flex-1 min-w-0 break-words whitespace-pre-wrap pt-0.5;
+}
 
 /* ---------- ロール行 ---------- */
 .rollrow {
-  @apply flex flex-wrap items-center gap-3 px-2.5 py-1.5 my-0.5 rounded-lg bg-base-200/50 text-[13px];
+  @apply flex flex-wrap items-center gap-2 text-sm;
   font-variant-numeric: tabular-nums;
-  transition: background-color 100ms ease;
 }
-.rollrow:hover { background: oklch(var(--b3) / 0.6); }
-.rollrow .cmd { @apply font-semibold text-[12.5px]; }
-.rollrow .dice { @apply text-base-content/50 text-[12px] font-mono; }
-.rollrow .cmd, .rollrow .dice { overflow-wrap: anywhere; min-width: 0; }
+.rollrow .cmd {
+  @apply font-semibold text-sm;
+}
+.rollrow .dice {
+  @apply text-base-content/65 text-xs font-mono;
+}
+.rollrow .cmd,
+.rollrow .dice {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
 
-/* ---------- 本文行 ---------- */
+/* ---------- シーン区切り・メモ行 ---------- */
 .noterow {
-  @apply flex items-start gap-2.5 px-2 py-1.5 my-0.5 rounded-lg text-[13px] text-base-content/60;
+  @apply flex items-center gap-3 px-3 py-2 my-1.5 text-xs text-base-content/60;
 }
 
 /* ---------- 日付区切り ---------- */
-.daysep { @apply flex items-center gap-3 my-3 first:mt-0; }
-.daysep::before, .daysep::after { content: ""; @apply h-px flex-1 bg-base-300; }
-
-/* ---------- タイムライン ---------- */
-.tl { @apply relative pl-6; }
-.tl::before { content: ""; @apply absolute left-2 top-2 bottom-2 w-0.5 bg-base-300; }
-.tlitem { @apply relative py-2.5; }
-.tlitem::before {
-  content: ""; @apply absolute -left-[19px] top-4 w-2.5 h-2.5 rounded-full bg-base-100 border-2 border-primary;
+.daysep {
+  @apply flex items-center gap-3 my-4 first:mt-1;
+}
+.daysep::before,
+.daysep::after {
+  content: "";
+  @apply h-px flex-1 bg-base-300;
 }
 
-/* ---------- ステップ ---------- */
-.steps { @apply flex gap-2 mb-5; }
-.step-pill { @apply flex-1 h-1 rounded-full bg-base-300 relative transition-colors duration-200; }
-.step-pill.on { @apply bg-primary; }
+/* ---------- キャラクター履歴タイムライン ---------- */
+.tl {
+  @apply relative pl-7;
+}
+.tl::before {
+  content: "";
+  @apply absolute left-2.5 top-2 bottom-2 w-0.5 bg-base-300;
+}
+.tlitem {
+  @apply relative py-3.5 border-b border-base-300/70 last:border-0;
+}
+.tlitem::before {
+  content: "";
+  @apply absolute -left-[22px] top-5 w-3 h-3 rounded-full bg-base-100 border-2 border-primary;
+}
 
 /* ---------- ドロップゾーン ---------- */
 .drop {
-  @apply border-2 border-dashed border-base-300 rounded-xl py-10 px-5 text-center bg-base-200/30 transition-all duration-200;
-  transition-timing-function: var(--ease-out);
+  @apply border-2 border-dashed border-base-300 rounded-xl py-10 px-6 text-center bg-base-100 transition-colors duration-150;
 }
-.drop.hot { @apply border-primary bg-primary/10 scale-[1.01]; }
+.drop.hot {
+  @apply border-primary bg-primary/10;
+}
 
 /* ---------- タブ ---------- */
-.tabs { @apply flex gap-0 border-b border-base-300 mb-4 flex-wrap; }
-.tabs .tab {
-  @apply px-4 py-2.5 text-[13px] font-semibold text-base-content/60 border-b-2 border-transparent -mb-px
-    transition-colors duration-150;
+.tabs {
+  @apply flex gap-1 border-b border-base-300 mb-6 overflow-x-auto;
+  scrollbar-width: none;
 }
-.tabs .tab:hover { @apply text-base-content/80; }
-.tabs .tab.tab-active { @apply text-primary border-primary; }
+.tabs .tab {
+  @apply px-3 sm:px-4 py-3 text-sm font-semibold text-base-content/60 border-b-2 border-transparent -mb-px min-h-11 whitespace-nowrap transition-colors duration-150;
+  height: auto;
+}
+.tabs .tab:hover {
+  @apply text-base-content;
+}
+.tabs .tab.tab-active {
+  @apply text-base-content border-primary;
+}
 
-/* ---------- 共通の読みやすさ ---------- */
-.text-ink { color: oklch(var(--bc) / 1); }
-.text-ink2 { color: oklch(var(--bc) / 0.7); }
-.font-display { font-family: inherit; }
-::selection { background: oklch(var(--p) / 0.2); }
-:focus-visible { outline: 2px solid oklch(var(--p)); outline-offset: 3px; }
-input, textarea { caret-color: oklch(var(--p)); }
-.badge { height: auto; min-height: 1.4rem; padding: 0.15rem 0.5rem; gap: 0.25rem; }
-.tabs .tab { height: auto; min-height: 2.75rem; }
+/* ---------- 共通トークンとブラウザ標準要素 ---------- */
+.text-ink {
+  color: oklch(var(--bc) / 1);
+}
+.text-ink2 {
+  color: oklch(var(--bc) / 0.66);
+}
+.text-ink3 {
+  color: oklch(var(--bc) / 0.5);
+}
+.font-display {
+  font-family: inherit;
+}
+::selection {
+  background: oklch(var(--p) / 0.2);
+}
+:focus-visible {
+  outline: 2px solid oklch(var(--p));
+  outline-offset: 2px;
+}
+input,
+textarea {
+  caret-color: oklch(var(--p));
+}
+.badge {
+  height: auto;
+  min-height: 1.5rem;
+  padding: 0.15rem 0.6rem;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+}
 
-/* ---------- スクロールバー ---------- */
-*::-webkit-scrollbar { width: 6px; height: 6px; }
-*::-webkit-scrollbar-thumb { background: oklch(var(--bc) / 0.15); border-radius: 3px; }
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: oklch(var(--bc) / 0.2);
+  border-radius: 4px;
+}
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
-/* ---------- ページ ---------- */
-.page { @apply max-w-5xl; }
+.page {
+  @apply max-w-5xl;
+}

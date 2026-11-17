@@ -1,16 +1,118 @@
-# Takufu interface
+# 卓譜 (Takufu) デザインシステム
 
-This document records the implemented application direction, superseding the early explorer-sheet concept in `.impeccable/briefs/app.md`. Latest user decisions are recorded in `docs/HANDOFF.md`.
+汎用の UI 原則は [design-principles](.agents/skills/design-principles/SKILL.md) にある。ここには卓譜固有の決定だけを書く。
+各規則がどの指摘から来ていて、どう検査しているかは [docs/design-feedback.md](docs/design-feedback.md) にある。
 
-- Mode: Operate. Prioritize recording, finding and sharing sessions.
-- Typography: self-hosted Noto Sans JP; no decorative serif headings.
-- Themes: daisyUI `takufu` and `takufuDark`, with light / system / dark preferences. System changes apply throughout the app.
-- Color source: `tailwind.config.js`. Light uses white / stone surfaces and teal actions; dark uses deep surfaces and cyan actions. Use semantic theme colors rather than hardcoded text colors.
-- Geometry: round user, character and provider avatars; daisyUI controls; no thick accent stripes on cards.
-- Icons: Iconify Tabler icons. Google, Discord and X use bundled brand icons. BOOTH/TALTO PNG assets originate from their public site icons, downloaded during the inherited OpenCode session.
-- Motion: buttons have no entrance animation or hover displacement. Press feedback is small; transitions communicate interaction. Reduced-motion preferences are honored. No blanket page or staggered-list entrances.
-- Hierarchy: session overview precedes timeline and statistics. Log and log-free records use the same creation route and detail structure.
-- Copy: label inputs and consequences in the player's language. Infrastructure, internal IDs and speculative future behavior do not belong in ordinary product UI.
-- Recovery: retain unreadable source data, offer its download, and never automatically reset it. Keep real account data separate from demo records.
+検査は 3 段:
+- **ソース**: `scripts/lint-design.ts`（`pnpm run lint`）。ボタンの段階、chip、面、色、文言、共通部品の重複定義など。
+- **描画後**: `e2e/design-audit.ts`（`pnpm run test:e2e`）。全画面をモバイル・デスクトップ・ダークで開き、横スクロール・面の入れ子・主ボタンの数・文字の大きさ・禁止文言・コントラストを確かめる。
+- **目視**: `pnpm run review` のスクリーンショット。
 
-Review used Chrome DevTools MCP at desktop, tablet and mobile sizes, in addition to Playwright journeys. The application had no entrance animation on buttons after the change. Existing browser records were inspected and validated without resetting them.
+## 1. 各画面が最初に答える問い
+
+画面を作るときは、利用者がその画面を開いた理由に最初の 1 画面で答える。それ以外は下に回すか詳細画面へ移す。
+
+| 画面 | 最初に答える問い | 主操作 |
+|---|---|---|
+| セッション一覧 | 前に遊んだあの回はどれか | 検索・絞り込み（記録はナビから） |
+| セッション詳細 | 誰が何で遊び、どうなったか | ログを読む / 共有する |
+| カレンダー | 次はいつ遊ぶか・自分の返事待ちはあるか | 日程に返事する |
+| 卓一覧・卓詳細 | いつものメンバーと次の予定 | この卓で記録 / 予定を立てる |
+| キャラクター | 自分の探索者とその歩み | 取り込む |
+| シナリオ | 遊んだ・遊べるシナリオ | このシナリオで記録 |
+| 記録（/upload） | ログを入れたら何が残るか | 記録する |
+| 共有ページ | 読んでよいログか、どう読むか | 読む |
+
+## 2. レイアウトとナビゲーション
+
+- **ナビは 5 つの行き先だけ**: セッション・カレンダー・卓・キャラクター・シナリオ。件数バッジや「参加している卓」の重複リンクは置かない。
+- **デスクトップ（lg 以上）**: 幅 240px の固定サイドバー。最上部に唯一の全体主操作「セッションを記録」、最下部にマイページと設定。
+- **モバイル**: 上部バー（ロゴ・記録ボタン・アカウント）と下部タブバー（5 項目、44px 以上の当たり判定、safe-area 対応）。ドロワーは使わない。
+- 本文の最大幅は `max-w-5xl`。ページ見出しは `PageHead`（戻るリンク・タイトル・メタ・操作）だけを使う。
+- 全体主操作（記録）はナビにあるので、ページ見出しに同じボタンを重ねない。文脈つきの記録（「この卓で記録」「このシナリオで記録」）は置いてよい。
+
+## 3. 面と階層
+
+- 面は 2 種類だけ: 内容をまとめる `.surface`（=`.card`）と、その中で区切り線つきに並べる `.list`。**面の中に面を入れない**。入れ子が欲しくなったら区切り線か余白で分ける。
+- 一覧は行（`.row-interactive`）で並べる。カードの格子は、画像を持つ独立した対象（キャラクター）にだけ使う。
+- 時系列の一覧は月見出し（`.eyebrow`）でまとめる。
+- メタ情報は `.meta` の子要素として並べる（区切り記号ではなく間隔で区切るので折り返しても崩れない）。
+
+## 4. 文字
+
+| 役割 | クラス |
+|---|---|
+| ページ見出し h1 | `PageHead` 内で `text-2xl sm:text-[1.75rem] font-bold` |
+| セクション見出し h2 | `SectionTitle`（`text-base sm:text-lg font-bold`） |
+| 行・カードのタイトル | `text-base font-bold` |
+| 本文・操作 | `text-sm`〜`text-base` |
+| メタ・補足 | `text-xs`〜`text-sm` + `text-ink2`（さらに弱いものは `text-ink3`） |
+| 分類ラベル | `.eyebrow` |
+
+`font-extrabold` / `font-black` は使わない（読み込んでいるウェイトは 400/500/700）。
+
+## 5. 操作の階層
+
+| 段 | クラス | 用途 |
+|---|---|---|
+| 主 | `btn btn-primary` | 画面の主操作。1 画面に 1 つ |
+| 副 | `btn` | 枠線つき。主操作の隣の操作、編集など |
+| 低 | `btn btn-quiet` | 塗りのみ。閉じる・キャンセル・行内の補助操作 |
+| アイコンのみ | `.icon-btn` + `aria-label` | 閉じる・前後移動・メニュー |
+| 危険 | `btn btn-danger` | 文字色だけで示す。確認を挟む |
+
+- 押下時だけ `scale(0.98)`。ホバーで白黒を反転しない。`btn-ghost` は使わない。
+- 選択肢の切り替えは `Seg`（トラック型。選択中は白い面が浮く）。主色の塗りで選択を示さない。
+
+## 6. 色とトークン
+
+- `tailwind.config.ts` の `takufu`（ライト）/ `takufuDark`（ダーク）。暖色の紙と墨の色相をそろえる。
+  - ライト: 地 `base-200 #f2ebe0`、面 `base-100 #fffdf9`、線 `base-300 #e2d7c5`、墨 `#221c17`、主色テラコッタ `#b84724`。
+  - ダーク: 地 `#1a1613`、面 `#231e1a`、線 `#362e28`、文字 `#d6cbc0`（純白は使わない）、主色 `#d9734c`。
+- 主色は「主操作」「現在地」「自分に関係する強調」だけに使う。装飾には使わない。
+- システムは `SysBadge`（色の点 + 名前）。枠つきの色チップにしない。
+- 共有範囲は `ScopeLabel`（アイコン + 文言）。`SCOPE_META` の文言を使う。
+
+## 7. 卓譜固有の約束
+
+- **システム名は正式名**（`クトゥルフ神話TRPG 7版` など）を省略せず `whitespace-nowrap` で出す。
+- **`endLabel` を表示・入力しない**。セッションはタイトル・システム・日付・時間・参加者で表す。
+- **卓はメンバーの集まり**。システム設定を求めない。
+- **共有範囲はセッションごと**（メンバー限定 / プレイした人 / 公開）。シークレットチャンネルを黙って除外しない（`MASK_FILTER_RE`）。
+- **プロフィールの既定は公開**。初回はオンボーディング表示で公開設定への導線を出す。
+- **時間表記は `3時間2分`**（`fmtDur`）。`3h2m` と混在させない。進行役の表記は「進行」。
+- カレンダーと `.ics` 生成は純粋関数（`src/lib/ics.ts`）に分ける。
+
+## 8. 部品
+
+画面は次の部品で組み立てる。同じ役割の部品をページに作らない（`lint:reserved-primitive`）。足りなければここに足す。
+
+| 部品 | 場所 | 用途 |
+|---|---|---|
+| `PageHead` | ui | 戻るリンク・h1・メタ・操作。`lead` に顔画像 |
+| `SectionTitle` / `PanelHead` | ui | 面の外の見出し / 面の中の見出し |
+| `SettingRow` / `FormRow` | ui | `.list` の 1 行（説明＋操作）/ フォームの 1 行（項目名＋入力） |
+| `DateBlock` / `weekdayTone` | ui | 一覧左の日付（日曜・祝日は赤、土曜は青） |
+| `SysBadge` / `ScopeLabel` | ui | システム（点＋正式名）/ 共有範囲（アイコン＋名前） |
+| `Select` / `Seg` / `Toggle` | ui | 多い選択肢 / 見比べたい少数の選択肢 / オンオフ |
+| `DateList` / `TimeRange` / `Field` / `FieldError` | ui | 実施日・時刻の入力 / 項目と検証エラー |
+| `Menu` | ui | 「…」にしまう、まれな操作（削除・書き出し） |
+| `HoverCard` | ui | ポインタを留めたときだけ出る補足（待ち時間つき。タッチでは出ない） |
+| `Modal` | ui | 確認・まれな設定・集中が要る入力だけ。よく使う操作はその場で |
+| `EmptyState` / `NotFound` | ui | 空・絞り込み結果なし・権限なし |
+| `InlineNotice` | ui | 待機中とエラーだけ（成功通知は型で出せない） |
+| `CopyBox` | ui | リンクのコピー。結果はボタン自身に出る |
+| `Avatar` / `CharAvatar` / `AvatarStack` | identity | 顔アイコン / 顔の重なり |
+| `PlayerPicker` / `ProviderIcon` | identity | 参加者の検索選択 / 外部サービスのロゴ |
+| `SessionRow` | pages/Sessions | セッションの 1 行。卓・シナリオのページでは `context` で重複を省く |
+
+- ネイティブ `<select>` と `.file-input` は使わない。ファイル入力は `<label>` で包んだ `sr-only`。
+- 浮動トーストは使わない。
+- バッジ（`Tag`）は本当の状態の例外（シークレット・クリティカル・ファンブル・調整中など）だけ。件数・所有者・増減には使わない。枠つき丸型の小札（chip）は作らない。
+- 利用者が書いた本文（ログ・感想・自己紹介・シナリオ概要・予定のメモ）を出す要素には `data-user-content` を付ける。描画後の文言検査から外すため。
+- 文言は直接的な日本語。詩的な副題、内部の判定ロジックの露出、技術用語（`.ics` など）、` — `、`——`、自明な「〜できます。」、`✓ 更新しました` 系の確認文、ネイティブ `title=` ツールチップは禁止。
+
+## 9. 実装の規律
+
+- 関連する画面と補助関数はまとめ、`src/pages` のファイル数を `MAX_PAGE_FILES`（13）以内に保つ。
+- アプリ・設定・スクリプトはすべて TypeScript。`.js` / `.mjs` / `.cjs` は置かない。

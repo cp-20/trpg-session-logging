@@ -1,23 +1,17 @@
-# Surface brief — 卓譜 全体(Operate)
+# Surface brief — 卓譜 全体（Operate / Read）
+
+規則の正本は [DESIGN.md](../../DESIGN.md)、過去の指摘は [docs/design-feedback.md](../../docs/design-feedback.md)。この brief はその要約で、食い違ったら DESIGN.md が優先する。
 
 ## Scope & mode
-全アプリ画面。モード: Operate(タスク完結・走査性・一貫性優先)。
+全画面。モード: Operate（記録・予定・管理）と Read（ログ・共有ページ）。新しさより、走査しやすさ・一貫性・長文の読みやすさを優先する。
 
 ## Audience / job
-CoC 中心の TRPG プレイヤー(KP と PL)。job: セッション記録を安全に残し、カルテとシナリオを辿る。
+TRPG（CoC 中心）の進行役とプレイヤー。身内で遊んだ記録を手間なく残し、あとから辿る。
 
-## Constraints
-無料 / シークレットと本文は保存しない / 紐付けはいつでも解除 / X #卓報告文化との互換。
+## Direction
+- 暖色の紙と墨（ライト: 地 #f2ebe0 / 面 #fffdf9 / 主色テラコッタ #b84724、ダーク: 地 #1a1613 / 文字 #d6cbc0）。サンセリフ（Noto Sans JP）。
+- 面は 1 段だけ。一覧は行。chip を使わない。主ボタンは 1 画面に 1 つ。
+- 説明文より、操作そのものが分かる配置。技術用語・自明な説明・成功通知を出さない。
 
-## Direction contract
-THESIS: アプリ自体を『CoC キャラクターシートの用紙』として扱う。UI は画面ではなく一枚の用紙であり、記入が進むほど資産になる。カテゴリ既定の「角丸カード+統計カード群」を拒否する。
-
-OWN-WORLD: 生成り紙(#FBF9F4)に墨(#26221A)、Primary は藍(#31456A)、状態印は朱(#C73E3A)。コンポーネント言語: 薄墨の罫線、2px 角丸、明朝(Zen Old Mincho)の見出し、朱印(済/END ラベル)、carbon 風の数字。
-
-STORY: 「これは私の探索者の用紙だ」——記録が積み上がり、印が押され、カルテとして炭化して残る。訪問者はその卓の歴史を一枚で読む。
-
-FIRST VIEWPORT: 卓一覧は一式の用紙として現れる。上端に卓名を明朝で、罫線は薄墨、Primary(セッションを記録)は藍の実ボタン。初見で「CoC のシートだ」と分かる。
-
-FORM: 7 候補中 5 番(ロール割り当て)。seed: 5d997b12c995244b7d328189054ab369(306/564 human-approved catalog)。
-
-FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance。
+## 過去に採用しなかった方向
+「CoC キャラクターシートの用紙」（明朝見出し・藍の主色・朱印）は 2026-11 に破棄済み。

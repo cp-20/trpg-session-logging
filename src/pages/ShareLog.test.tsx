@@ -1,9 +1,15 @@
+import {
+  RouterProvider,
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+} from "@tanstack/react-router";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { expect, it } from "vitest";
-import { StoreProvider } from "../store";
 import { seedState } from "../data/seed";
+import { StoreProvider } from "../store";
 import ShareLog from "./ShareLog";
 
 const GATE_PASSED = "このログは、このシナリオをプレイした人だけが読めます（自己申告）。";
@@ -26,41 +32,53 @@ function seedWith(overrides: {
   localStorage.setItem("takufu-state-v4", JSON.stringify(state));
 }
 
-function renderShare(slug: string) {
+async function renderShare(slug: string) {
+  const rootRoute = createRootRoute();
+  const shareRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/share/l/$slug",
+    component: ShareLog,
+  });
+  const routeTree = rootRoute.addChildren([shareRoute]);
+  const router = createRouter({
+    routeTree,
+    history: createMemoryHistory({ initialEntries: [`/share/l/${slug}`] }),
+  });
+  await router.load();
   return render(
     <StoreProvider>
-      <MemoryRouter initialEntries={[`/share/l/${slug}`]}>
-        <Routes>
-          <Route path="/share/l/:slug" element={<ShareLog />} />
-        </Routes>
-      </MemoryRouter>
-    </StoreProvider>
+      <RouterProvider router={router} />
+    </StoreProvider>,
   );
 }
 
 it("passed ログは外部ユーザーにはゲートが表示され、自己申告で解除できる", async () => {
   seedWith({ slug: "slg-test-passed", scope: "passed" });
-  renderShare("slg-test-passed");
+  await renderShare("slg-test-passed");
 
   expect(screen.getByText(GATE_PASSED)).toBeInTheDocument();
   // ゲート中は本文の絞り込み欄すら出ない
-  expect(screen.queryByPlaceholderText("絞り込み…")).not.toBeInTheDocument();
+  expect(screen.queryByPlaceholderText("本文・発言者で絞り込み…")).not.toBeInTheDocument();
 
-  await userEvent.setup().click(screen.getByRole("checkbox", { name: "このシナリオをプレイした（自己申告）" }));
+  await userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: "このシナリオをプレイした（記録を開く）" }));
 
   expect(screen.queryByText(GATE_PASSED)).not.toBeInTheDocument();
-  expect(screen.getByPlaceholderText("絞り込み…")).toBeInTheDocument();
+  expect(screen.getByPlaceholderText("本文・発言者で絞り込み…")).toBeInTheDocument();
 });
 
-it("members ログは自己申告では読めない", () => {
+it("members ログは自己申告では読めない", async () => {
   seedWith({ slug: "slg-test-members", scope: "members" });
-  renderShare("slg-test-members");
+  await renderShare("slg-test-members");
 
   expect(screen.getByText(GATE_MEMBERS)).toBeInTheDocument();
-  expect(screen.queryByRole("checkbox", { name: "このシナリオをプレイした（自己申告）" })).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "このシナリオをプレイした（記録を開く）" }),
+  ).not.toBeInTheDocument();
 });
 
-it("participants に入っていれば members ログをそのまま読める", () => {
+it("participants に入っていれば members ログをそのまま読める", async () => {
   seedWith({
     slug: "slg-test-in",
     scope: "members",
@@ -69,8 +87,8 @@ it("participants に入っていれば members ログをそのまま読める", 
       u_sora: { linked: true, hidden: false, characterIds: [] },
     },
   });
-  renderShare("slg-test-in");
+  await renderShare("slg-test-in");
 
   expect(screen.queryByText(GATE_MEMBERS)).not.toBeInTheDocument();
-  expect(screen.getByPlaceholderText("絞り込み…")).toBeInTheDocument();
+  expect(screen.getByPlaceholderText("本文・発言者で絞り込み…")).toBeInTheDocument();
 });
