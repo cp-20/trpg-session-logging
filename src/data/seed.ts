@@ -1,4 +1,4 @@
-import type { State, User, Table, Character, Scenario, Log, Channel, Provider } from "../types";
+import type { State, User, Table, Character, Scenario, Log, Channel, Provider, TableEvent } from "../types";
 import generated from "./generated.json";
 import { jstTime, jstDate, sessionMinutes, fmtDur, uid } from "../lib/time";
 
@@ -9,6 +9,7 @@ const g = generated as unknown as {
   scenarios: Scenario[];
   logs: Record<string, Log>;
   characters: Character[];
+  events?: Record<string, TableEvent>;
 };
 
 export function seedState(): State {
@@ -21,16 +22,23 @@ export function seedState(): State {
   const characters: Record<string, Character> = {};
   Object.values(g.characters).forEach((c) => (characters[c.id] = c));
   const logs: Record<string, Log> = {};
-  Object.values(g.logs).forEach((l) => (logs[l.id] = { ...l, slug: (l as unknown as { slug?: string }).slug ?? uid("s") }));
+  Object.values(g.logs).forEach(
+    (l) => (logs[l.id] = { ...l, slug: (l as unknown as { slug?: string }).slug ?? uid("s") }),
+  );
+  const events: Record<string, TableEvent> = {};
+  if (g.events) {
+    Object.values(g.events).forEach((e) => (events[e.id] = e));
+  }
   return {
     me: "u_mikan",
     entered: false,
-    prefs: { hideSelfOnShare: false },
+    prefs: { hideSelfOnShare: false, onboardingDone: true },
     users,
     tables,
     characters,
     scenarios,
     logs,
+    events,
     editRequests: [],
   };
 }
@@ -38,6 +46,9 @@ export function seedState(): State {
 /** アップロードフローのサンプルログ（シークレットチャンネル付きの実データを再利用） */
 const sampleSource = Object.values(g.logs).find((l) => l.id === "s06") ?? Object.values(g.logs)[0];
 export const SAMPLE_LOG: Channel[] = JSON.parse(JSON.stringify(sampleSource.channels));
+export const SAMPLE_SPEAKER_ICONS: Record<string, string> = JSON.parse(
+  JSON.stringify(sampleSource.speakerIcons ?? {}),
+);
 
 function summarizeSample() {
   const all = SAMPLE_LOG.flatMap((c) => c.msgs);

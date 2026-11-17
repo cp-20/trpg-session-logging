@@ -20,7 +20,7 @@ export interface ShareViewerOptions {
 export function evaluateShareGate(
   log: Pick<Log, "scope" | "ownerId" | "players">,
   viewerId: string | null,
-  opts: ShareViewerOptions = {}
+  opts: ShareViewerOptions = {},
 ): ShareGateResult {
   const isParticipant = viewerId !== null && (log.ownerId === viewerId || Boolean(log.players[viewerId]));
   if (log.scope === "members" && !isParticipant) {
@@ -38,7 +38,7 @@ export function evaluateShareGate(
  */
 export function visibleShareMembers(
   log: Pick<Log, "players">,
-  opts: { hideSelfOnShare?: boolean; viewerId: string | null }
+  opts: { hideSelfOnShare?: boolean; viewerId: string | null },
 ): string[] {
   return Object.entries(log.players)
     .filter(([u, p]) => p.linked && !p.hidden && !(opts.hideSelfOnShare && u === opts.viewerId))

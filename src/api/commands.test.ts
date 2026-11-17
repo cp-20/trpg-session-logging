@@ -8,8 +8,13 @@ it("添付と同時に登録したシナリオを正しく紐付け、参加者�
   const participant = Object.keys(target.players)[0];
   target.players[participant].hidden = true;
   const input: CommitLogInput = {
-    attachId: target.id, fileName: "log.json", meta: { title: target.title, systemId: target.systemId },
-    channels: target.channels, kinds: {}, tableId: target.tableId ?? "", scenarioId: "",
+    attachId: target.id,
+    fileName: "log.json",
+    meta: { title: target.title, systemId: target.systemId },
+    channels: target.channels,
+    kinds: {},
+    tableId: target.tableId ?? "",
+    scenarioId: "",
     newScenario: { title: "新規シナリオ", author: "作者", policy: "members" },
     players: [{ userId: participant, characterIds: target.players[participant].characterIds }],
   };
@@ -19,6 +24,8 @@ it("添付と同時に登録したシナリオを正しく紐付け、参加者�
   expect(state.logs[target.id].players[participant].hidden).toBe(true);
 
   state.me = "another-user";
-  const refused = await commitLogImport(input, state, () => { throw new Error("must not mutate"); });
+  const refused = await commitLogImport(input, state, () => {
+    throw new Error("must not mutate");
+  });
   expect(refused.ok).toBe(false);
 });

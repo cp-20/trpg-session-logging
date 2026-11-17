@@ -1,6 +1,13 @@
 import {
-  getAuth, GoogleAuthProvider, TwitterAuthProvider, signInWithPopup,
-  linkWithPopup, unlink, signOut, onAuthStateChanged, connectAuthEmulator,
+  getAuth,
+  GoogleAuthProvider,
+  TwitterAuthProvider,
+  signInWithPopup,
+  linkWithPopup,
+  unlink,
+  signOut,
+  onAuthStateChanged,
+  connectAuthEmulator,
   type User as FirebaseUser,
 } from "firebase/auth";
 import { getFirebaseApp } from "./firebase";
@@ -13,7 +20,9 @@ export function getTakufuAuth() {
   if (!app) return null;
   const auth = getAuth(app);
   if (import.meta.env.VITE_FIREBASE_USE_EMULATORS === "true" && !emulatorConnected) {
-    connectAuthEmulator(auth, import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_URL || "http://127.0.0.1:9099", { disableWarnings: true });
+    connectAuthEmulator(auth, import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_URL || "http://127.0.0.1:9099", {
+      disableWarnings: true,
+    });
     emulatorConnected = true;
   }
   auth.languageCode = "ja";
@@ -48,11 +57,16 @@ export async function unlinkXAccount(): Promise<FirebaseUser> {
   return unlink(user, "twitter.com");
 }
 
-export function signOutAccount() { return signOut(requireAuth()); }
+export function signOutAccount() {
+  return signOut(requireAuth());
+}
 
 export function observeAuth(listener: (user: FirebaseUser | null) => void, onError?: (error: Error) => void) {
   const auth = getTakufuAuth();
-  if (!auth) { listener(null); return () => {}; }
+  if (!auth) {
+    listener(null);
+    return () => {};
+  }
   return onAuthStateChanged(auth, listener, onError);
 }
 
@@ -66,7 +80,9 @@ export function firebaseUserProfile(user: FirebaseUser): User {
     color: "#0e7490",
     accounts: user.providerData.flatMap((p) => {
       const provider = p.providerId === "google.com" ? "google" : p.providerId === "twitter.com" ? "x" : null;
-      return provider ? [{ provider, status: "linked" as const, displayName: p.email || p.displayName || undefined }] : [];
+      return provider
+        ? [{ provider, status: "linked" as const, displayName: p.email || p.displayName || undefined }]
+        : [];
     }),
   };
 }
@@ -80,9 +96,13 @@ export function authErrorMessage(error: unknown): string {
     "auth/unauthorized-domain": "このURLではまだサインインを利用できません。",
     "auth/operation-not-allowed": "この連携は準備中です。しばらくしてからお試しください。",
     "auth/credential-already-in-use": "このアカウントは別の卓譜アカウントに連携されています。",
-    "auth/account-exists-with-different-credential": "Googleでサインインしてから、設定でアカウントを連携してください。",
+    "auth/account-exists-with-different-credential":
+      "Googleでサインインしてから、設定でアカウントを連携してください。",
     "auth/network-request-failed": "接続できませんでした。通信状態を確認してください。",
     "auth/requires-recent-login": "もう一度Googleでサインインしてからお試しください。",
   };
-  return (code && messages[code]) || (error instanceof Error && !code ? error.message : "連携できませんでした。もう一度お試しください。");
+  return (
+    (code && messages[code]) ||
+    (error instanceof Error && !code ? error.message : "連携できませんでした。もう一度お試しください。")
+  );
 }

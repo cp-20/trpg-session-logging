@@ -37,12 +37,23 @@ function collectStats(node: unknown, out: Record<string, number>, depth = 0): vo
   }
   if (!isRecord(node)) return;
   if (typeof node.label === "string") {
-    const value = typeof node.value === "number" ? node.value : typeof node.value === "string" && node.value.trim() ? Number(node.value) : NaN;
+    const value =
+      typeof node.value === "number"
+        ? node.value
+        : typeof node.value === "string" && node.value.trim()
+          ? Number(node.value)
+          : NaN;
     if (Number.isFinite(value)) out[node.label.toLowerCase()] = value;
     return;
   }
   for (const [k, v] of Object.entries(node)) {
-    if (typeof v === "number" && Number.isFinite(v) && /^(HP|MP|SAN|DB|[A-Z]{2,4})$/i.test(k) && v >= -100 && v <= 999) {
+    if (
+      typeof v === "number" &&
+      Number.isFinite(v) &&
+      /^(HP|MP|SAN|DB|[A-Z]{2,4})$/i.test(k) &&
+      v >= -100 &&
+      v <= 999
+    ) {
       out[k.toLowerCase()] = v;
     } else if (isRecord(v) || Array.isArray(v)) {
       collectStats(v, out, depth + 1);
@@ -73,7 +84,9 @@ export function parseCcfoliaCharacterJson(raw: string): ParsedCharacter | null {
   /* 形式B: 単体キャラ({name, ...}) */
   const single = typeof root.name === "string" ? [root] : [];
   const clipboard = root.kind === "character" && isRecord(root.data) ? [root.data] : [];
-  const candidates = [...clipboard, ...chars, ...single].filter((c): c is Candidate => isRecord(c) && typeof c.name === "string" && Boolean(c.name.trim()));
+  const candidates = [...clipboard, ...chars, ...single].filter(
+    (c): c is Candidate => isRecord(c) && typeof c.name === "string" && Boolean(c.name.trim()),
+  );
   if (candidates.length === 0) return null;
 
   const c = candidates[0];
@@ -90,7 +103,11 @@ export function parseCcfoliaCharacterJson(raw: string): ParsedCharacter | null {
     memo: memo || undefined,
     systemId: guessSystem(memo + " " + commands),
     stats,
-    image: typeof c.iconUrl === "string" && (/^https:\/\//i.test(c.iconUrl) || /^data:image\/(png|jpeg|gif|webp);base64,/i.test(c.iconUrl)) ? c.iconUrl : undefined,
+    image:
+      typeof c.iconUrl === "string" &&
+      (/^https:\/\//i.test(c.iconUrl) || /^data:image\/(png|jpeg|gif|webp);base64,/i.test(c.iconUrl))
+        ? c.iconUrl
+        : undefined,
     imageId: str(c.imageId),
   };
 }
@@ -126,9 +143,19 @@ async function attachImage(zip: import("jszip"), parsed: ParsedCharacter): Promi
   /* 別のキャラクターの画像を誤って使わない。参照先がなければ画像は付けない。 */
   const imageId = parsed.imageId ?? parsed.image?.split("/").at(-1)?.split("?")[0];
   if (!imageId) return;
-  const img = images.find((f) => f.name === `images/${imageId}` || f.name.replace(/\.(png|jpe?g|gif|webp)$/i, "") === `images/${imageId}`);
+  const img = images.find(
+    (f) =>
+      f.name === `images/${imageId}` ||
+      f.name.replace(/\.(png|jpe?g|gif|webp)$/i, "") === `images/${imageId}`,
+  );
   if (!img || !/\.(png|jpe?g|gif|webp)$/i.test(img.name)) return;
-  const mime = /\.jpe?g$/i.test(img.name) ? "image/jpeg" : /\.gif$/i.test(img.name) ? "image/gif" : /\.webp$/i.test(img.name) ? "image/webp" : "image/png";
+  const mime = /\.jpe?g$/i.test(img.name)
+    ? "image/jpeg"
+    : /\.gif$/i.test(img.name)
+      ? "image/gif"
+      : /\.webp$/i.test(img.name)
+        ? "image/webp"
+        : "image/png";
   const blob = new Blob([await img.async("arraybuffer")], { type: mime });
   parsed.image = await blobToDataUrl(blob);
 }

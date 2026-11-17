@@ -62,7 +62,8 @@ function collectMessages(node: unknown, out: Candidate[]): void {
 
 function mapKind(sp: string, explicit: unknown): MsgKind {
   const e = str(explicit)?.toUpperCase();
-  if (e === "PC" || e === "NPC" || e === "KP" || e === "PL" || e === "GM" || e === "SYSTEM") return e as MsgKind;
+  if (e === "PC" || e === "NPC" || e === "KP" || e === "PL" || e === "GM" || e === "SYSTEM")
+    return e as MsgKind;
   if (/^(KP|GM)[\s:：]/.test(sp) || sp === "KP" || sp === "GM") return "KP";
   if (e === "SYSTEM") return "SYSTEM";
   return "PC";
@@ -73,7 +74,9 @@ function buildRoll(m: Candidate): Msg["roll"] | undefined {
   const roll = ext && isRecord(ext.roll) ? ext.roll : undefined;
   if (!roll) return undefined;
   const cmd = str(roll.cmd) ?? "ロール";
-  const result = str(roll.result) ?? (roll.critical === true ? "クリティカル" : roll.fumble === true ? "ファンブル" : "成功");
+  const result =
+    str(roll.result) ??
+    (roll.critical === true ? "クリティカル" : roll.fumble === true ? "ファンブル" : "成功");
   const diceArr = Array.isArray(roll.dice) ? roll.dice : [];
   const dice = diceArr
     .map((d) => (isRecord(d) ? `${str(d.value) ?? ""}` : ""))
@@ -132,16 +135,17 @@ export interface LogEntry {
 
 function assembleChannels(entries: LogEntry[]): ParsedLog | null {
   if (entries.length === 0) return null;
-  const msgs: Msg[] = entries.map((e, i) =>
-    ({
-      id: `p${i}`,
-      ts: e.ts,
-      sp: e.sp,
-      kind: e.kind,
-      type: e.type === "note" ? "note" : "text",
-      text: e.text,
-      ...(e.roll ? { roll: e.roll } : {}),
-    }) as Msg
+  const msgs: Msg[] = entries.map(
+    (e, i) =>
+      ({
+        id: `p${i}`,
+        ts: e.ts,
+        sp: e.sp,
+        kind: e.kind,
+        type: e.type === "note" ? "note" : "text",
+        text: e.text,
+        ...(e.roll ? { roll: e.roll } : {}),
+      }) as Msg,
   );
   /* グローバルソートはしない: チャンネル対応を保ち、各チャンネル内でソートする */
 
@@ -157,9 +161,11 @@ function assembleChannels(entries: LogEntry[]): ParsedLog | null {
   /* 正規チャンネル名の判定(ヒューリスティック) */
   const nameFor = (raw: string, speakerCount: number): { name: string; secret: boolean } => {
     const lower = raw.toLowerCase();
-    if (lower === "main" || raw === "メイン" || lower.includes("main")) return { name: "メイン", secret: false };
+    if (lower === "main" || raw === "メイン" || lower.includes("main"))
+      return { name: "メイン", secret: false };
     if (lower === "info" || raw === "情報" || raw.includes("info")) return { name: "情報", secret: false };
-    if (lower === "chat" || raw === "チャット" || raw.includes("chat") || raw === "雑談") return { name: "チャット", secret: false };
+    if (lower === "chat" || raw === "チャット" || raw.includes("chat") || raw === "雑談")
+      return { name: "チャット", secret: false };
     /* 発言者が2人以下の非標準チャンネルはシークレットタブとして扱う(plan のヒューリスティック) */
     return { name: raw, secret: speakerCount <= 2 };
   };
@@ -286,12 +292,16 @@ export async function parseCcfoliaLogZip(data: ArrayBuffer | Blob): Promise<Pars
   const files = Object.values(zip.files).filter((f) => !f.dir);
 
   /* ログJSONは zip 直下に置かれることが多い(ルート優先) */
-  const jsons = files.filter((f) => f.name.endsWith(".json")).sort((a, b) => a.name.split("/").length - b.name.split("/").length);
+  const jsons = files
+    .filter((f) => f.name.endsWith(".json"))
+    .sort((a, b) => a.name.split("/").length - b.name.split("/").length);
   for (const f of jsons) {
     const parsed = parseCcfoliaLog(await f.async("string"));
     if (parsed && parsed.messageCount > 0) return parsed;
   }
-  const htmls = files.filter((f) => /\.html?$/i.test(f.name)).sort((a, b) => a.name.split("/").length - b.name.split("/").length);
+  const htmls = files
+    .filter((f) => /\.html?$/i.test(f.name))
+    .sort((a, b) => a.name.split("/").length - b.name.split("/").length);
   for (const f of htmls) {
     const parsed = parseCcfoliaLogHtml(await f.async("string"));
     if (parsed && parsed.messageCount > 0) return parsed;

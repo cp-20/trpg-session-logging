@@ -4,8 +4,12 @@ import { authErrorMessage, firebaseUserProfile } from "./auth";
 
 it("uses recognizable profile data without storing OAuth credentials", () => {
   const user = {
-    uid: "uid", displayName: "プレイヤー", email: "player@example.com", photoURL: "https://example.com/avatar.png",
-    accessToken: "must-not-store", providerData: [
+    uid: "uid",
+    displayName: "プレイヤー",
+    email: "player@example.com",
+    photoURL: "https://example.com/avatar.png",
+    accessToken: "must-not-store",
+    providerData: [
       { providerId: "google.com", email: "player@example.com", uid: "internal-provider-id" },
       { providerId: "twitter.com", displayName: "Xの名前", uid: "internal-twitter-id" },
     ],

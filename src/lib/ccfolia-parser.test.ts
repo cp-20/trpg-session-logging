@@ -1,5 +1,7 @@
-import fixtureRaw from "../../e2e/fixtures/ccfolia-sample.json";
 import { describe, expect, it } from "vitest";
+import fixtureRaw from "../../e2e/fixtures/ccfolia-sample.json";
+import { inferSystem } from "../data/systems";
+import type { Channel, Msg } from "../types";
 import { parseCcfoliaLog, sessionDatesOf, summarizeParsed } from "./ccfolia-parser";
 
 const fixture = JSON.stringify(fixtureRaw);
@@ -44,7 +46,9 @@ describe("parseCcfoliaLog", () => {
 
   it("スピーカーの kind 推定: KPプレフィックス付きはKP、それ以外はPC(Step2で修正可能)", () => {
     const withPrefix = parseCcfoliaLog(
-      JSON.stringify({ messages: [{ name: "KP:夜霜", text: "導入です", createdAt: 1794831600000, channel: "main" }] })
+      JSON.stringify({
+        messages: [{ name: "KP:夜霜", text: "導入です", createdAt: 1794831600000, channel: "main" }],
+      }),
     )!;
     expect(withPrefix.kinds["KP:夜霜"]).toBe("KP");
     expect(parsed.kinds["夜霜"]).toBe("PC");
@@ -57,5 +61,43 @@ describe("parseCcfoliaLog", () => {
   it("解析できない入力は null", () => {
     expect(parseCcfoliaLog("not json")).toBeNull();
     expect(parseCcfoliaLog('{"foo":1}')).toBeNull();
+  });
+});
+
+describe("inferSystem", () => {
+  const msg = (partial: Partial<Msg>): Msg => ({
+    id: "m",
+    ts: 0,
+    sp: "x",
+    kind: "PC",
+    type: "text",
+    text: null,
+    ...partial,
+  });
+  const chans = (msgs: Msg[]): Channel[] => [{ id: "main", name: "メイン", secret: false, msgs }];
+
+  it("CC<= / SANチェック から CoC7 を推定する", () => {
+    const r = inferSystem(
+      chans([msg({ type: "roll", roll: { cmd: "CC<=70 目星", skill: "目星", dice: "61", result: "成功" } })]),
+    );
+    expect(r?.id).toBe("coc7");
+  });
+  it("結合判定・自分:不可能 からエモクロアを推定する", () => {
+    const r = inferSystem(
+      chans([
+        msg({ type: "roll", roll: { cmd: "2D6+3 結合", skill: "交渉", dice: "7,5", result: "成功" } }),
+        msg({ text: "（自分:不可能 2点減）" }),
+      ]),
+    );
+    expect(r?.id).toBe("emoklore");
+  });
+  it("エモクロアの手がかりがなければ 2D6 から SW2.5 を推定する", () => {
+    const r = inferSystem(
+      chans([msg({ type: "roll", roll: { cmd: "2D6+5 射撃", skill: "射撃", dice: "9", result: "成功" } })]),
+    );
+    expect(r?.id).toBe("sw25");
+  });
+  it("手がかりがなければ null", () => {
+    expect(inferSystem(chans([msg({ text: "「こんにちは」" })]))).toBeNull();
   });
 });

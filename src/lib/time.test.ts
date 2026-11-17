@@ -56,7 +56,12 @@ describe("sessionPlayMinutes", () => {
     const b = jstEpoch("2026-11-14", "23:00");
     const c = jstEpoch("2026-11-15", "20:00");
     const d = jstEpoch("2026-11-15", "22:00");
-    const log = { hasLog: true, channels: [{ msgs: [{ ts: a }, { ts: b }, { ts: c }, { ts: d }] }], t0: a, t1: d };
+    const log = {
+      hasLog: true,
+      channels: [{ msgs: [{ ts: a }, { ts: b }, { ts: c }, { ts: d }] }],
+      t0: a,
+      t1: d,
+    };
     expect(sessionPlayMinutes(log)).toBe(240);
     // 壁時間(47h)とは異なる
     expect(sessionMinutes(a, d)).toBeGreaterThan(240);
@@ -70,7 +75,11 @@ describe("sessionPlayMinutes", () => {
 
 describe("buildSessionRange", () => {
   it("複数日: 終了は最終日の時刻として解釈し、日数を二重加算しない", () => {
-    const r = buildSessionRange({ dates: ["2026-11-14", "2026-11-15"], startTime: "21:00", endTime: "25:00" });
+    const r = buildSessionRange({
+      dates: ["2026-11-14", "2026-11-15"],
+      startTime: "21:00",
+      endTime: "25:00",
+    });
     expect(r.ok).toBe(true);
     if (r.ok) {
       // 14日21:00 → 16日01:00(15日の25:00) = 28時間

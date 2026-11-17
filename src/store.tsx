@@ -7,7 +7,14 @@ import { seedState } from "./data/seed";
 import type { User as FirebaseUser } from "firebase/auth";
 import type { User } from "./types";
 import { firebaseUserProfile } from "./lib/auth";
-import { saveCloudState, publishSharedLog, deleteSharedLog, publishSharedCharacter, deleteSharedCharacter, updateSharedMembership } from "./lib/cloud-state";
+import {
+  saveCloudState,
+  publishSharedLog,
+  deleteSharedLog,
+  publishSharedCharacter,
+  deleteSharedCharacter,
+  updateSharedMembership,
+} from "./lib/cloud-state";
 
 const KEY = "takufu-state-v4";
 
@@ -36,7 +43,10 @@ function restore(): RestoreResult {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { state: seedState(), issue: "missing" };
     const parsed = parseSavedState(raw);
-    if (parsed) return { state: parsed, issue: "none" };
+    if (parsed) {
+      parsed.events ??= {};
+      return { state: parsed, issue: "none" };
+    }
     return { state: seedState(), issue: "corrupt" };
   } catch {
     return { state: seedState(), issue: "corrupt" };
@@ -71,13 +81,41 @@ interface StoreApi {
 const Ctx = createContext<StoreApi>(null!);
 
 export function emptyState(user: User): State {
-  return { me: user.id, entered: true, users: { [user.id]: user }, prefs: { hideSelfOnShare: false }, tables: {}, characters: {}, scenarios: {}, logs: {}, editRequests: [] };
+  const normalizedUser: User = {
+    ...user,
+    profilePublic: user.profilePublic ?? true,
+  };
+  return {
+    me: normalizedUser.id,
+    entered: true,
+    users: { [normalizedUser.id]: normalizedUser },
+    prefs: { hideSelfOnShare: false, onboardingDone: false },
+    tables: {},
+    characters: {},
+    scenarios: {},
+    logs: {},
+    events: {},
+    editRequests: [],
+  };
 }
 
-export function StoreProvider({ children, initialState, storageKey = KEY, authUser = null, cloudRevision = null }: {
-  children: ReactNode; initialState?: State; storageKey?: string; authUser?: FirebaseUser | null; cloudRevision?: string | null;
+export function StoreProvider({
+  children,
+  initialState,
+  storageKey = KEY,
+  authUser = null,
+  cloudRevision = null,
+}: {
+  children: ReactNode;
+  initialState?: State;
+  storageKey?: string;
+  authUser?: FirebaseUser | null;
+  cloudRevision?: string | null;
 }) {
-  const initial = useMemo(() => initialState ? { state: initialState, issue: "none" as const } : restore(), []);
+  const initial = useMemo(
+    () => (initialState ? { state: initialState, issue: "none" as const } : restore()),
+    [],
+  );
   const [state, setState] = useState<State>(initial.state);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [otherTabUpdated, setOtherTabUpdated] = useState(false);
@@ -89,8 +127,20 @@ export function StoreProvider({ children, initialState, storageKey = KEY, authUs
   const lastSavedState = useRef<State | null>(null);
   const queue = useRef(Promise.resolve());
   const alive = useRef(true);
-  const published = useRef(new Map(Object.values(initial.state.logs).filter((l) => l.ownerId === authUser?.uid).map((l) => [l.slug, ""])));
-  const publishedCharacters = useRef(new Map(Object.values(initial.state.characters).filter((c) => c.ownerId === authUser?.uid).map((c) => [c.id, ""])));
+  const published = useRef(
+    new Map(
+      Object.values(initial.state.logs)
+        .filter((l) => l.ownerId === authUser?.uid)
+        .map((l) => [l.slug, ""]),
+    ),
+  );
+  const publishedCharacters = useRef(
+    new Map(
+      Object.values(initial.state.characters)
+        .filter((c) => c.ownerId === authUser?.uid)
+        .map((c) => [c.id, ""]),
+    ),
+  );
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -101,7 +151,11 @@ export function StoreProvider({ children, initialState, storageKey = KEY, authUs
     if (persistBlocked || blockedRef.current || staleRef.current) return;
     try {
       localStorage.setItem(storageKey, JSON.stringify(stateRef.current));
-      if (authUser) localStorage.setItem(`${storageKey}-pending`, stateRef.current === lastSavedState.current ? "false" : "true");
+      if (authUser)
+        localStorage.setItem(
+          `${storageKey}-pending`,
+          stateRef.current === lastSavedState.current ? "false" : "true",
+        );
       if (!authUser) setSaveError(null);
     } catch {
       setSaveError("この端末に保存できません。記録をダウンロードしてから、空き容量を確認してください。");
@@ -131,26 +185,43 @@ export function StoreProvider({ children, initialState, storageKey = KEY, authUs
               localStorage.setItem(storageKey, JSON.stringify(state));
               localStorage.setItem(`${storageKey}-pending`, "false");
             }
-          } catch { /* Cloud save succeeded; the cache is best effort. */ }
+          } catch {
+            /* Cloud save succeeded; the cache is best effort. */
+          }
           const owned = Object.values(state.logs).filter((l) => l.ownerId === authUser.uid);
           const slugs = new Set(owned.map((l) => l.slug));
           for (const slug of published.current.keys()) {
-            if (!slugs.has(slug)) { await deleteSharedLog(slug); published.current.delete(slug); }
+            if (!slugs.has(slug)) {
+              await deleteSharedLog(slug);
+              published.current.delete(slug);
+            }
           }
           for (const log of owned) {
-            const signature = JSON.stringify([log, state.users, state.prefs, log.scenarioId ? state.scenarios[log.scenarioId] : null]);
+            const signature = JSON.stringify([
+              log,
+              state.users,
+              state.prefs,
+              log.scenarioId ? state.scenarios[log.scenarioId] : null,
+            ]);
             if (published.current.get(log.slug) === signature) continue;
             await publishSharedLog(log, state);
             published.current.set(log.slug, signature);
           }
           for (const log of Object.values(state.logs).filter((l) => l.ownerId !== authUser.uid)) {
             const membership = log.players[authUser.uid];
-            if (membership) await updateSharedMembership(log.slug, { linked: membership.linked, hidden: membership.hidden });
+            if (membership)
+              await updateSharedMembership(log.slug, {
+                linked: membership.linked,
+                hidden: membership.hidden,
+              });
           }
           const characters = Object.values(state.characters).filter((c) => c.ownerId === authUser.uid);
           const characterIds = new Set(characters.map((c) => c.id));
           for (const id of publishedCharacters.current.keys()) {
-            if (!characterIds.has(id)) { await deleteSharedCharacter(id); publishedCharacters.current.delete(id); }
+            if (!characterIds.has(id)) {
+              await deleteSharedCharacter(id);
+              publishedCharacters.current.delete(id);
+            }
           }
           for (const character of characters) {
             const signature = JSON.stringify([character, state.logs, state.users[authUser.uid]]);
@@ -158,10 +229,17 @@ export function StoreProvider({ children, initialState, storageKey = KEY, authUs
             await publishSharedCharacter(character, state);
             publishedCharacters.current.set(character.id, signature);
           }
-          if (alive.current) { setSaveError(null); setCloudStatus(stateRef.current === state ? "saved" : "saving"); }
+          if (alive.current) {
+            setSaveError(null);
+            setCloudStatus(stateRef.current === state ? "saved" : "saving");
+          }
         } catch (error) {
           if (alive.current) {
-            setSaveError(error instanceof Error ? error.message : "記録を同期できませんでした。通信状態を確認して、もう一度保存してください。");
+            setSaveError(
+              error instanceof Error
+                ? error.message
+                : "記録を同期できませんでした。通信状態を確認して、もう一度保存してください。",
+            );
             setCloudStatus("error");
           }
         }
@@ -170,7 +248,12 @@ export function StoreProvider({ children, initialState, storageKey = KEY, authUs
     return () => clearTimeout(timer);
   }, [state, retry, authUser]);
 
-  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   /* 単一writer: 他タブの更新を検知したら保存を停止し、再読み込みを促す */
   useEffect(() => {
@@ -183,7 +266,11 @@ export function StoreProvider({ children, initialState, storageKey = KEY, authUs
       if (persistBlocked || blockedRef.current || staleRef.current) return;
       try {
         localStorage.setItem(storageKey, JSON.stringify(stateRef.current));
-        if (authUser) localStorage.setItem(`${storageKey}-pending`, stateRef.current === lastSavedState.current ? "false" : "true");
+        if (authUser)
+          localStorage.setItem(
+            `${storageKey}-pending`,
+            stateRef.current === lastSavedState.current ? "false" : "true",
+          );
       } catch {
         /* noop */
       }
@@ -204,16 +291,28 @@ export function StoreProvider({ children, initialState, storageKey = KEY, authUs
       authUser,
       cloudStatus,
       retrySave: () => setRetry((n) => n + 1),
-      enterDemo: (userId = "u_mikan") => setState((prev) => {
-        const next = structuredClone(prev.users[userId] ? prev : seedState());
-        next.me = userId;
-        next.entered = true;
-        return next;
-      }),
+      enterDemo: (userId = "u_mikan") =>
+        setState((prev) => {
+          const next = structuredClone(prev.users[userId] ? prev : seedState());
+          next.events ??= {};
+          next.me = userId;
+          next.entered = true;
+          return next;
+        }),
       refreshProfile: () => {
-        if (authUser) setState((prev) => ({ ...prev, users: { ...prev.users, [authUser.uid]: { ...prev.users[authUser.uid], ...firebaseUserProfile(authUser) } } }));
+        if (authUser)
+          setState((prev) => ({
+            ...prev,
+            users: {
+              ...prev.users,
+              [authUser.uid]: { ...prev.users[authUser.uid], ...firebaseUserProfile(authUser) },
+            },
+          }));
       },
-      exportData: () => initial.issue === "corrupt" ? (localStorage.getItem(storageKey) ?? JSON.stringify(stateRef.current)) : JSON.stringify(stateRef.current, null, 2),
+      exportData: () =>
+        initial.issue === "corrupt"
+          ? (localStorage.getItem(storageKey) ?? JSON.stringify(stateRef.current))
+          : JSON.stringify(stateRef.current, null, 2),
       importData: (next) => {
         if (authUser && next.me !== authUser.uid) throw new Error("このアカウントの記録を選んでください。");
         if (dataCorrupt) {
@@ -222,7 +321,7 @@ export function StoreProvider({ children, initialState, storageKey = KEY, authUs
         }
         blockedRef.current = false;
         setDataCorrupt(false);
-        setState({ ...next, entered: true });
+        setState({ ...next, events: next.events ?? {}, entered: true });
       },
       update: (fn) =>
         setState((prev) => {
@@ -240,15 +339,19 @@ export function StoreProvider({ children, initialState, storageKey = KEY, authUs
       dataCorrupt,
       otherTabUpdated,
     }),
-    [state, saveError, otherTabUpdated, initial.issue, authUser, cloudStatus, dataCorrupt]
+    [state, saveError, otherTabUpdated, initial.issue, authUser, cloudStatus, dataCorrupt],
   );
 
   return (
     <Ctx.Provider value={api}>
       {children}
-      <div className="toast toast-bottom toast-center z-[99] pointer-events-none" role="status" aria-live="polite">
+      <div
+        className="toast toast-bottom toast-center z-[99] pointer-events-none"
+        role="status"
+        aria-live="polite"
+      >
         {toasts.map((t) => (
-          <div key={t.id} className="alert alert-neutral py-2 px-4 text-[13px] shadow-lg">
+          <div key={t.id} className="alert alert-neutral py-2.5 px-4 text-sm shadow-lg">
             <span>{t.msg}</span>
           </div>
         ))}

@@ -1,6 +1,14 @@
 import {
-  collection, doc, getDocFromServer, getDocs, query, where, runTransaction, writeBatch,
-  Timestamp, type Firestore,
+  collection,
+  doc,
+  getDocFromServer,
+  getDocs,
+  query,
+  where,
+  runTransaction,
+  writeBatch,
+  Timestamp,
+  type Firestore,
 } from "firebase/firestore";
 import { getTakufuFirestore } from "./firebase";
 import type { Character, Log, Policy, Scenario, Scope, State, User } from "../types";
@@ -17,7 +25,8 @@ function database(): Firestore {
 
 export function splitCloudData(value: unknown): string[] {
   const json = JSON.stringify(value);
-  if (json.length > CHUNK_LENGTH * MAX_CHUNKS) throw new Error("データが保存できる大きさを超えています。JSONをエクスポートしてください。");
+  if (json.length > CHUNK_LENGTH * MAX_CHUNKS)
+    throw new Error("データが保存できる大きさを超えています。JSONをエクスポートしてください。");
   const chunks: string[] = [];
   for (let start = 0; start < json.length;) {
     let end = Math.min(start + CHUNK_LENGTH, json.length);
@@ -26,7 +35,8 @@ export function splitCloudData(value: unknown): string[] {
     chunks.push(json.slice(start, end));
     start = end;
   }
-  if (chunks.length > MAX_CHUNKS) throw new Error("データが保存できる大きさを超えています。JSONをエクスポートしてください。");
+  if (chunks.length > MAX_CHUNKS)
+    throw new Error("データが保存できる大きさを超えています。JSONをエクスポートしてください。");
   return chunks;
 }
 
@@ -34,19 +44,24 @@ async function writeChunks(db: Firestore, path: string[], chunks: string[], owne
   // Keep each commit below Firestore's 10MiB request limit, even for four-byte text.
   for (let offset = 0; offset < chunks.length; offset += 10) {
     const batch = writeBatch(db);
-    chunks.slice(offset, offset + 10).forEach((data, i) => batch.set(doc(db, path.join("/"), String(offset + i).padStart(4, "0")), {
-      data, ...(ownerId ? { ownerId } : {}),
-    }));
+    chunks.slice(offset, offset + 10).forEach((data, i) =>
+      batch.set(doc(db, path.join("/"), String(offset + i).padStart(4, "0")), {
+        data,
+        ...(ownerId ? { ownerId } : {}),
+      }),
+    );
     await batch.commit();
   }
 }
 
 async function readChunks(db: Firestore, path: string[], chunkCount: number): Promise<unknown> {
-  if (!Number.isInteger(chunkCount) || chunkCount < 1 || chunkCount > MAX_CHUNKS) throw new Error("保存データの構成を確認できません。");
+  if (!Number.isInteger(chunkCount) || chunkCount < 1 || chunkCount > MAX_CHUNKS)
+    throw new Error("保存データの構成を確認できません。");
   const rows = await getDocs(collection(db, path.join("/")));
   const pieces = new Map(rows.docs.map((row) => [row.id, row.data().data]));
   const chunks = Array.from({ length: chunkCount }, (_, i) => pieces.get(String(i).padStart(4, "0")));
-  if (rows.size !== chunkCount || chunks.some((chunk) => typeof chunk !== "string")) throw new Error("保存データをすべて読み込めませんでした。もう一度お試しください。");
+  if (rows.size !== chunkCount || chunks.some((chunk) => typeof chunk !== "string"))
+    throw new Error("保存データをすべて読み込めませんでした。もう一度お試しください。");
   return JSON.parse(chunks.join(""));
 }
 
@@ -62,11 +77,16 @@ async function readGeneration(db: Firestore, manifestPath: string[], parentPath:
   const ref = doc(db, manifestPath.join("/"));
   for (let attempt = 0; attempt < 3; attempt++) {
     const manifest = await getDocFromServer(ref);
-    if (!manifest.exists() || manifest.data().enabled === false || manifest.data().revision === "revoked") return null;
+    if (!manifest.exists() || manifest.data().enabled === false || manifest.data().revision === "revoked")
+      return null;
     const metadata = manifest.data();
     if (typeof metadata.revision !== "string") throw new Error("保存データの構成を確認できません。");
     try {
-      const payload = await readChunks(db, [...parentPath, "revisions", metadata.revision, "chunks"], metadata.chunkCount);
+      const payload = await readChunks(
+        db,
+        [...parentPath, "revisions", metadata.revision, "chunks"],
+        metadata.chunkCount,
+      );
       return { metadata, payload };
     } catch (error) {
       const latest = await getDocFromServer(ref);
@@ -77,21 +97,13 @@ async function readGeneration(db: Firestore, manifestPath: string[], parentPath:
   throw new Error("記録が更新されています。もう一度お試しください。");
 }
 
-export interface CloudWorkspace { state: State; revision: string }
+export interface CloudWorkspace {
+  state: State;
+  revision: string;
+}
 
 export function cloudStateProjection(state: State): State {
-  return {
-    ...state,
-    characters: Object.fromEntries(Object.entries(state.characters).map(([id, character]) => [id, {
-      ...character, sessions: character.sessions.map((session) => ({ ...session, rolls: session.rolls.filter((roll) => !roll.secret) })),
-    }])),
-    logs: Object.fromEntries(Object.entries(state.logs).map(([id, log]) => [id, {
-      ...log,
-      channels: log.channels.filter((channel) => !channel.secret).map((channel) => ({
-        ...channel, msgs: channel.msgs.filter((message) => message.type !== "note" && !message.roll?.secret),
-      })),
-    }])),
-  };
+  return state;
 }
 
 export async function loadCloudState(uid: string): Promise<CloudWorkspace | null> {
@@ -99,12 +111,18 @@ export async function loadCloudState(uid: string): Promise<CloudWorkspace | null
   const loaded = await readGeneration(db, ["users", uid, "workspace", "current"], ["users", uid]);
   if (!loaded) return null;
   const state = loaded.payload as State;
-  if (state?.me !== uid || !state.users?.[uid]) throw new Error("このアカウントの保存データを確認できません。");
+  if (state?.me !== uid || !state.users?.[uid])
+    throw new Error("このアカウントの保存データを確認できません。");
   return { state, revision: loaded.metadata.revision as string };
 }
 
-export async function saveCloudState(uid: string, state: State, expectedRevision: string | null): Promise<string> {
-  if (state.me !== uid || !state.users[uid]) throw new Error("サインイン中のアカウントと保存データが一致しません。");
+export async function saveCloudState(
+  uid: string,
+  state: State,
+  expectedRevision: string | null,
+): Promise<string> {
+  if (state.me !== uid || !state.users[uid])
+    throw new Error("サインイン中のアカウントと保存データが一致しません。");
   const db = database();
   const chunks = splitCloudData(cloudStateProjection(state));
   const revision = crypto.randomUUID();
@@ -115,7 +133,9 @@ export async function saveCloudState(uid: string, state: State, expectedRevision
       const ref = doc(db, "users", uid, "workspace", "current");
       const current = await transaction.get(ref);
       if ((current.data()?.revision ?? null) !== expectedRevision) {
-        throw new Error("別の端末で記録が更新されています。この端末のデータをエクスポートしてから、再読み込みしてください。");
+        throw new Error(
+          "別の端末で記録が更新されています。この端末のデータをエクスポートしてから、再読み込みしてください。",
+        );
       }
       transaction.set(ref, { revision, chunkCount: chunks.length, updatedAt: new Date().toISOString() });
     });
@@ -124,7 +144,8 @@ export async function saveCloudState(uid: string, state: State, expectedRevision
     throw error;
   }
   // The old generation remains readable until the manifest switches successfully.
-  if (expectedRevision) void removeChunks(db, ["users", uid, "revisions", expectedRevision, "chunks"]).catch(() => {});
+  if (expectedRevision)
+    void removeChunks(db, ["users", uid, "revisions", expectedRevision, "chunks"]).catch(() => {});
   return revision;
 }
 
@@ -138,17 +159,18 @@ export function sharedLogProjection(log: Log, state: State): SharedLogData {
   const scenario = log.scenarioId ? state.scenarios[log.scenarioId] : undefined;
   // Identity lives in individually controlled member documents, never in a public body snapshot.
   const players = {};
-  const users: Record<string, User> = { [log.ownerId]: { id: log.ownerId, name: "非表示", color: "#64748b", accounts: [] } };
+  const users: Record<string, User> = {
+    [log.ownerId]: { id: log.ownerId, name: "非表示", color: "#64748b", accounts: [] },
+  };
   const sharedLog: Log = {
-    ...log, players,
-    channels: log.channels.filter((channel) => !channel.secret).map((channel) => ({
-      ...channel, msgs: channel.msgs.filter((message) => message.type !== "note" && !message.roll?.secret),
-    })),
+    ...log,
+    players,
   };
   // File names may contain personal information and do not belong on public pages.
   delete sharedLog.importedFrom;
   return {
-    log: sharedLog, users,
+    log: sharedLog,
+    users,
     ...(scenario ? { scenario: { ...scenario, claimedBy: undefined, addedByUid: undefined } } : {}),
   };
 }
@@ -163,8 +185,13 @@ export async function publishSharedLog(log: Log, state: State): Promise<void> {
   if (log.ownerId !== state.me) throw new Error("この記録の共有設定を変更できません。");
   const db = database();
   const projection = sharedLogProjection(log, state);
-  const scenarioPolicy = log.scenarioId ? state.scenarios[log.scenarioId]?.policy ?? "unknown" : "unknown";
-  const scope = scenarioPolicy === "public" ? log.scope : "members";
+  const scenarioPolicy = log.scenarioId ? (state.scenarios[log.scenarioId]?.policy ?? "unknown") : "unknown";
+  const scope: Scope =
+    scenarioPolicy === "members"
+      ? "members"
+      : scenarioPolicy === "passed" && log.scope === "public"
+        ? "passed"
+        : log.scope;
   const chunks = splitCloudData(projection);
   const revision = crypto.randomUUID();
   const ref = doc(db, "sharedLogs", log.slug);
@@ -174,10 +201,17 @@ export async function publishSharedLog(log: Log, state: State): Promise<void> {
     await writeChunks(db, path, chunks, state.me);
     await runTransaction(db, async (transaction) => {
       const current = await transaction.get(ref);
-      if ((current.data()?.revision ?? null) !== (old.data()?.revision ?? null)) throw new Error("共有設定が別の端末で更新されています。再読み込みしてください。");
+      if ((current.data()?.revision ?? null) !== (old.data()?.revision ?? null))
+        throw new Error("共有設定が別の端末で更新されています。再読み込みしてください。");
       transaction.set(ref, {
-        ownerId: state.me, scope, scenarioPolicy, revision, chunkCount: chunks.length,
-        memberIds: Object.entries(log.players).filter(([, player]) => player.linked).map(([id]) => id),
+        ownerId: state.me,
+        scope,
+        scenarioPolicy,
+        revision,
+        chunkCount: chunks.length,
+        memberIds: Object.entries(log.players)
+          .filter(([, player]) => player.linked)
+          .map(([id]) => id),
       });
     });
   } catch (error) {
@@ -185,15 +219,19 @@ export async function publishSharedLog(log: Log, state: State): Promise<void> {
     throw error;
   }
   const oldRevision = old.data()?.revision;
-  if (oldRevision) void removeChunks(db, ["sharedLogs", log.slug, "revisions", oldRevision, "chunks"]).catch(() => {});
+  if (oldRevision)
+    void removeChunks(db, ["sharedLogs", log.slug, "revisions", oldRevision, "chunks"]).catch(() => {});
   const ownMemberRef = doc(db, "sharedLogs", log.slug, "members", state.me);
   const ownMember = await getDocFromServer(ownMemberRef);
   const ownProfile = state.users[state.me];
   const profileBatch = writeBatch(db);
   profileBatch.set(ownMemberRef, {
     inviteId: ownMember.data()?.inviteId || "",
-    displayName: ownProfile.name, color: ownProfile.color, image: ownProfile.image || "",
-    hidden: state.prefs.hideSelfOnShare || Boolean(log.players[state.me]?.hidden), linked: true,
+    displayName: ownProfile.name,
+    color: ownProfile.color,
+    image: ownProfile.image || "",
+    hidden: state.prefs.hideSelfOnShare || Boolean(log.players[state.me]?.hidden),
+    linked: true,
   });
   await profileBatch.commit();
 }
@@ -205,7 +243,14 @@ export async function deleteSharedLog(slug: string): Promise<void> {
   if (!manifest.exists()) return;
   // Keep a tombstone so an old share URL cannot be taken over by another account.
   const batch = writeBatch(db);
-  batch.set(ref, { ownerId: manifest.data().ownerId, scope: "members", scenarioPolicy: "unknown", memberIds: [], revision: "revoked", chunkCount: 1 });
+  batch.set(ref, {
+    ownerId: manifest.data().ownerId,
+    scope: "members",
+    scenarioPolicy: "unknown",
+    memberIds: [],
+    revision: "revoked",
+    chunkCount: 1,
+  });
   await batch.commit();
   const { revision } = manifest.data();
   if (revision) void removeChunks(db, ["sharedLogs", slug, "revisions", revision, "chunks"]).catch(() => {});
@@ -216,16 +261,30 @@ export async function fetchSharedLog(slug: string): Promise<SharedLogData | null
   const loaded = await readGeneration(db, ["sharedLogs", slug], ["sharedLogs", slug]);
   if (!loaded) return null;
   const payload = loaded.payload as SharedLogData;
-  const visibleMembers = await getDocs(query(collection(db, "sharedLogs", slug, "members"), where("hidden", "==", false), where("linked", "==", true)));
+  const visibleMembers = await getDocs(
+    query(
+      collection(db, "sharedLogs", slug, "members"),
+      where("hidden", "==", false),
+      where("linked", "==", true),
+    ),
+  );
   for (const member of visibleMembers.docs) {
     const { displayName, color, image } = member.data();
-    payload.users[member.id] = { id: member.id, name: displayName, color, accounts: [], ...(image ? { image } : {}) };
+    payload.users[member.id] = {
+      id: member.id,
+      name: displayName,
+      color,
+      accounts: [],
+      ...(image ? { image } : {}),
+    };
     payload.log.players[member.id] = { linked: true, hidden: false, characterIds: [] };
   }
   return payload;
 }
 
-export async function getSharedLogAccess(slug: string): Promise<{ scope: Scope; scenarioPolicy: Policy } | null> {
+export async function getSharedLogAccess(
+  slug: string,
+): Promise<{ scope: Scope; scenarioPolicy: Policy } | null> {
   const manifest = await getDocFromServer(doc(database(), "sharedLogs", slug));
   if (!manifest.exists()) return null;
   const { scope, scenarioPolicy, revision } = manifest.data();
@@ -260,25 +319,40 @@ export function sharedCharacterProjection(character: Character, state: State): S
     tags: share.includeProfile ? character.tags : [],
     stats: share.includeStats ? character.stats : {},
     growth: share.includeGrowth ? character.growth : [],
-    sessions: share.includeSessions ? character.sessions.map((session) => ({
-      ...session, delta: share.includeStats ? session.delta : {}, rolls: session.rolls.filter((roll) => !roll.secret), memo: "",
-    })) : [],
+    sessions: share.includeSessions
+      ? character.sessions.map((session) => ({
+          ...session,
+          delta: share.includeStats ? session.delta : {},
+          rolls: session.rolls.filter((roll) => !roll.secret),
+          memo: "",
+        }))
+      : [],
   };
   delete projected.import;
   const hideOwner = state.prefs.hideSelfOnShare;
   return {
     character: projected,
-    owner: { id: character.ownerId, name: hideOwner ? "非表示" : source?.name || "プレイヤー", color: source?.color || "#64748b", accounts: [] },
-    publicLogs: Object.fromEntries(projected.sessions.flatMap((session) => {
-      const log = state.logs[session.logId];
-      return log && publicLogProjection(log, state) ? [[log.id, log.slug]] : [];
-    })),
+    owner: {
+      id: character.ownerId,
+      name: hideOwner ? "非表示" : source?.name || "プレイヤー",
+      color: source?.color || "#64748b",
+      accounts: [],
+    },
+    publicLogs: Object.fromEntries(
+      projected.sessions.flatMap((session) => {
+        const log = state.logs[session.logId];
+        return log && publicLogProjection(log, state) ? [[log.id, log.slug]] : [];
+      }),
+    ),
   };
 }
 
 export async function publishSharedCharacter(character: Character, state: State): Promise<void> {
   if (character.ownerId !== state.me) throw new Error("このキャラクターの共有設定を変更できません。");
-  if (!character.share.enabled || character.share.scope === "private") { await deleteSharedCharacter(character.id); return; }
+  if (!character.share.enabled || character.share.scope === "private") {
+    await deleteSharedCharacter(character.id);
+    return;
+  }
   const db = database();
   const chunks = splitCloudData(sharedCharacterProjection(character, state));
   const revision = crypto.randomUUID();
@@ -289,14 +363,22 @@ export async function publishSharedCharacter(character: Character, state: State)
     await writeChunks(db, path, chunks, state.me);
     await runTransaction(db, async (transaction) => {
       const current = await transaction.get(ref);
-      if ((current.data()?.revision ?? null) !== (old.data()?.revision ?? null)) throw new Error("共有設定が別の端末で更新されています。再読み込みしてください。");
+      if ((current.data()?.revision ?? null) !== (old.data()?.revision ?? null))
+        throw new Error("共有設定が別の端末で更新されています。再読み込みしてください。");
       transaction.set(ref, { ownerId: state.me, enabled: true, revision, chunkCount: chunks.length });
     });
   } catch (error) {
     await removeChunks(db, path).catch(() => {});
     throw error;
   }
-  if (old.data()?.revision && old.data()?.revision !== "revoked") void removeChunks(db, ["sharedCharacters", character.id, "revisions", old.data()!.revision, "chunks"]).catch(() => {});
+  if (old.data()?.revision && old.data()?.revision !== "revoked")
+    void removeChunks(db, [
+      "sharedCharacters",
+      character.id,
+      "revisions",
+      old.data()!.revision,
+      "chunks",
+    ]).catch(() => {});
 }
 
 export async function deleteSharedCharacter(id: string): Promise<void> {
@@ -308,13 +390,14 @@ export async function deleteSharedCharacter(id: string): Promise<void> {
   const batch = writeBatch(db);
   batch.set(ref, { ownerId, enabled: false, revision: "revoked", chunkCount: 1 });
   await batch.commit();
-  if (revision !== "revoked") void removeChunks(db, ["sharedCharacters", id, "revisions", revision, "chunks"]).catch(() => {});
+  if (revision !== "revoked")
+    void removeChunks(db, ["sharedCharacters", id, "revisions", revision, "chunks"]).catch(() => {});
 }
 
 export async function fetchSharedCharacter(id: string): Promise<SharedCharacterData | null> {
   const db = database();
   const loaded = await readGeneration(db, ["sharedCharacters", id], ["sharedCharacters", id]);
-  return loaded ? loaded.payload as SharedCharacterData : null;
+  return loaded ? (loaded.payload as SharedCharacterData) : null;
 }
 
 export interface SharedInvite {
@@ -333,8 +416,12 @@ export async function createSharedInvite(log: Log, state: State): Promise<string
   const expiresAt = Timestamp.fromMillis(Date.now() + 30 * 24 * 60 * 60 * 1000);
   const batch = writeBatch(database());
   batch.set(doc(database(), "sharedInvites", token), {
-    slug: log.slug, ownerId: state.me, title: log.title, systemId: log.systemId,
-    scenarioTitle: log.scenarioId ? state.scenarios[log.scenarioId]?.title || "" : "", expiresAt,
+    slug: log.slug,
+    ownerId: state.me,
+    title: log.title,
+    systemId: log.systemId,
+    scenarioTitle: log.scenarioId ? state.scenarios[log.scenarioId]?.title || "" : "",
+    expiresAt,
   });
   await batch.commit();
   return token;
@@ -349,7 +436,13 @@ export async function getSharedInvite(token: string): Promise<SharedInvite | nul
   if (!snapshot.exists()) return null;
   const { slug, title, systemId, scenarioTitle, expiresAt } = snapshot.data();
   if (!(expiresAt instanceof Timestamp) || expiresAt.toMillis() <= Date.now()) return null;
-  return { slug, title, systemId, scenarioTitle: scenarioTitle || undefined, expiresAt: expiresAt.toDate().toISOString() };
+  return {
+    slug,
+    title,
+    systemId,
+    scenarioTitle: scenarioTitle || undefined,
+    expiresAt: expiresAt.toDate().toISOString(),
+  };
 }
 
 export async function acceptSharedInvite(token: string): Promise<SharedLogData> {
@@ -364,7 +457,8 @@ export async function acceptSharedInvite(token: string): Promise<SharedLogData> 
   await runTransaction(db, async (transaction) => {
     const existing = await transaction.get(ref);
     const identity = { displayName: profile.name, color: profile.color, image: profile.image || "" };
-    if (!existing.exists()) transaction.set(ref, { inviteId: token, hidden: false, linked: true, ...identity });
+    if (!existing.exists())
+      transaction.set(ref, { inviteId: token, hidden: false, linked: true, ...identity });
     else transaction.update(ref, { linked: true, ...identity });
   });
   const shared = await fetchSharedLog(invite.slug);
@@ -372,7 +466,10 @@ export async function acceptSharedInvite(token: string): Promise<SharedLogData> 
   return shared;
 }
 
-export async function updateSharedMembership(slug: string, state: { linked: boolean; hidden: boolean }): Promise<void> {
+export async function updateSharedMembership(
+  slug: string,
+  state: { linked: boolean; hidden: boolean },
+): Promise<void> {
   const { getTakufuAuth } = await import("./auth");
   const user = getTakufuAuth()?.currentUser;
   if (!user) throw new Error("Googleでサインインしてください。");
@@ -383,7 +480,13 @@ export async function updateSharedMembership(slug: string, state: { linked: bool
   if (current.exists()) batch.update(ref, state);
   else {
     const profile = (await import("./auth")).firebaseUserProfile(user);
-    batch.set(ref, { inviteId: "", ...state, displayName: profile.name, color: profile.color, image: profile.image || "" });
+    batch.set(ref, {
+      inviteId: "",
+      ...state,
+      displayName: profile.name,
+      color: profile.color,
+      image: profile.image || "",
+    });
   }
   await batch.commit();
 }

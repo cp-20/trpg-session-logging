@@ -40,14 +40,21 @@ export function getTakufuFirestore(): Firestore | null {
   if (!a) return null;
   if (!fs) {
     fs = getFirestore(a, FIRESTORE_DATABASE_ID);
-    if (import.meta.env.VITE_FIREBASE_USE_EMULATORS === "true") connectFirestoreEmulator(fs,
-      import.meta.env.VITE_FIRESTORE_EMULATOR_HOST || "127.0.0.1",
-      Number(import.meta.env.VITE_FIRESTORE_EMULATOR_PORT || 8080));
+    if (import.meta.env.VITE_FIREBASE_USE_EMULATORS === "true")
+      connectFirestoreEmulator(
+        fs,
+        import.meta.env.VITE_FIRESTORE_EMULATOR_HOST || "127.0.0.1",
+        Number(import.meta.env.VITE_FIRESTORE_EMULATOR_PORT || 8080),
+      );
   }
   return fs;
 }
 
 /** 状態表示用の要約 */
 export function firebaseStatus(): { configured: boolean; projectId: string; databaseId: string } {
-  return { configured: isFirebaseConfigured, projectId: firebaseConfig.projectId, databaseId: FIRESTORE_DATABASE_ID };
+  return {
+    configured: isFirebaseConfigured,
+    projectId: firebaseConfig.projectId,
+    databaseId: FIRESTORE_DATABASE_ID,
+  };
 }

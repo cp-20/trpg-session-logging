@@ -19,6 +19,7 @@ export interface User {
   bio?: string;
   email?: string;
   image?: string;
+  profilePublic?: boolean;
 }
 
 export interface SystemDef {
@@ -33,7 +34,7 @@ export interface SystemDef {
   skills: string[];
 }
 
-export type Policy = "public" | "members" | "unknown";
+export type Policy = "public" | "passed" | "members" | "unknown";
 
 export interface Scenario {
   id: string;
@@ -104,6 +105,14 @@ export interface LinkState {
 
 export type Scope = "members" | "passed" | "public";
 
+export interface SessionImpression {
+  id: string;
+  userId: string;
+  text: string;
+  createdAt: string;
+  spoiler: boolean;
+}
+
 export interface Log {
   id: string;
   title: string;
@@ -113,7 +122,6 @@ export interface Log {
   ownerId: string;
   scope: Scope;
   hasLog: boolean;
-  endLabel?: string;
   channels: Channel[];
   players: Record<string, LinkState>;
   createdAt: string;
@@ -126,6 +134,9 @@ export interface Log {
   slug: string;
   /** 取り込み元ファイル(誠実な表示用) */
   importedFrom?: string;
+  /** タイムラインの発言者名(sp)ごとのアイコン画像(data URL または Character/User ID) */
+  speakerIcons?: Record<string, string>;
+  impressions?: SessionImpression[];
 }
 
 export interface SessionStat {
@@ -177,6 +188,34 @@ export interface Character {
 
 export interface Prefs {
   hideSelfOnShare: boolean;
+  onboardingDone?: boolean;
+  busyDates?: string[];
+}
+
+export type Availability = "ok" | "maybe" | "ng";
+
+export interface TableEventCandidate {
+  id: string;
+  date: string; // YYYY-MM-DD
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+  responses: Record<string, Availability>;
+}
+
+export interface TableEvent {
+  id: string;
+  tableId?: string;
+  scenarioId?: string;
+  title: string;
+  status?: "confirmed" | "poll";
+  date: string; // YYYY-MM-DD
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+  durationMin?: number;
+  note?: string;
+  responses: Record<string, Availability>;
+  candidates?: TableEventCandidate[];
+  createdBy: string;
 }
 
 export interface ScenarioEditRequest {
@@ -197,5 +236,6 @@ export interface State {
   characters: Record<string, Character>;
   scenarios: Record<string, Scenario>;
   logs: Record<string, Log>;
+  events: Record<string, TableEvent>;
   editRequests: ScenarioEditRequest[];
 }

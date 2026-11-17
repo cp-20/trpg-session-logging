@@ -9,12 +9,20 @@ export interface CommitLogInput {
   meta: { title: string; systemId: string };
   channels: Channel[];
   kinds: Record<string, MsgKind>;
+  speakerIcons?: Record<string, string>;
+  scope?: Scope;
   tableId: string;
   scenarioId: string;
-  newScenario: { title: string; author: string; policy: Policy } | null;
+  newScenario: { title: string; author: string; policy?: Policy } | null;
   players: { userId: string; characterIds: string[] }[];
   /** ログなしで作る場合の日時(Step1 の手入力)。channels が空のときのみ使われる */
   schedule?: { dates: string[]; t0: number; t1: number } | null;
+}
+
+function normalizeSpeakerIcons(icons?: Record<string, string>): Record<string, string> | undefined {
+  if (!icons) return undefined;
+  const entries = Object.entries(icons).filter(([, v]) => Boolean(v));
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 export interface CommitLogResult {
@@ -33,12 +41,19 @@ export interface CommitLogResult {
 export async function commitLogImport(
   input: CommitLogInput,
   snapshot: State,
-  apply: (fn: (s: State) => void) => void
+  apply: (fn: (s: State) => void) => void,
 ): Promise<CommitLogResult> {
   if (input.attachId) {
     const target = snapshot.logs[input.attachId];
-    if (!target) return { ok: false, id: input.attachId, slug: "", reason: "添付先のセッションが見つかりません" };
-    if (target.ownerId !== snapshot.me) return { ok: false, id: target.id, slug: "", reason: "ログを添付できるのは、このセッションを記録した人だけです" };
+    if (!target)
+      return { ok: false, id: input.attachId, slug: "", reason: "添付先のセッションが見つかりません" };
+    if (target.ownerId !== snapshot.me)
+      return {
+        ok: false,
+        id: target.id,
+        slug: "",
+        reason: "ログを添付できるのは、このセッションを記録した人だけです",
+      };
     const newScenarioId = input.newScenario?.title.trim() ? "sc_" + uid() : undefined;
     const scenarioId = newScenarioId ?? (input.scenarioId || undefined);
     const derived = deriveSessionFromMessages(input.channels);
@@ -53,7 +68,7 @@ export async function commitLogImport(
           author: input.newScenario.author.trim() || "自由記述（未登録）",
           systemId: input.meta.systemId,
           source: "manual",
-          policy: input.newScenario.policy,
+          policy: input.newScenario.policy ?? "public",
           emoji: SYSTEMS[input.meta.systemId]?.emoji ?? "🎲",
           bg: "#e6e6f0",
           tags: [],
@@ -68,7 +83,7 @@ export async function commitLogImport(
         c.msgs.forEach((m) => {
           m.id = `${id}-${c.id}-${n++}`;
           m.kind = input.kinds[m.sp] ?? m.kind;
-        })
+        }),
       );
       const l = s.logs[id];
       l.channels = channels;
@@ -76,6 +91,10 @@ export async function commitLogImport(
       l.systemId = input.meta.systemId;
       l.scenarioId = scenarioId;
       l.tableId = input.tableId || undefined;
+      if (input.scope) l.scope = input.scope;
+      const speakerIcons = normalizeSpeakerIcons(input.speakerIcons);
+      if (speakerIcons) l.speakerIcons = speakerIcons;
+      else if (input.speakerIcons) delete l.speakerIcons;
       if (derived) {
         l.dates = derived.dates;
         l.t0 = derived.t0;
@@ -108,7 +127,7 @@ export async function commitLogImport(
         author: input.newScenario.author.trim() || "自由記述（未登録）",
         systemId: input.meta.systemId,
         source: "manual",
-        policy: input.newScenario.policy,
+        policy: input.newScenario.policy ?? "public",
         emoji: SYSTEMS[input.meta.systemId]?.emoji ?? "🎲",
         bg: "#e6e6f0",
         tags: [],
@@ -124,12 +143,13 @@ export async function commitLogImport(
       c.msgs.forEach((m) => {
         m.id = `${id}-${c.id}-${n++}`;
         m.kind = input.kinds[m.sp] ?? m.kind;
-      })
+      }),
     );
     const derived = deriveSessionFromMessages(channels);
     const dates = derived?.dates ?? input.schedule?.dates ?? [new Date().toISOString().slice(0, 10)];
     const t0 = derived?.t0 || input.schedule?.t0 || Math.floor(Date.now() / 1000);
     const t1 = derived?.t1 || input.schedule?.t1 || t0;
+    const speakerIcons = normalizeSpeakerIcons(input.speakerIcons);
     s.logs[id] = {
       id,
       title: input.meta.title.trim() || "未タイトルの卓",
@@ -137,11 +157,15 @@ export async function commitLogImport(
       scenarioId,
       systemId: input.meta.systemId,
       ownerId: s.me,
-      scope: "members" as Scope,
+      scope: input.scope ?? ("members" as Scope),
       hasLog,
+      ...(speakerIcons ? { speakerIcons } : {}),
       channels,
       players: Object.fromEntries(
-        input.players.map((p) => [p.userId, { linked: true, hidden: false, characterIds: p.characterIds.filter((x) => x !== "__import__") }])
+        input.players.map((p) => [
+          p.userId,
+          { linked: true, hidden: false, characterIds: p.characterIds.filter((x) => x !== "__import__") },
+        ]),
       ),
       createdAt: new Date().toISOString(),
       dates,
@@ -155,4 +179,9 @@ export async function commitLogImport(
 }
 
 /** 編集モーダルなどから使う Log の一部更新の共通ラッパ(将来 revision 競合をここで扱う) */
-export type LogPatch = Partial<Pick<Log, "title" | "dates" | "t0" | "t1" | "scenarioId" | "tableId" | "systemId" | "endLabel">>;
+export type LogPatch = Partial<
+  Pick<
+    Log,
+    "title" | "dates" | "t0" | "t1" | "scenarioId" | "tableId" | "systemId" | "scope" | "speakerIcons"
+  >
+>;
