@@ -40,7 +40,7 @@ async function visit(path, expectText, shot) {
 }
 
 /* 1. 初回はサインイン画面 */
-await visit("/", ["卓譜", "Google", "Discord"], "signin");
+await visit("/", ["卓譜", "Google"], "signin");
 
 /* 2. デモとして入る */
 await page.click("text=サンプルデータをそのまま見る（デモ）", { force: true });
@@ -60,7 +60,7 @@ await visit("/tables", ["卓", "メンバー"], "tables");
 await visit("/tables/t_haikou", ["廃校部", "この卓のセッション"], "table-detail");
 await visit("/characters", ["キャラクター", "キャラシートを取り込む"], "characters");
 await visit("/characters/ch_towa", ["遠沢澄花", "セッション時系列", "SAN"], "char-detail");
-await visit("/scenarios", ["シナリオ", "プレイ済み"], "scenarios");
+await visit("/scenarios", ["シナリオ", "シナリオを追加"], "scenarios");
 await visit("/scenarios/sc_kankyo", ["廃校の十三時間目", "ラン一覧"], "scenario-detail");
 await visit("/upload", ["セッションを記録", "サンプルログで試す"], "upload");
 await visit("/settings", ["設定・連携", "BOOTH"], "settings");

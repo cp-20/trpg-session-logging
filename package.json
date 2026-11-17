@@ -15,7 +15,9 @@
     "test:smoke": "node scripts/smoke.mjs",
     "check": "npm run typecheck && npm run test && npm run build",
     "deploy:rules": "node scripts/deploy-rules.mjs",
-    "check:emulator": "node scripts/emulator-smoke.mjs"
+    "check:emulator": "node scripts/emulator-smoke.mjs",
+    "deploy": "node scripts/deploy-lolipop.mjs",
+    "check:firebase": "node scripts/firebase-admin.mjs"
   },
   "dependencies": {
     "@fontsource/noto-sans-jp": "^5.3.1",
