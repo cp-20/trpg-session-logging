@@ -1,0 +1,14 @@
+{
+  "plugins": ["typescript", "react", "unicorn"],
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2022": true
+  },
+  "ignorePatterns": ["dist/**", "node_modules/**", "src/data/generated.json"],
+  "rules": {
+    "no-unused-vars": "warn",
+    "no-debugger": "error",
+    "eqeqeq": ["error", "smart"]
+  }
+}

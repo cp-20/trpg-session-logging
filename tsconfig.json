@@ -11,7 +11,16 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "strict": false
+    "types": ["node", "vite/client"],
+    "strict": false,
+    "strictNullChecks": true
   },
-  "include": ["src"]
+  "include": [
+    "src",
+    "scripts",
+    "e2e",
+    "vite.config.ts",
+    "tailwind.config.ts",
+    "playwright.config.ts"
+  ]
 }
