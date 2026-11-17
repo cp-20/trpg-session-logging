@@ -17,6 +17,8 @@ test("招待リンクから別ユーザーが自己紐付けでき、参加者�
   await page.getByLabel(/卓（参加者を自動で入れます）/).selectOption("", { force: true });
   await page.getByRole("button", { name: "シナリオと参加者へ進む" }).click({ force: true });
   await page.getByRole("button", { name: "記録する", exact: true }).click({ force: true });
+  await expect(page.getByRole("heading", { name: "セッションを記録しました", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "セッションを開く", exact: true }).click({ force: true });
   await expect(page).toHaveURL(/#\/sessions\/s_/);
 
   const logId = await page.waitForFunction(() => {
@@ -27,9 +29,8 @@ test("招待リンクから別ユーザーが自己紐付けでき、参加者�
 
   // そらとして入り直す
   await page.goto("/#/settings");
-  await page.getByRole("button", { name: "サインアウト" }).click({ force: true });
-  await page.getByRole("button", { name: "Google でサインイン", exact: true }).click({ force: true });
-  await page.getByRole("button", { name: /sora@example\.com/ }).click({ force: true });
+  await page.getByRole("button", { name: "デモ利用者を切替" }).click({ force: true });
+  await page.getByRole("button", { name: /そら/ }).click({ force: true });
 
   // 招待URL着地 → 発言者なしで参加
   await page.goto(`/#/invite/${id}`);

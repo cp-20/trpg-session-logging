@@ -54,13 +54,14 @@ body {
 
 /* ---------- ロール行 ---------- */
 .rollrow {
-  @apply flex items-center gap-3 px-2.5 py-1.5 my-0.5 rounded-lg bg-base-200/50 text-[13px];
+  @apply flex flex-wrap items-center gap-3 px-2.5 py-1.5 my-0.5 rounded-lg bg-base-200/50 text-[13px];
   font-variant-numeric: tabular-nums;
   transition: background-color 100ms ease;
 }
 .rollrow:hover { background: oklch(var(--b3) / 0.6); }
 .rollrow .cmd { @apply font-semibold text-[12.5px]; }
 .rollrow .dice { @apply text-base-content/50 text-[12px] font-mono; }
+.rollrow .cmd, .rollrow .dice { overflow-wrap: anywhere; min-width: 0; }
 
 /* ---------- 本文行 ---------- */
 .noterow {

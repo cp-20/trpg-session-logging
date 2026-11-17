@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { State } from "../types";
 import { Avatar, Tag } from "./ui";
-import { IconUserPlus, IconSearch } from "./icons";
+import { IconUserPlus, IconSearch, IconX } from "./icons";
 
 /**
  * 検索つきの参加者ピッカー。
@@ -26,20 +26,20 @@ export function PlayerPicker({
   placeholder?: string;
 }) {
   const [q, setQ] = useState("");
-  const all = Object.values(state.users).filter((u) => !exclude?.includes(u.id));
+  const all = Object.values(state.users).filter((u) => !exclude?.includes(u.id) && !selected.includes(u.id));
   const results = useMemo(() => {
     const query = q.trim().toLowerCase();
     const list = query ? all.filter((u) => u.name.toLowerCase().includes(query)) : [];
     return list.slice(0, 8);
   }, [q, all]);
-  const quick = (quickIds ?? []).filter((id) => !selected.includes(id));
+  const quick = (quickIds ?? []).filter((id) => state.users[id] && !selected.includes(id) && !exclude?.includes(id));
 
   return (
     <div>
       {/* 検索欄 */}
       <label className="input input-bordered input-sm flex items-center gap-2 w-full bg-base-100">
         <IconSearch width={15} height={15} className="opacity-40" />
-        <input className="grow min-w-0" value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} />
+        <input aria-label="参加者を検索" className="grow min-w-0" value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} />
       </label>
 
       {/* クイック候補 */}
@@ -84,12 +84,12 @@ export function PlayerPicker({
       {/* 選択済み */}
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mt-2">
-          {selected.map((id) => (
+          {selected.filter((id) => state.users[id]).map((id) => (
             <Tag key={id} v="gray" className="!badge-md">
               <Avatar u={state.users[id]} size={16} />
               {state.users[id].name}
-              <button className="ml-0.5 opacity-60 hover:opacity-100" onClick={() => onChange(selected.filter((x) => x !== id))}>
-                ✕
+              <button aria-label={`${state.users[id].name}を参加者から外す`} className="ml-0.5 opacity-70 hover:opacity-100" onClick={() => onChange(selected.filter((x) => x !== id))}>
+                <IconX width={14} height={14} />
               </button>
             </Tag>
           ))}

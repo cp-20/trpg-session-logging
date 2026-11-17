@@ -3,15 +3,14 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useStore } from "../store";
 import { Empty, Field, Modal, NotFound, PageHead, SectionTitle, Tag } from "../components/ui";
 import { SYSTEMS, POLICY_HINT, POLICY_LABEL } from "../data/systems";
-import { buildSessionRange, fmtDate, fmtDur, sessionPlayMinutes, todayStr, uid } from "../lib/time";
+import { fmtDate, fmtDur, sessionPlayMinutes, uid } from "../lib/time";
 import { evaluateShareGate } from "../lib/share-gate";
-import { IconUpload, IconPlus, IconPencil, IconSend, IconExternal } from "../components/icons";
+import { IconPlus, IconPencil, IconSend, IconExternal } from "../components/icons";
 
 export default function ScenarioDetail() {
   const { id } = useParams();
-  const { state, update, toast } = useStore();
+  const { state, update, toast, authUser } = useStore();
   const nav = useNavigate();
-  const [newSession, setNewSession] = useState(false);
   const [editRequest, setEditRequest] = useState(false);
   const [editing, setEditing] = useState(false);
 
@@ -20,13 +19,13 @@ export default function ScenarioDetail() {
   const sys = SYSTEMS[sc.systemId];
   const allLogs = Object.values(state.logs).filter((l) => l.scenarioId === sc.id).sort((a, b) => a.t0 - b.t0);
   const visibleLogs = allLogs.filter((l) => evaluateShareGate(l, state.me).visible);
-  const hiddenCount = allLogs.length - visibleLogs.length;
-  const runs = visibleLogs.length + (sc.extraRuns ?? 0);
+  const runs = visibleLogs.length;
   const visible = visibleLogs;
   const visibleUsers = new Set<string>();
   visibleLogs.forEach((l) => Object.entries(l.players).forEach(([u, p]) => p.linked && !p.hidden && visibleUsers.add(u)));
   const medDur = visibleLogs.length ? [...visibleLogs].sort((a, b) => sessionPlayMinutes(a) - sessionPlayMinutes(b))[Math.floor(visibleLogs.length / 2)] : null;
   const isAuthor = sc.claimedBy === state.me;
+  const canEdit = isAuthor || sc.addedByUid === state.me;
   const pendingRequests = state.editRequests.filter((r) => r.scenarioId === sc.id && r.status === "pending");
 
   return (
@@ -36,7 +35,7 @@ export default function ScenarioDetail() {
         title={sc.title}
         sub={
           <>
-            {sc.author} · {sys?.emoji} {sys?.name}
+            {sc.author} · {sys?.name}
             {sc.sourceUrl && (
               <>
                 {" · "}
@@ -45,24 +44,20 @@ export default function ScenarioDetail() {
                 </a>
               </>
             )}
-            <span className="text-ink2"> · {sc.addedBy === "user" ? "ユーザー登録" : "カタログ取込"}</span>
           </>
         }
         actions={
           <>
-            {isAuthor ? (
+            {canEdit ? (
               <button className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>
-                <IconPencil width={15} height={15} /> 編集（作者）
+                <IconPencil width={15} height={15} /> 編集
               </button>
-            ) : (
+            ) : !authUser ? (
               <button className="btn btn-ghost btn-sm" onClick={() => setEditRequest(true)}>
                 <IconSend width={15} height={15} /> 編集を申請{pendingRequests.length > 0 && <span className="badge badge-warning badge-xs">{pendingRequests.length}</span>}
               </button>
-            )}
-            <button className="btn btn-ghost btn-sm" onClick={() => nav(`/upload?scenario=${sc.id}`)}>
-              <IconUpload width={15} height={15} /> ログをアップロード
-            </button>
-            <button className="btn btn-primary btn-sm" onClick={() => setNewSession(true)}>
+            ) : null}
+            <button className="btn btn-primary btn-sm" onClick={() => nav(`/upload?scenario=${sc.id}`)}>
               <IconPlus width={15} height={15} /> このシナリオでセッションを記録
             </button>
           </>
@@ -73,11 +68,11 @@ export default function ScenarioDetail() {
       <div className="card bg-base-100 border border-base-300 px-5 py-4 mb-4">
         <div className="flex flex-wrap items-start gap-x-10 gap-y-4">
           <div>
-            <div className="text-[10.5px] font-extrabold text-ink2">記録されたセッション(見える範囲)</div>
+            <div className="text-[10.5px] font-extrabold text-ink2">記録したセッション</div>
             <div className="text-3xl font-extrabold leading-tight">{runs}<span className="text-[12px] font-semibold text-ink2 ml-1">回</span></div>
           </div>
           <div>
-            <div className="text-[10.5px] font-extrabold text-ink2">共有されたセッションのプレイヤー</div>
+            <div className="text-[10.5px] font-extrabold text-ink2">参加したプレイヤー</div>
             <div className="text-3xl font-extrabold leading-tight">{visibleUsers.size}<span className="text-[12px] font-semibold text-ink2 ml-1">人</span></div>
           </div>
           <div>
@@ -89,11 +84,7 @@ export default function ScenarioDetail() {
             <p className="text-[11.5px] text-ink2 mt-1.5 leading-5">{POLICY_HINT[sc.policy]}</p>
             {sc.claimedBy ? (
               isAuthor ? <Tag v="ok" className="mt-1.5">あなたが所有権を申請済み</Tag> : <Tag v="accent" className="mt-1.5">作者が所有権を申請済み</Tag>
-            ) : (
-              <button className="btn btn-ghost btn-xs mt-1 px-0" onClick={() => toast("（モック）頒布元アカウント（BOOTH/TALTO）を連携すると申請できます。設定・連携からどうぞ。")}>
-                所有権を申請（作者の方）
-              </button>
-            )}
+            ) : null}
           </div>
         </div>
         {sc.description && <p className="text-[13px] text-base-content/75 mt-3">{sc.description}</p>}
@@ -105,13 +96,13 @@ export default function ScenarioDetail() {
       </div>
 
       {/* 見えるラン */}
-      <SectionTitle right={<span className="text-[11px] text-ink2">共有範囲で見えるセッションだけを表示します</span>}>ラン一覧</SectionTitle>
+      <SectionTitle>ラン一覧</SectionTitle>
       {allLogs.length === 0 ? (
         <div className="card bg-base-100 border border-base-300">
-          <Empty icon="🗺️">
+          <Empty>
             このシナリオのセッションはまだありません。
             <div className="flex justify-center gap-2 mt-3">
-              <button className="btn btn-primary btn-sm" onClick={() => setNewSession(true)}>卓を登録する</button>
+              <button className="btn btn-primary btn-sm" onClick={() => nav(`/upload?scenario=${sc.id}`)}>卓を登録する</button>
             </div>
           </Empty>
         </div>
@@ -141,17 +132,12 @@ export default function ScenarioDetail() {
           )}
         </div>
       )}
-      {allLogs.some((l) => l.scope === "members") && (
-        <p className="text-[11px] text-ink2 mt-2">
-          このほかに非公開のセッションが {hiddenCount} 件あります（件数のみ表示。作者のポリシーが許す場合に限ります）。
-        </p>
-      )}
 
       {pendingRequests.length > 0 && isAuthor && (
         <div className="alert alert-warning text-[12px] mt-4">
           <span>
             編集の申請が {pendingRequests.length} 件あります（{pendingRequests.map((r) => state.users[r.uid]?.name ?? "ユーザー").join("・")} さん）。
-            承認するとメタデータの変更を任せられます（モックでは承認ボタンのみ）。
+            内容を確認して、承認してください。
           </span>
           <button className="btn btn-xs" onClick={() => { update((s) => { s.editRequests.forEach((r) => { if (r.scenarioId === sc.id) r.status = "accepted"; }); }); toast("申請を承認しました"); }}>
             承認
@@ -159,87 +145,9 @@ export default function ScenarioDetail() {
         </div>
       )}
 
-      {newSession && <NewSessionModal sc={sc} onClose={() => setNewSession(false)} />}
       {editing && <EditScenarioModal sc={sc} onClose={() => setEditing(false)} />}
       {editRequest && <EditRequestModal sc={sc} onClose={() => setEditRequest(false)} />}
     </>
-  );
-}
-
-function NewSessionModal({ sc, onClose }: { sc: ReturnType<typeof useStore>["state"]["scenarios"][string]; onClose: () => void }) {
-  const { state, update, toast } = useStore();
-  const nav = useNavigate();
-  const myTables = Object.values(state.tables).filter((t) => t.memberIds.includes(state.me) || t.ownerId === state.me);
-  const [title, setTitle] = useState(`${sc.title} — `);
-  const [tableId, setTableId] = useState(myTables[0]?.id ?? "");
-  const [date, setDate] = useState(todayStr());
-  const [start, setStart] = useState("21:00");
-  const [end, setEnd] = useState("25:00");
-
-  function save() {
-    const id = "s_" + uid();
-    const range = buildSessionRange({ dates: [date], startTime: start, endTime: end });
-    if (!range.ok) {
-      toast(range.error ?? "入力を確認してください");
-      return;
-    }
-    const { t0, t1 } = range;
-    update((s) => {
-      const members = tableId ? s.tables[tableId].memberIds : [];
-      s.logs[id] = {
-        id,
-        title: title.trim() || sc.title,
-        tableId: tableId || undefined,
-        scenarioId: sc.id,
-        systemId: sc.systemId,
-        ownerId: s.me,
-        scope: "members",
-        hasLog: false,
-        channels: [],
-        players: {
-          [s.me]: { linked: true, hidden: false, characterIds: [] },
-          ...Object.fromEntries(members.filter((m) => m !== s.me).map((m) => [m, { linked: true, hidden: false, characterIds: [] }])),
-        },
-        createdAt: new Date().toISOString(),
-        dates: [date],
-        t0,
-        t1,
-        slug: uid("s") + uid(""),
-      };
-    });
-    toast("卓を登録しました。メンバーを集めて、ログはあとから添付できます。");
-    onClose();
-    nav(`/sessions/${id}`);
-  }
-
-  return (
-    <Modal
-      title="このシナリオで卓を登録"
-      onClose={onClose}
-      foot={
-        <>
-          <button className="btn" onClick={onClose}>キャンセル</button>
-          <button className="btn btn-primary" onClick={save}>登録する</button>
-        </>
-      }
-    >
-      <p className="text-[11.5px] text-ink2 mb-1">ログなしのセッション記録として登録します。日程・参加者・キャラクターはあとから編集できます。</p>
-      <Field label="タイトル"><input className="input input-bordered input-sm w-full bg-base-100" value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
-      <Field label="卓">
-        <select className="select select-bordered select-sm " value={tableId} onChange={(e) => setTableId(e.target.value)}>
-          <option value="">— 選択しない —</option>
-          {Object.values(state.tables).map((t) => (
-            <option key={t.id} value={t.id}>{t.name}</option>
-          ))}
-        </select>
-      </Field>
-      <div className="grid sm:grid-cols-3 gap-x-4">
-        <Field label="日付"><input type="date" className="input input-bordered input-sm w-full bg-base-100" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-        <Field label="開始"><input className="input input-bordered input-sm w-full bg-base-100" value={start} onChange={(e) => setStart(e.target.value)} /></Field>
-        <Field label="終了" hint="翌朝は+24h（例: 27:30）"><input className="input input-bordered input-sm w-full bg-base-100" value={end} onChange={(e) => setEnd(e.target.value)} /></Field>
-      </div>
-      <p className="text-[11px] text-ink2 mt-2">共有範囲の既定はメンバー限定です。{POLICY_HINT[sc.policy]}</p>
-    </Modal>
   );
 }
 
@@ -306,7 +214,7 @@ function EditRequestModal({ sc, onClose }: { sc: ReturnType<typeof useStore>["st
     update((s) => {
       s.editRequests.push({ id: "er_" + uid(), scenarioId: sc.id, uid: s.me, at: new Date().toISOString(), note: note.trim() || undefined, status: "pending" });
     });
-    toast("編集の申請を送りました。作者の承認後に反映されます（モック）。");
+    toast("編集の申請を記録しました。");
     onClose();
   }
 

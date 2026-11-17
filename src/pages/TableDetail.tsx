@@ -55,9 +55,6 @@ export default function TableDetail() {
             <button className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>
               <IconPencil width={15} height={15} /> 編集
             </button>
-            <button className="btn btn-sm" onClick={() => nav(`/upload?table=${table.id}`)}>
-              <IconUpload width={15} height={15} /> ログをアップロード
-            </button>
             <button className="btn btn-primary btn-sm" onClick={() => nav(`/upload?table=${table.id}`)}>
               <IconPlus width={15} height={15} /> セッションを記録
             </button>
@@ -87,7 +84,7 @@ export default function TableDetail() {
         )}
       </div>
 
-      <SectionTitle right={<span className="text-[11px] text-ink2">メンバーは検索で追加できます</span>}>メンバー · {table.memberIds.length}</SectionTitle>
+      <SectionTitle>メンバー · {table.memberIds.length}</SectionTitle>
       <div className="card bg-base-100 border border-base-300 px-4 py-3">
         {table.memberIds.map((m) => (
           <div key={m} className="flex items-center gap-3 py-2 border-b border-base-200 last:border-0">
@@ -174,7 +171,7 @@ function EditTableModal({ table, onClose }: { table: ReturnType<typeof useStore>
         <Field label="主なシステム">
           <select className="select select-bordered select-sm " value={systemId} onChange={(e) => setSystemId(e.target.value)}>
             {Object.values(SYSTEMS).map((s) => (
-              <option key={s.id} value={s.id}>{s.emoji} {s.name}</option>
+              <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
         </Field>

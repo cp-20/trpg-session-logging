@@ -23,19 +23,22 @@ test("実ログファイルを解析して保存し、共有ビューでは本�
 
   // Step2 で自動解析の結果を確認してから進む
   await page.getByRole("button", { name: "シナリオと参加者へ進む" }).click({ force: true });
-  await expect(page.getByText("参加者のリンク")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "参加者を検索" })).toBeVisible();
+  await page.getByLabel("タイトル", { exact: true }).fill("CCFOLIA 実ファイル取り込み");
   await page.getByRole("button", { name: "アップロードする" }).click({ force: true });
-  await expect(page.getByText("ログをアップロードしました")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "ログをアップロードしました", exact: true })).toBeVisible();
 
-  const slug = await page.evaluate(() => {
+  const slugHandle = await page.waitForFunction(() => {
     const st = JSON.parse(localStorage.getItem("takufu-state-v4") ?? "{}");
-    const id = Object.keys(st.logs).find((k) => st.logs[k].importedFrom?.includes("ccfolia-sample"));
-    return st.logs[id].slug as string;
-  });
+    const id = Object.keys(st.logs ?? {}).find((k) => st.logs[k].importedFrom?.includes("ccfolia-sample"));
+    return id ? st.logs[id].slug as string : null;
+  }, undefined, { polling: 250 });
+  const slug = await slugHandle.jsonValue();
 
   // 自分のビュー: 実内容・取込元・シークレット表示
   await page.getByRole("button", { name: "セッションを開く" }).click({ force: true });
   await expect(page.getByText("取込: ccfolia-sample.json")).toBeVisible();
+  await page.getByRole("tab", { name: /タイムライン/ }).click({ force: true });
   await expect(page.getByText("——1972年、廃講義棟。始まりの鐘が鳴る。")).toBeVisible();
   await expect(page.getByText("【シークレット】黒板に文字を書いたのは")).toBeVisible();
 

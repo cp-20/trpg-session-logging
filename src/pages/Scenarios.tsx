@@ -4,6 +4,7 @@ import { useStore } from "../store";
 import { EmptyState, PageHead, SysBadge, Tag } from "../components/ui";
 import { SYSTEMS, SYSTEM_LIST, POLICY_LABEL } from "../data/systems";
 import { IconPlus } from "../components/icons";
+import { evaluateShareGate } from "../lib/share-gate";
 
 export default function Scenarios() {
   const { state } = useStore();
@@ -22,7 +23,7 @@ export default function Scenarios() {
     <>
       <PageHead
         title="シナリオ"
-        sub="メタデータのみを保存します。シナリオ本文や有料ファイルは保存しません"
+        sub="シナリオから、セッションの記録を探す"
         actions={
           <button className="btn btn-primary btn-sm" onClick={() => nav("/scenarios/new")}>
             <IconPlus width={15} height={15} /> シナリオを追加
@@ -34,7 +35,7 @@ export default function Scenarios() {
         <select className="select select-bordered select-sm " value={sys} onChange={(e) => setSys(e.target.value)}>
           <option value="all">全部のシステム</option>
           {SYSTEM_LIST.map((s) => (
-            <option key={s.id} value={s.id}>{s.emoji} {s.short}</option>
+                <option key={s.id} value={s.id}>{s.short}</option>
           ))}
         </select>
       </div>
@@ -61,25 +62,24 @@ export default function Scenarios() {
       ) : (
         <div className="card bg-base-100 border border-base-300 divide-y divide-base-300">
           {list.map((s) => {
-            const runs = Object.values(state.logs).filter((l) => l.scenarioId === s.id).length + (s.extraRuns ?? 0);
+            const runs = Object.values(state.logs).filter((l) => l.scenarioId === s.id && evaluateShareGate(l, state.entered ? state.me : null).visible).length;
             return (
-              <a key={s.id} href={`#/scenarios/${s.id}`} className="flex items-center gap-4 px-4 py-3 hover:bg-base-200/40">
-                <SysBadge short={SYSTEMS[s.systemId]?.short ?? "汎"} color={SYSTEMS[s.systemId]?.color ?? "#6d7f8f"} size={36} />
+              <a key={s.id} href={`#/scenarios/${s.id}`} className="grid grid-cols-[36px_minmax(0,1fr)] sm:flex items-center gap-x-3 gap-y-1.5 px-4 py-3 hover:bg-base-200/40">
+                <span className="row-span-2 self-start sm:self-auto"><SysBadge short={SYSTEMS[s.systemId]?.short ?? "汎"} color={SYSTEMS[s.systemId]?.color ?? "#6d7f8f"} size={36} /></span>
                 <div className="flex-1 min-w-0">
                   <b className="text-[14px] leading-5 block truncate">{s.title}</b>
                   <div className="text-[11px] text-ink2 truncate">{s.author} · {SYSTEMS[s.systemId]?.short}</div>
                 </div>
-                <Tag v="gray" className="!badge-sm flex-none">記録 {runs}回</Tag>
-                <Tag v={s.policy === "public" ? "ok" : "gray"} className="!badge-sm flex-none">{POLICY_LABEL[s.policy]}</Tag>
-                {s.claimedBy === state.me && <Tag v="accent" className="!badge-sm flex-none">所有</Tag>}
+                <div className="col-start-2 flex flex-wrap gap-1.5 sm:contents">
+                  <Tag v="gray" className="!badge-sm flex-none">記録 {runs}回</Tag>
+                  <Tag v={s.policy === "public" ? "ok" : "gray"} className="!badge-sm flex-none">{POLICY_LABEL[s.policy]}</Tag>
+                  {s.claimedBy === state.me && <Tag v="accent" className="!badge-sm flex-none">所有</Tag>}
+                </div>
               </a>
             );
           })}
         </div>
       )}
-      <p className="text-[11px] text-ink2 mt-3">
-        ※ 「N回プレイ済み」は、この卓での記録とカタログ上の既知ラン数の合計です。メンバー限定のランは名前なしで件数にのみ含まれます。
-      </p>
     </>
   );
 }

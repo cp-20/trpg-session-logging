@@ -24,7 +24,7 @@ export default function Tables() {
     <>
       <PageHead
         title="卓"
-        sub="メンバーグループ。セッションをまとめ、あとから日程調整にも使えます"
+        sub="いつものメンバーと、遊んだセッションをひとまとめに"
         actions={
           <button className="btn btn-primary btn-sm" onClick={() => setNewTable(true)}>
             <IconPlus width={15} height={15} /> 卓を作成
@@ -44,7 +44,7 @@ export default function Tables() {
               <div key={t.id} className="card bg-base-100 border border-base-300 px-4 py-3.5 cursor-pointer hover:border-primary/50" onClick={() => nav(`/tables/${t.id}`)}>
                 <div className="flex items-center gap-2">
                   <span className="w-8 h-8 rounded-lg bg-base-200 flex items-center justify-center text-base flex-none">
-                    {SYSTEMS[t.systemId ?? ""]?.emoji ?? "🎲"}
+                    <IconUsersGroup width={20} height={20} />
                   </span>
                   <div className="flex-1 min-w-0">
                     <b className="text-[15px] block truncate">{t.name}</b>
@@ -118,14 +118,14 @@ function NewTableModal({ onClose }: { onClose: () => void }) {
     >
       <p className="text-[11.5px] text-ink2 mb-1 flex items-start gap-1.5">
         <IconUsersGroup width={14} height={14} className="mt-0.5 flex-none" />
-        卓はメンバーのグループです。ここからセッションを立てると参加者が自動で入り、日程調整機能の土台にもなります。
+        一緒に遊ぶメンバーをまとめておくと、次のセッションにまとめて追加できます。
       </p>
       <Field label="卓名"><input className="input input-bordered input-sm w-full bg-base-100" value={name} onChange={(e) => setName(e.target.value)} placeholder="例: 廃校部" /></Field>
       <div className="grid sm:grid-cols-2 gap-x-4">
         <Field label="主なシステム">
           <select className="select select-bordered select-sm " value={systemId} onChange={(e) => setSystemId(e.target.value)}>
             {SYSTEM_LIST.map((s) => (
-              <option key={s.id} value={s.id}>{s.emoji} {s.name}</option>
+              <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
         </Field>

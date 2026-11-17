@@ -43,7 +43,7 @@ export default function CharacterDetail() {
       <PageHead
         back={{ to: "/characters", label: "キャラクター" }}
         title={c.name}
-        sub={<>{c.archetype} · {sys?.emoji} {sys?.name} · 所有: {state.users[c.ownerId].name}{c.import && c.import.source !== "手入力" && <> · <IconWand width={11} height={11} className="inline" /> {c.import.source} から取り込み</>}</>}
+        sub={<>{c.archetype} · {sys?.name} · 所有: {state.users[c.ownerId].name}{c.import && c.import.source !== "手入力" && <> · <IconWand width={11} height={11} className="inline" /> {c.import.source} から取り込み</>}</>}
         actions={
           <>
             {isMine && <button className="btn btn-ghost btn-sm" onClick={() => useEdit(c)}><IconPencil width={15} height={15} /> 編集</button>}
@@ -53,7 +53,7 @@ export default function CharacterDetail() {
       />
 
       {/* 現在値サマリー(名前・bioはページ見出しとプロフィールに集約) */}
-      <div className="card bg-base-100 border border-base-300 px-5 py-4 mb-4" style={{ borderLeft: `4px solid var(--ink)` }}>
+      <div className="card bg-base-100 border border-base-300 px-5 py-4 mb-4">
         <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
           {sys?.stats.map((st) => (
             <div key={st.key} className="min-w-20 text-center">
@@ -173,7 +173,7 @@ export default function CharacterDetail() {
             const sc = state.scenarios[scid];
             return (
               <a key={scid} href={`#/scenarios/${scid}`} className="flex items-center gap-2 py-1.5 border-b border-base-200 last:border-0 hover:bg-base-200/40 rounded px-1">
-                <span className="w-6 h-6 rounded flex items-center justify-center text-[13px] flex-none" style={{ background: sc.bg }}>{sc.emoji}</span>
+
                 <span className="text-[12.5px] truncate">{sc.title}</span>
                 <span className="text-[10.5px] text-ink2 ml-auto">{n}回</span>
               </a>

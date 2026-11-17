@@ -30,10 +30,20 @@ function str(v: unknown): string | undefined {
 
 /** 数値パラメータの収集: params / status / parameters 配下の数値を拾う */
 function collectStats(node: unknown, out: Record<string, number>, depth = 0): void {
-  if (depth > 4 || !isRecord(node)) return;
+  if (depth > 4) return;
+  if (Array.isArray(node)) {
+    node.forEach((entry) => collectStats(entry, out, depth + 1));
+    return;
+  }
+  if (!isRecord(node)) return;
+  if (typeof node.label === "string") {
+    const value = typeof node.value === "number" ? node.value : typeof node.value === "string" && node.value.trim() ? Number(node.value) : NaN;
+    if (Number.isFinite(value)) out[node.label.toLowerCase()] = value;
+    return;
+  }
   for (const [k, v] of Object.entries(node)) {
     if (typeof v === "number" && Number.isFinite(v) && /^(HP|MP|SAN|DB|[A-Z]{2,4})$/i.test(k) && v >= -100 && v <= 999) {
-      out[k] = v;
+      out[k.toLowerCase()] = v;
     } else if (isRecord(v) || Array.isArray(v)) {
       collectStats(v, out, depth + 1);
     }
@@ -42,8 +52,9 @@ function collectStats(node: unknown, out: Record<string, number>, depth = 0): vo
 
 /** システムの推定: メモとコマンドから判定 */
 function guessSystem(text: string): string | undefined {
-  if (/CCB|CoC|クトゥルフ|1d100/i.test(text)) return "coc7";
-  if (/SW2|キーパー|レンジャー/i.test(text)) return "sw2";
+  if (/CCB|クトゥルフ.*6|CoC\s*6/i.test(text)) return "coc6";
+  if (/\bCC(?:<=|\s)|CoC\s*7|クトゥルフ.*7/i.test(text)) return "coc7";
+  if (/SW2|ソード.?ワールド/i.test(text)) return "sw25";
   return undefined;
 }
 
@@ -60,8 +71,9 @@ export function parseCcfoliaCharacterJson(raw: string): ParsedCharacter | null {
   /* 形式A: {characters: {id: {...}}} (コマのクリップボード) */
   const chars = isRecord(root.characters) ? Object.values(root.characters) : [];
   /* 形式B: 単体キャラ({name, ...}) */
-  const single = isRecord(root.name) ? [root] : [];
-  const candidates = [...chars, ...single].filter((c): c is Candidate => isRecord(c) && typeof c.name === "string");
+  const single = typeof root.name === "string" ? [root] : [];
+  const clipboard = root.kind === "character" && isRecord(root.data) ? [root.data] : [];
+  const candidates = [...clipboard, ...chars, ...single].filter((c): c is Candidate => isRecord(c) && typeof c.name === "string" && Boolean(c.name.trim()));
   if (candidates.length === 0) return null;
 
   const c = candidates[0];
@@ -74,11 +86,11 @@ export function parseCcfoliaCharacterJson(raw: string): ParsedCharacter | null {
   const commands = str(c.commands) ?? "";
   return {
     name: c.name as string,
-    color: str(c.color),
+    color: typeof c.color === "string" && /^#[\da-f]{6}$/i.test(c.color) ? c.color : undefined,
     memo: memo || undefined,
     systemId: guessSystem(memo + " " + commands),
     stats,
-    image: undefined,
+    image: typeof c.iconUrl === "string" && (/^https:\/\//i.test(c.iconUrl) || /^data:image\/(png|jpeg|gif|webp);base64,/i.test(c.iconUrl)) ? c.iconUrl : undefined,
     imageId: str(c.imageId),
   };
 }
@@ -111,10 +123,12 @@ export async function parseCcfoliaCharacterZip(data: ArrayBuffer | Blob): Promis
 async function attachImage(zip: import("jszip"), parsed: ParsedCharacter): Promise<void> {
   const images = Object.values(zip.files).filter((f) => !f.dir && /^images\//.test(f.name));
   if (images.length === 0) return;
-  /* imageId が一致するファイルを優先し、無ければ先頭の画像 */
-  const match = parsed.imageId ? images.find((f) => f.name.startsWith(`images/${parsed.imageId}`)) : undefined;
-  const img = match ?? images[0];
-  const mime = /\.jpe?g$/i.test(img.name) ? "image/jpeg" : /\.svg$/i.test(img.name) ? "image/svg+xml" : "image/png";
+  /* 別のキャラクターの画像を誤って使わない。参照先がなければ画像は付けない。 */
+  const imageId = parsed.imageId ?? parsed.image?.split("/").at(-1)?.split("?")[0];
+  if (!imageId) return;
+  const img = images.find((f) => f.name === `images/${imageId}` || f.name.replace(/\.(png|jpe?g|gif|webp)$/i, "") === `images/${imageId}`);
+  if (!img || !/\.(png|jpe?g|gif|webp)$/i.test(img.name)) return;
+  const mime = /\.jpe?g$/i.test(img.name) ? "image/jpeg" : /\.gif$/i.test(img.name) ? "image/gif" : /\.webp$/i.test(img.name) ? "image/webp" : "image/png";
   const blob = new Blob([await img.async("arraybuffer")], { type: mime });
   parsed.image = await blobToDataUrl(blob);
 }

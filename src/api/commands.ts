@@ -1,4 +1,4 @@
-import { deriveSessionFromMessages, sleep, uid } from "../lib/time";
+import { deriveSessionFromMessages, uid } from "../lib/time";
 import { SYSTEMS } from "../data/systems";
 import type { Channel, Log, MsgKind, Policy, Scope, State } from "../types";
 
@@ -35,22 +35,18 @@ export async function commitLogImport(
   snapshot: State,
   apply: (fn: (s: State) => void) => void
 ): Promise<CommitLogResult> {
-  await sleep(500); /* 疑似レイテンシ: 本実装ではネットワーク+解析ジョブ */
-
   if (input.attachId) {
     const target = snapshot.logs[input.attachId];
     if (!target) return { ok: false, id: input.attachId, slug: "", reason: "添付先のセッションが見つかりません" };
-    let scenarioId = target.scenarioId;
-    if (input.newScenario && input.newScenario.title.trim()) {
-      const scid = "sc_" + uid();
-      scenarioId = scid;
-    }
+    if (target.ownerId !== snapshot.me) return { ok: false, id: target.id, slug: "", reason: "ログを添付できるのは、このセッションを記録した人だけです" };
+    const newScenarioId = input.newScenario?.title.trim() ? "sc_" + uid() : undefined;
+    const scenarioId = newScenarioId ?? (input.scenarioId || undefined);
     const derived = deriveSessionFromMessages(input.channels);
     const id = input.attachId;
     const slug = target.slug;
     apply((s) => {
       if (input.newScenario && input.newScenario.title.trim()) {
-        const scid = "sc_" + uid();
+        const scid = newScenarioId!;
         s.scenarios[scid] = {
           id: scid,
           title: input.newScenario.title.trim(),
@@ -65,7 +61,6 @@ export async function commitLogImport(
           addedBy: "user",
           addedByUid: s.me,
         };
-        s.logs[id].scenarioId = scid;
       }
       let n = 0;
       const channels: Channel[] = JSON.parse(JSON.stringify(input.channels));
@@ -79,8 +74,8 @@ export async function commitLogImport(
       l.channels = channels;
       l.hasLog = true;
       l.systemId = input.meta.systemId;
-      if (scenarioId) l.scenarioId = scenarioId;
-      if (input.tableId) l.tableId = input.tableId;
+      l.scenarioId = scenarioId;
+      l.tableId = input.tableId || undefined;
       if (derived) {
         l.dates = derived.dates;
         l.t0 = derived.t0;

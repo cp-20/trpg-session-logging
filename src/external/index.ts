@@ -1,86 +1,3 @@
-import type { Provider } from "../types";
-
-/**
- * 外部依存(OAuth・頒布元確認・X投稿)の契約。
- * モック実装と本番実装(Firebase Auth / 実API)をここで差し替える。
- */
-
-/* ---------- OAuth(サインイン) ---------- */
-
-export const SIGNIN_PROVIDERS: Provider[] = ["google", "discord", "x"];
-
-export interface OAuthFlow {
-  /** 同意画面の見せ方: モックはアカウント選択モーダル */
-  kind: "mock-account-chooser";
-  scope: string;
-}
-
-export function oauthFlow(provider: Provider): OAuthFlow {
-  return {
-    kind: "mock-account-chooser",
-    scope: provider === "google" ? "openid / email / profile(識別のみ)" : "identify(識別のみ)",
-  };
-}
-
-/* ---------- 頒布元アカウント確認(BOOTH/TALTO 文面確認) ---------- */
-
-export type VerificationProvider = "booth" | "talto";
-
-export interface VerificationCode {
-  code: string;
-  /** ISO文字列。モックでは30分 */
-  expiresAt: string;
-  /** コードを貼る場所の説明 */
-  place: string;
-}
-
-export interface VerificationResult {
-  ok: boolean;
-  externalId?: string;
-  verifiedAt?: string;
-  error?: string;
-}
-
-export interface VerificationService {
-  createCode(provider: VerificationProvider): Promise<VerificationCode>;
-  confirm(provider: VerificationProvider, code: string): Promise<VerificationResult>;
-  /** 確認ページの取得先(モックではダミーURL) */
-  targetUrl(provider: VerificationProvider): string;
-}
-
-export function createMockVerificationService(opts: { latencyMs?: number } = {}): VerificationService {
-  const latency = opts.latencyMs ?? 900;
-  const issued = new Map<VerificationProvider, VerificationCode>();
-  return {
-    async createCode(provider) {
-      await sleep(latency / 2);
-      const code = `TF-${rand(4)}-${rand(4)}`;
-      const v: VerificationCode = {
-        code,
-        expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-        place: provider === "booth" ? "ショップの自己紹介欄" : "プロフィールの自己紹介欄",
-      };
-      issued.set(provider, v);
-      return v;
-    },
-    async confirm(provider, code) {
-      await sleep(latency);
-      const v = issued.get(provider);
-      if (!v || v.code !== code) return { ok: false, error: "確認コードが一致しません" };
-      if (Date.now() > new Date(v.expiresAt).getTime()) return { ok: false, error: "確認コードの有効期限が切れています" };
-      issued.delete(provider);
-      return {
-        ok: true,
-        externalId: provider === "booth" ? "example-shop" : "12345",
-        verifiedAt: new Date().toISOString().slice(0, 10),
-      };
-    },
-    targetUrl(provider) {
-      return provider === "booth" ? "https://example.booth.pm" : "https://talto.io/users/12345";
-    },
-  };
-}
-
 /* ---------- X 卓報告カード ---------- */
 
 export interface ReportCardData {
@@ -96,26 +13,38 @@ export interface ReportCardData {
 
 export function buildReportCardSVG(d: ReportCardData): string {
   const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const title = esc(d.scenarioTitle ?? d.title);
-  const date = esc(d.dateLabel);
-  const sys = esc(d.systemName);
-  const end = d.endLabel ? esc(d.endLabel) : null;
-  const meta = `${esc(String(d.playerCount))}人でプレイ`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="335" viewBox="0 0 600 335">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#1e1a2e"/>
-      <stop offset="1" stop-color="#3a2f57"/>
-    </linearGradient>
-  </defs>
-  <rect width="600" height="335" rx="24" fill="url(#bg)"/>
-  <text x="300" y="64" text-anchor="middle" font-family="sans-serif" font-size="13" letter-spacing="5" fill="#ffffff" opacity="0.7">TRPG SESSION REPORT</text>
-  <text x="300" y="118" text-anchor="middle" font-family="sans-serif" font-weight="800" font-size="26" fill="#ffffff">${title}</text>
-  <text x="300" y="158" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#ffffff" opacity="0.8">${date} · ${sys}</text>
-  <text x="300" y="184" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#ffffff" opacity="0.8">${meta}</text>
-  ${end ? `<rect x="210" y="212" width="180" height="34" rx="17" fill="none" stroke="#ffffff" stroke-opacity="0.45"/><text x="300" y="235" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#ffffff">${end}</text>` : ""}
-  <text x="300" y="300" text-anchor="middle" font-family="sans-serif" font-size="12" letter-spacing="3" fill="#ffffff" opacity="0.5">🎼 卓譜 — takufu.app</text>
+  const clip = (s: string, count: number) => Array.from(s).length > count ? Array.from(s).slice(0, count - 1).join("") + "…" : s;
+  const title = Array.from(clip(d.scenarioTitle ?? d.title, 38));
+  const lines = [title.slice(0, 19).join(""), title.slice(19).join("")].filter(Boolean);
+  let host = "卓譜";
+  try { host = new URL(d.shareUrl).hostname; } catch { /* Use the product name for a malformed URL. */ }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="670" viewBox="0 0 600 335">
+  <rect width="600" height="335" rx="12" fill="#f8fafc"/>
+  <text x="32" y="42" font-family="sans-serif" font-weight="700" font-size="18" fill="#0e7490">卓譜</text>
+  <text x="568" y="40" text-anchor="end" font-family="sans-serif" font-size="12" fill="#475569">#卓報告</text>
+  <path d="M32 60H568" stroke="#cbd5e1"/>
+  ${lines.map((line, i) => `<text x="32" y="${112 + i * 37}" font-family="sans-serif" font-weight="700" font-size="26" fill="#0f172a">${esc(line)}</text>`).join("")}
+  <text x="32" y="194" font-family="sans-serif" font-size="14" fill="#475569">${esc(clip(d.dateLabel, 35))}</text>
+  <text x="32" y="220" font-family="sans-serif" font-size="14" fill="#475569">${esc(clip(d.systemName, 30))} / ${d.playerCount}人でプレイ</text>
+  ${d.endLabel ? `<text x="32" y="262" font-family="sans-serif" font-weight="700" font-size="16" fill="#0e7490">${esc(clip(d.endLabel, 32))}</text>` : ""}
+  <text x="568" y="309" text-anchor="end" font-family="sans-serif" font-size="11" fill="#475569">${esc(host)}</text>
 </svg>`;
+}
+
+export async function downloadReportPNG(svg: string, filename: string): Promise<void> {
+  const source = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  try {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = () => reject(new Error("画像を作成できませんでした。")); img.src = source; });
+    const canvas = document.createElement("canvas"); canvas.width = 1200; canvas.height = 670;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("画像を保存できませんでした。");
+    context.drawImage(img, 0, 0, 1200, 670);
+    const png = await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("画像を保存できませんでした。")), "image/png"));
+    const url = URL.createObjectURL(png);
+    const link = document.createElement("a"); link.href = url; link.download = filename; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } finally { URL.revokeObjectURL(source); }
 }
 
 export function reportTweetText(d: ReportCardData): string {
@@ -130,19 +59,3 @@ export function xIntentUrl(d: ReportCardData): string {
 export function svgDataUrl(svg: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
-
-export function downloadSvg(svg: string, filename: string) {
-  const blob = new Blob([svg], { type: "image/svg+xml" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-/* ---------- utils ---------- */
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const rand = (n: number) =>
-  Array.from({ length: n }, () => "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 36)]).join("");

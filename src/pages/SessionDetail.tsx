@@ -1,27 +1,45 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useStore } from "../store";
 import { Avatar, CopyBox, EmptyState, Field, Modal, NotFound, PageHead, SectionTitle, Seg, Tag, Toggle, cx } from "../components/ui";
 import { SessionTimeline, TimelineFilter } from "../components/timeline";
-import { PlayerPicker } from "../components/pickers";
 import { SYSTEMS } from "../data/systems";
-import { buildSessionRange, fmtDate, fmtDates, fmtDur, jstEpoch, jstTime, sessionClock, sessionPlayMinutes, todayStr, uid } from "../lib/time";
+import { buildSessionRange, fmtDate, fmtDates, fmtDur, jstTime, sessionClock, sessionPlayMinutes, todayStr } from "../lib/time";
 import type { Log, Scope } from "../types";
 import {
-  IconShare, IconPencil, IconTrash, IconUpload, IconWand, IconPlus, IconUserPlus, IconLink, IconUnlink, IconCalendarTime, IconFileText, IconExternal,
+  IconShare, IconPencil, IconTrash, IconUpload, IconWand, IconPlus, IconUserPlus, IconLink, IconUnlink, IconCalendarTime, IconFileText, IconExternal, IconX,
 } from "../components/icons";
-import { buildReportCardSVG, svgDataUrl, downloadSvg, xIntentUrl } from "../external";
+import { buildReportCardSVG, svgDataUrl, downloadReportPNG, xIntentUrl } from "../external";
+import { createSharedInvite, fetchSharedLog, revokeSharedMember } from "../lib/cloud-state";
 
 export default function SessionDetail() {
   const { id } = useParams();
-  const { state, update, toast } = useStore();
+  const { state, update, toast, authUser } = useStore();
   const nav = useNavigate();
-  const [tab, setTab] = useState<"timeline" | "members" | "stats">("members");
+  const [tab, setTab] = useState<"timeline" | "overview" | "stats">("overview");
   const [editing, setEditing] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [reportCard, setReportCard] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [filter, setFilter] = useState<TimelineFilter>({ query: "", channel: "all" });
+  useEffect(() => {
+    const log = state.logs[id ?? ""];
+    if (!authUser || !log) return;
+    let alive = true;
+    fetchSharedLog(log.slug).then((shared) => {
+      if (!alive || !shared) return;
+      const newcomers = Object.keys(shared.log.players).filter((uid) => !log.players[uid]);
+      if (!newcomers.length) return;
+      update((s) => {
+        if (!s.logs[log.id]) return;
+        for (const uid of newcomers) {
+          if (!s.users[uid] && shared.users[uid]) s.users[uid] = shared.users[uid];
+          s.logs[log.id].players[uid] ??= shared.log.players[uid];
+        }
+      });
+    }).catch(() => { /* A new record may not have been published yet. */ });
+    return () => { alive = false; };
+  }, [id, authUser?.uid]);
 
   const log = state.logs[id ?? ""];
   if (!log) return <NotFound what="セッション" />;
@@ -30,28 +48,7 @@ export default function SessionDetail() {
   const tb = log.tableId ? state.tables[log.tableId] : null;
   const sys = SYSTEMS[log.systemId];
   const isOwner = log.ownerId === state.me;
-  const shareUrl = `${location.origin}${location.pathname}#/share/l/${log.slug}`;
   const playMin = sessionPlayMinutes(log);
-
-  const scopeOptions: { v: Scope; label: string; disabled?: boolean; title?: string }[] = [
-    { v: "members", label: "メンバー限定" },
-    { v: "passed", label: "このシナリオをプレイした人" },
-    {
-      v: "public",
-      label: "公開",
-      disabled: sc ? sc.policy !== "public" : true,
-      title: sc && sc.policy !== "public" ? "作者のログルールが公開を許可していないため、公開にはできません" : undefined,
-    },
-  ];
-
-  function setScope(v: Scope) {
-    update((s) => {
-      s.logs[log.id].scope = v;
-    });
-    toast(`共有範囲を「${{ members: "メンバー限定", passed: "プレイした人", public: "公開" }[v]}」に変更しました`);
-  }
-
-  const linkedCount = Object.values(log.players).filter((p) => p.linked).length;
 
   return (
     <>
@@ -82,14 +79,14 @@ export default function SessionDetail() {
                 <IconPencil width={15} height={15} /> 編集
               </button>
             )}
-            {!log.hasLog && (
+            {!log.hasLog && isOwner && (
               <button className="btn btn-primary btn-sm" onClick={() => nav(`/upload?log=${log.id}`)}>
                 <IconUpload width={15} height={15} /> ログを添付
               </button>
             )}
             {isOwner && (
               <div className="dropdown dropdown-end">
-                <button tabIndex={0} className="btn btn-ghost btn-sm">⋯</button>
+                <button tabIndex={0} className="btn btn-ghost btn-sm" aria-label="その他の操作">その他</button>
                 <div tabIndex={0} className="dropdown-content z-50 card p-1 w-44">
                   <button className="flex items-center gap-2 w-full px-3 py-2 text-[12.5px] text-error hover:bg-base-200 rounded" onClick={() => setConfirmDel(true)}>
                     <IconTrash width={14} height={14} /> 削除
@@ -101,75 +98,45 @@ export default function SessionDetail() {
         }
       />
 
-      {/* ログなし: タイムライン/統計タブは出さず、添付CTA + 参加者を直接見せる */}
-      {!log.hasLog ? (
-        <>
-          <div className="card bg-base-100 border border-base-300">
-            <EmptyState
-              kind="first"
-              icon={<IconFileText width={24} height={24} className="opacity-40" />}
-              title="ログを添付するとタイムラインと統計を作成できます"
-              action={
-                <button className="btn btn-primary btn-sm" onClick={() => nav(`/upload?log=${log.id}`)}>
-                  <IconUpload width={14} height={14} /> ログを添付
-                </button>
-              }
-            >
-              日時・参加者はすでに記録されています。ログは後から追加できます。
-            </EmptyState>
-          </div>
+      <div role="tablist" aria-label="セッション詳細のタブ" className="tabs mb-5">
+        {([['overview', '概要'], ['timeline', 'タイムライン'], ['stats', '統計']] as const).map(([value, label]) => (
+          <button key={value} role="tab" aria-selected={tab === value} aria-controls={`panel-${value}`} id={`tab-${value}`} className={cx("tab", tab === value && "tab-active")} onClick={() => setTab(value)}>
+            {label}{value === 'timeline' && log.hasLog ? ` · ${log.channels.reduce((n, c) => n + c.msgs.length, 0)}` : ''}
+          </button>
+        ))}
+      </div>
+
+      <div role="tabpanel" id="panel-overview" aria-labelledby="tab-overview" hidden={tab !== "overview"}>
+        {tab === "overview" && <>
+          <dl className="grid sm:grid-cols-2 gap-x-8 gap-y-4 pb-5 border-b border-base-300 text-sm">
+            <div><dt className="text-xs text-base-content/70 mb-1">記録した人</dt><dd className="flex items-center gap-2"><Avatar u={state.users[log.ownerId]} size={24} /><a href={`#/users/${log.ownerId}`} className="link link-hover">{state.users[log.ownerId]?.name}</a></dd></div>
+            <div><dt className="text-xs text-base-content/70 mb-1">ログの共有範囲</dt><dd>{log.scope === "public" ? "公開" : log.scope === "passed" ? "このシナリオをプレイした人" : "メンバー限定"}</dd></div>
+            <div><dt className="text-xs text-base-content/70 mb-1">シナリオ</dt><dd>{sc ? <a href={`#/scenarios/${sc.id}`} className="link link-hover">{sc.title}</a> : "未設定"}</dd></div>
+            <div><dt className="text-xs text-base-content/70 mb-1">ログ</dt><dd>{log.hasLog ? `${log.channels.reduce((n, c) => n + c.msgs.length, 0)}行を記録` : "未添付"}</dd></div>
+          </dl>
           <SectionTitle>参加者 · {Object.keys(log.players).length}</SectionTitle>
           <MembersTab log={log} />
-        </>
-      ) : (
-        <>
-          <div role="tablist" aria-label="セッション詳細のタブ" className="tabs tabs-boxed w-fit bg-base-200/70 mb-4">
-            <button role="tab" aria-selected={tab === "timeline"} aria-controls="panel-timeline" id="tab-timeline" className={cx("tab", tab === "timeline" && "tab-active")} onClick={() => setTab("timeline")}>
-              タイムライン · {log.channels.reduce((a, c) => a + c.msgs.length, 0)}
-            </button>
-            <button role="tab" aria-selected={tab === "members"} aria-controls="panel-members" id="tab-members" className={cx("tab", tab === "members" && "tab-active")} onClick={() => setTab("members")}>
-              参加者 · {Object.keys(log.players).length}
-            </button>
-            <button role="tab" aria-selected={tab === "stats"} aria-controls="panel-stats" id="tab-stats" className={cx("tab", tab === "stats" && "tab-active")} onClick={() => setTab("stats")}>
-              統計
-            </button>
-          </div>
+        </>}
+      </div>
 
-          <div role="tabpanel" id="panel-timeline" aria-labelledby="tab-timeline" hidden={tab !== "timeline"}>
-            {tab === "timeline" && (
-              <>
-              {/* 絞り込み */}
-              <div className="flex flex-wrap items-center gap-2 mb-2">
-                <input
-                  type="search"
-                  className="input input-bordered input-sm w-48 bg-base-100"
-                  placeholder="本文・発言者で絞り込み…"
-                  value={filter.query}
-                  onChange={(e) => setFilter({ ...filter, query: e.target.value })}
-                />
-                <select className="select select-bordered select-sm bg-base-100" value={filter.channel} onChange={(e) => setFilter({ ...filter, channel: e.target.value })} aria-label="チャンネルで絞り込み">
-                  <option value="all">全部のチャンネル（時系列）</option>
-                  {log.channels.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}{c.secret ? "（シークレット）" : ""}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="card bg-base-100 border border-base-300 px-3 py-3 sheet-lined">
-                <SessionTimeline log={log} state={state} mode="own" filter={filter} />
-              </div>
-              </>
-            )}
+      <div role="tabpanel" id="panel-timeline" aria-labelledby="tab-timeline" hidden={tab !== "timeline"}>
+        {tab === "timeline" && (log.hasLog ? <>
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <input type="search" aria-label="ログを絞り込み" className="input input-bordered input-sm w-full sm:w-64 bg-base-100" placeholder="本文・発言者で絞り込み…" value={filter.query} onChange={(e) => setFilter({ ...filter, query: e.target.value })} />
+            <select className="select select-bordered select-sm bg-base-100 max-w-full" value={filter.channel} onChange={(e) => setFilter({ ...filter, channel: e.target.value })} aria-label="チャンネルで絞り込み">
+              <option value="all">全部のチャンネル（時系列）</option>
+              {log.channels.map((c) => <option key={c.id} value={c.id}>{c.name}{c.secret ? "（シークレット）" : ""}</option>)}
+            </select>
           </div>
+          <div className="card bg-base-100 border border-base-300 px-3 py-3"><SessionTimeline log={log} state={state} mode="own" filter={filter} /></div>
+        </> : <div className="card bg-base-100 border border-base-300">
+          <EmptyState kind="first" icon={<IconFileText width={24} height={24} />} title="ログはまだ添付されていません" action={isOwner ? <button className="btn btn-primary btn-sm" onClick={() => nav(`/upload?log=${log.id}`)}><IconUpload width={14} height={14} /> ログを添付</button> : undefined}>日時と参加者は記録されています。</EmptyState>
+        </div>)}
+      </div>
 
-          <div role="tabpanel" id="panel-members" aria-labelledby="tab-members" hidden={tab !== "members"}>
-            {tab === "members" && <MembersTab log={log} />}
-          </div>
-
-          <div role="tabpanel" id="panel-stats" aria-labelledby="tab-stats" hidden={tab !== "stats"}>
-            {tab === "stats" && <StatsTab log={log} />}
-          </div>
-        </>
-      )}
+      <div role="tabpanel" id="panel-stats" aria-labelledby="tab-stats" hidden={tab !== "stats"}>
+        {tab === "stats" && <StatsTab log={log} />}
+      </div>
 
       {editing && <EditLogModal log={log} onClose={() => setEditing(false)} />}
       {confirmDel && (
@@ -185,7 +152,7 @@ export default function SessionDetail() {
                   update((s) => {
                     delete s.logs[log.id];
                   });
-                  toast("削除しました（モック: 24時間以内に完全削除される想定）");
+                  toast("セッションを削除しました");
                   nav("/sessions");
                 }}
               >
@@ -205,8 +172,11 @@ export default function SessionDetail() {
 
 /* ---------- 参加者 ---------- */
 function MembersTab({ log }: { log: Log }) {
-  const { state, update, toast } = useStore();
+  const { state, update, toast, authUser } = useStore();
   const [q, setQ] = useState("");
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
   const ids = Object.keys(log.players);
   const candidates = Object.values(state.users)
     .filter((u) => !ids.includes(u.id))
@@ -218,7 +188,11 @@ function MembersTab({ log }: { log: Log }) {
     });
     toast(`${state.users[uid2].name}さんを参加者に追加しました`);
   }
-  function removeParticipant(uid2: string) {
+  async function removeParticipant(uid2: string) {
+    if (authUser) {
+      try { await revokeSharedMember(log.slug, uid2); }
+      catch { toast("参加者を外せませんでした。もう一度お試しください。"); return; }
+    }
     update((s) => {
       delete s.logs[log.id].players[uid2];
     });
@@ -234,12 +208,12 @@ function MembersTab({ log }: { log: Log }) {
         <div className="text-[11.5px] font-bold text-ink2 mb-1.5">参加者を追加</div>
         <input
           className="input input-bordered input-sm w-full bg-base-100"
-          placeholder="ユーザー名で検索…（卓のメンバーは自動で候補に出ます）"
+          aria-label="参加者を検索" placeholder="ユーザー名で検索…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
         {/* 卓メンバーのクイック候補 */}
-        {log.tableId && state.tables[log.tableId] && (
+        {log.tableId && state.tables[log.tableId]?.memberIds.some((member) => !ids.includes(member)) && (
           <div className="flex flex-wrap gap-1.5 mt-2">
             <span className="text-[10.5px] text-ink2 self-center">卓のメンバー:</span>
             {state.tables[log.tableId].memberIds
@@ -268,7 +242,7 @@ function MembersTab({ log }: { log: Log }) {
       </div>
       ) : (
         <p className="text-[11.5px] text-ink2 mb-2">
-          参加者の追加・キャラクターの付け替えは、この卓のKP（{state.users[log.ownerId].name}さん）が管理します。
+          参加者の追加・キャラクターの付け替えは、記録した人（{state.users[log.ownerId].name}さん）が管理します。
         </p>
       )}
 
@@ -284,10 +258,10 @@ function MembersTab({ log }: { log: Log }) {
             <Avatar u={user} size={28} />
             <div className="w-28">
               <b className="text-[13px]">{user.name}</b>
-              {isKp && <div className="text-[10px] text-ink2">この卓のKP</div>}
+              {isKp && <div className="text-[10px] text-ink2">記録した人</div>}
             </div>
             {p.linked ? (
-              <select className="select select-bordered select-xs w-52 bg-base-100"
+              <select aria-label={`${user.name}のキャラクター`} disabled={!isKpView && u !== state.me} className="select select-bordered select-sm w-full sm:w-52 max-w-full bg-base-100"
                 value={p.characterIds[0] ?? ""}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -306,7 +280,7 @@ function MembersTab({ log }: { log: Log }) {
               <span className="text-[11px] text-ink2">未リンク（名前のみ表示されます）</span>
             )}
             <div className="ml-auto flex items-center gap-2">
-              {isKpView && (
+              {(isKpView || u === state.me) && (
                 <>
                 <Toggle on={p.hidden} onChange={(v) => { update((s) => { s.logs[log.id].players[u].hidden = v; }); toast(v ? `${user.name}さんを共有ビューから外しました（KPには見えます）` : `${user.name}さんを再表示しました`); }} label="非表示" />
                 {p.linked ? (
@@ -314,13 +288,13 @@ function MembersTab({ log }: { log: Log }) {
                     <IconUnlink width={13} height={13} /> 解除
                   </button>
                 ) : (
-                  <button className="btn btn-xs btn-primary gap-1" onClick={() => { update((s) => { s.logs[log.id].players[u].linked = true; }); toast(`${user.name}さんをリンクしました（本人に通知）`); }}>
+                  <button className="btn btn-xs btn-primary gap-1" onClick={() => { update((s) => { s.logs[log.id].players[u].linked = true; }); toast(`${user.name}さんをリンクしました`); }}>
                     <IconLink width={13} height={13} /> リンク
                   </button>
                 )}
-                {!isKp && (
-                  <button className="btn btn-ghost btn-xs btn-circle" title="参加者から外す" onClick={() => removeParticipant(u)}>
-                    ✕
+                {isKpView && !isKp && (
+                  <button className="btn btn-ghost btn-xs btn-circle" aria-label={`${user.name}を参加者から外す`} onClick={() => removeParticipant(u)}>
+                    <IconX width={14} height={14} />
                   </button>
                 )}
                 </>
@@ -330,21 +304,31 @@ function MembersTab({ log }: { log: Log }) {
         );
       })}
 
-      <div className="flex flex-wrap items-center gap-2 bg-base-200/60 rounded-xl px-3 py-2.5 mt-3">
+      {isKpView && <div className="flex flex-wrap items-center gap-2 bg-base-200/60 rounded-xl px-3 py-2.5 mt-3">
         <span className="text-[11.5px] text-ink2 grow">
-          卓にいないメンバーには、Discordに招待リンクを1つ貼ればOK。本人がサインインして自分の発言とキャラクターを引き受けます。
+          招待リンクを送ると、相手がこのセッションに参加できます。
         </span>
-        <button className="btn btn-xs" onClick={() => { navigator.clipboard?.writeText(`${location.origin}${location.pathname}#/invite/${log.id}`).catch(() => {}); toast("招待リンクをコピーしました"); }}>
-          招待リンクを作成
+        <button className="btn btn-xs" disabled={inviting} onClick={async () => {
+          setInviting(true); setInviteError(null);
+          try {
+            const token = authUser ? await createSharedInvite(log, state) : log.id;
+            const url = `${location.origin}${location.pathname}#/invite/${token}`;
+            setInviteUrl(url);
+            if (!authUser) { await navigator.clipboard.writeText(url); toast("招待リンクをコピーしました"); }
+          } catch { setInviteError("招待リンクを作成できませんでした。もう一度お試しください。"); }
+          finally { setInviting(false); }
+        }}>
+          {inviting ? "作成中…" : authUser ? "招待リンクを作成" : "招待リンクをコピー"}
         </button>
-      </div>
+      </div>}
+      {inviteUrl && <div className="mt-3"><CopyBox text={inviteUrl} /></div>}
+      {inviteError && <p className="text-xs text-error mt-2" role="alert">{inviteError}</p>}
     </div>
   );
 }
 
 /* ---------- 統計 ---------- */
 function StatsTab({ log }: { log: Log }) {
-  const { state } = useStore();
   const rolls = log.channels.flatMap((c) => c.msgs.filter((m) => m.type === "roll" && m.roll).map((m) => m.roll!));
   const bySp: Record<string, { crit: number; fumble: number; fail: number; ok: number; spec: number }> = {};
   log.channels.forEach((c) =>
@@ -367,10 +351,6 @@ function StatsTab({ log }: { log: Log }) {
     dist[key] = (dist[key] ?? 0) + 1;
   });
   const maxDist = Math.max(1, ...Object.values(dist));
-  const changes = Object.values(state.characters)
-    .flatMap((c) => c.sessions.filter((s) => s.logId === log.id).map((s) => ({ c, s })))
-    .filter(({ s }) => Object.keys(s.delta).length > 0);
-
   return (
     <>
       <div className="grid sm:grid-cols-2 gap-3">
@@ -401,23 +381,7 @@ function StatsTab({ log }: { log: Log }) {
           ))}
         </div>
       </div>
-      <div className="card bg-base-100 border border-base-300 px-4 py-3 mt-3">
-        <SectionTitle>この卓でのキャラクターの変化</SectionTitle>
-        {changes.length === 0 && <p className="text-[12px] text-ink2">カルテに記録された変化はありません。</p>}
-        {changes.map(({ c, s }) =>
-          Object.entries(s.delta).map(([k, d]) => {
-            const def = SYSTEMS[c.systemId]?.stats.find((x) => x.key === k);
-            const diff = d.after - d.before;
-            return (
-              <div key={c.id + k} className="flex flex-wrap items-center gap-2.5 py-1.5 border-b border-base-200 last:border-0">
-                <a href={`#/characters/${c.id}`} className="font-bold text-[13px]" style={{ color: c.color }}>{c.name}</a>
-                <Tag v={diff < 0 ? "danger" : "ok"}>{def?.label ?? k} {d.before}→{d.after}（{diff > 0 ? "+" : ""}{diff}）</Tag>
-                <span className="text-[11px] text-ink2 grow truncate">{s.memo}</span>
-              </div>
-            );
-          })
-        )}
-      </div>
+
     </>
   );
 }
@@ -432,6 +396,7 @@ function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
   const [startTime, setStartTime] = useState(sessionClock(log.t0, log.dates[0]));
   const [endTime, setEndTime] = useState(sessionClock(log.t1, log.dates[log.dates.length - 1]));
   const [endLabel, setEndLabel] = useState(log.endLabel ?? "");
+  const [error, setError] = useState<string | null>(null);
 
   function addDate() {
     const last = dates.at(-1) ?? todayStr();
@@ -441,9 +406,14 @@ function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
   }
 
   function save() {
-    const range = buildSessionRange({ dates, startTime, endTime });
+    if (dates.some((date) => !/^\d{4}-\d{2}-\d{2}$/.test(date)) || new Set(dates).size !== dates.length) {
+      setError("実施日を重複しない日付で入力してください。");
+      return;
+    }
+    const sortedDates = [...dates].sort();
+    const range = buildSessionRange({ dates: sortedDates, startTime, endTime });
     if (!range.ok) {
-      toast(range.error ?? "入力を確認してください");
+      setError(range.error ?? "入力を確認してください");
       return;
     }
     const { t0, t1 } = range;
@@ -453,7 +423,7 @@ function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
       l.tableId = tableId || undefined;
       l.scenarioId = scenarioId || undefined;
       if (scenarioId && s.scenarios[scenarioId]) l.systemId = s.scenarios[scenarioId].systemId;
-      l.dates = dates;
+      l.dates = sortedDates;
       l.t0 = t0;
       l.t1 = t1;
       l.endLabel = endLabel.trim() || undefined;
@@ -488,20 +458,20 @@ function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
           <select className="select select-bordered select-sm bg-base-100" value={scenarioId} onChange={(e) => setScenarioId(e.target.value)}>
             <option value="">— 選択しない —</option>
             {Object.values(state.scenarios).map((s) => (
-              <option key={s.id} value={s.id}>{s.emoji} {s.title}</option>
+              <option key={s.id} value={s.id}>{s.title}</option>
             ))}
           </select>
         </Field>
       </div>
       <Field label="実施日（複数日にまたがる場合は日を追加）">
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="space-y-2">
           {dates.map((d, i) => (
-            <span key={i} className="badge badge-ghost gap-1">
-              <IconCalendarTime width={12} height={12} /> {fmtDate(d)}
+            <div key={i} className="flex items-center gap-2">
+              <input type="date" aria-label={`実施日 ${i + 1}`} className="input input-bordered input-sm w-full bg-base-100" value={d} onChange={(e) => setDates(dates.map((date, index) => index === i ? e.target.value : date))} />
               {dates.length > 1 && (
-                <button onClick={() => setDates(dates.filter((_, x) => x !== i))}>✕</button>
+                <button className="btn btn-ghost btn-sm btn-square" aria-label={`実施日 ${i + 1} を削除`} onClick={() => setDates(dates.filter((_, x) => x !== i))}><IconX width={16} height={16} /></button>
               )}
-            </span>
+            </div>
           ))}
           <button className="btn btn-ghost btn-xs" onClick={addDate}><IconPlus width={12} height={12} /> 日を追加</button>
         </div>
@@ -515,18 +485,15 @@ function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
         </Field>
       </div>
       <Field label="ENDラベル"><input className="input input-bordered input-sm w-full bg-base-100" value={endLabel} onChange={(e) => setEndLabel(e.target.value)} placeholder="正常END「後夜祭」" /></Field>
-      {log.hasLog && (
-        <p className="text-[11px] text-ink2 mt-2 flex items-center gap-1.5">
-          <IconWand width={13} height={13} /> 保存すると、開始・終了時刻が再計算されます。ログを再解析すればタイムスタンプから自動算出に戻せます。
-        </p>
-      )}
+      {error && <p role="alert" className="text-sm text-error mt-3">{error}</p>}
     </Modal>
   );
 }
 
 /* ---------- 卓報告カード ---------- */
 export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => void }) {
-  const { state } = useStore();
+  const { state, toast } = useStore();
+  const [savingImage, setSavingImage] = useState(false);
   const sc = log.scenarioId ? state.scenarios[log.scenarioId] : null;
   const chars = Object.entries(log.players).flatMap(([, p]) => p.characterIds.map((cid) => state.characters[cid])).filter(Boolean);
   const cardData = {
@@ -547,7 +514,7 @@ export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => voi
       onClose={onClose}
       foot={
         <>
-          <button className="btn" onClick={() => downloadSvg(cardSvg, `takufu-report-${log.id}.svg`)}>SVGをダウンロード</button>
+          <button className="btn" disabled={savingImage} onClick={async () => { setSavingImage(true); try { await downloadReportPNG(cardSvg, `takufu-report-${log.id}.png`); } catch { toast("画像を保存できませんでした。もう一度お試しください。"); } finally { setSavingImage(false); } }}>{savingImage ? "画像を作成中…" : "画像を保存"}</button>
           <button className="btn" onClick={() => { navigator.clipboard?.writeText(`${location.origin}${location.pathname}#/share/l/${log.slug}`).catch(() => {}); }}>リンクをコピー</button>
           <a className="btn btn-primary" href={xIntentUrl(cardData)} target="_blank" rel="noreferrer">
             <IconExternal width={14} height={14} /> Xで投稿
@@ -564,7 +531,7 @@ export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => voi
         </div>
       )}
       <p className="text-[11px] text-ink2 mt-3">
-        SVGをダウンロードしてXに添付できます。「Xで投稿」は #卓報告 付きの投稿画面を開きます(実際の投稿はX側で行われます)。
+        保存した画像をXの投稿に添付できます。
       </p>
     </Modal>
   );
@@ -578,7 +545,7 @@ function ShareModal({ log, onClose, onOpenReportCard }: { log: Log; onClose: () 
 
   const options: { v: Scope; label: string; disabled?: boolean; title?: string }[] = [
     { v: "members", label: "メンバー限定" },
-    { v: "passed", label: "このシナリオをプレイした人" },
+    { v: "passed", label: "このシナリオをプレイした人", disabled: sc?.policy !== "public" },
     {
       v: "public",
       label: "公開",
@@ -588,6 +555,7 @@ function ShareModal({ log, onClose, onOpenReportCard }: { log: Log; onClose: () 
   ];
 
   function setScope(v: Scope) {
+    if (log.ownerId !== state.me || (v !== "members" && sc?.policy !== "public")) return;
     update((s) => {
       s.logs[log.id].scope = v;
     });
@@ -609,14 +577,14 @@ function ShareModal({ log, onClose, onOpenReportCard }: { log: Log; onClose: () 
       </div>
       <div className="flex flex-wrap gap-2 mt-3">
         <a className="btn btn-sm" href={`#/share/l/${log.slug}`} target="_blank" rel="noreferrer">
-          共有ビューを確認
+          共有ページを確認
         </a>
         <button className="btn btn-ghost btn-sm" onClick={onOpenReportCard}>
           <IconShare width={14} height={14} /> 卓報告カード(X)
         </button>
       </div>
       <p className="text-[11px] text-ink2 mt-3 leading-5">
-        共有ビューでは、シークレットタブ・シナリオ本文・非表示の参加者を自動で除外します。
+        シークレットタブ・シナリオ本文・非表示の参加者は、共有ページに表示しません。
       </p>
     </Modal>
   );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createMockVerificationService, buildReportCardSVG, reportTweetText, xIntentUrl, svgDataUrl } from "./index";
+import { buildReportCardSVG, reportTweetText, xIntentUrl, svgDataUrl } from "./index";
 
 describe("buildReportCardSVG", () => {
   const data = {
@@ -38,28 +38,5 @@ describe("X intent", () => {
 describe("svgDataUrl", () => {
   it("data URL にエンコードする", () => {
     expect(svgDataUrl("<svg/>").startsWith("data:image/svg+xml;utf8,%3Csvg%2F%3E")).toBe(true);
-  });
-});
-
-describe("createMockVerificationService", () => {
-  it("発行したコードで確認すると成功する", async () => {
-    const svc = createMockVerificationService({ latencyMs: 10 });
-    const code = await svc.createCode("booth");
-    const r = await svc.confirm("booth", code.code);
-    expect(r.ok).toBe(true);
-    expect(r.externalId).toBe("example-shop");
-  });
-  it("誤ったコードは失敗", async () => {
-    const svc = createMockVerificationService({ latencyMs: 10 });
-    await svc.createCode("talto");
-    const r = await svc.confirm("talto", "TF-WRNG-WRNG");
-    expect(r.ok).toBe(false);
-  });
-  it("一度使ったコードは再確認できない", async () => {
-    const svc = createMockVerificationService({ latencyMs: 10 });
-    const code = await svc.createCode("booth");
-    await svc.confirm("booth", code.code);
-    const r = await svc.confirm("booth", code.code);
-    expect(r.ok).toBe(false);
   });
 });

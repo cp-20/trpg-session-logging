@@ -17,8 +17,11 @@ test("作成したログは永続化され、passed にすると外部ユーザ�
   // 卓を選ばず、自分だけのセッションにする
   await page.getByLabel(/卓（参加者を自動で入れます）/).selectOption("", { force: true });
   await page.getByRole("button", { name: "シナリオと参加者へ進む" }).click({ force: true });
+  await page.getByRole("button", { name: /深淵の呼び声/ }).click({ force: true });
   await page.getByRole("button", { name: "記録する", exact: true }).click({ force: true });
 
+  await expect(page.getByRole("heading", { name: "セッションを記録しました", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "セッションを開く", exact: true }).click({ force: true });
   await expect(page).toHaveURL(/#\/sessions\/s_/);
   // localStorage への書き込みはデバウンスされているので、現れるまで待つ
   const slugHandle = await page.waitForFunction(() => {
@@ -39,9 +42,8 @@ test("作成したログは永続化され、passed にすると外部ユーザ�
 
   // 4. 別ユーザー(そら)で共有ビューを開く
   await page.goto("/#/settings");
-  await page.getByRole("button", { name: "サインアウト" }).click({ force: true });
-  await page.getByRole("button", { name: "Google でサインイン", exact: true }).click({ force: true });
-  await page.getByRole("button", { name: /sora@example\.com/ }).click({ force: true });
+  await page.getByRole("button", { name: "デモ利用者を切替" }).click({ force: true });
+  await page.getByRole("button", { name: /そら/ }).click({ force: true });
 
   await page.goto(`/#/share/l/${slug}`);
   const gate = "このログは、このシナリオをプレイした人だけが読めます（自己申告）。";

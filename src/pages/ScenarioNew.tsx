@@ -58,7 +58,7 @@ export default function ScenarioNew() {
           <Field label="システム">
             <select className="select select-bordered select-sm " value={systemId} onChange={(e) => setSystemId(e.target.value)}>
               {SYSTEM_LIST.map((s) => (
-                <option key={s.id} value={s.id}>{s.emoji} {s.name}</option>
+                <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
           </Field>
@@ -85,20 +85,11 @@ export default function ScenarioNew() {
         </Field>
         <Field label="タグ（カンマ区切り）"><input className="input input-bordered input-sm w-full bg-base-100" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="例: 学校, 1回完結" /></Field>
         <Field label="ひとこと紹介"><textarea className="textarea textarea-bordered w-full bg-base-100 text-[13px]" value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
-        <div className="flex flex-wrap gap-1.5 mt-2">
-          <Tag v="gray">シナリオ本文は保存しません</Tag>
-          <Tag v="gray">登録した行は「ユーザー登録」として区別されます</Tag>
-        </div>
         <div className="flex justify-end gap-2 mt-4">
           <button className="btn" onClick={() => nav("/scenarios")}>キャンセル</button>
           <button className="btn btn-primary" onClick={save}>登録する</button>
         </div>
       </div>
-      <p className="text-[11px] text-ink2 mt-2 max-w-2xl">
-        登録すると、シナリオページから「このシナリオで卓を登録」「ログをアップロード」できます。
-        所有権の申請は、出典URLを連携済みの頒布元アカウントと照合できた場合に限ります。
-        追加は自由ですが、既存の行の編集は作者への申請が必要です。
-      </p>
       {Object.keys(state.scenarios).length === 0 && <p className="text-[11px] text-ink2 mt-1">（最初のシナリオです）</p>}
     </>
   );

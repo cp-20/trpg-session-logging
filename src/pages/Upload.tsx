@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useStore } from "../store";
-import { CopyBox, Empty, Field, PageHead, Progress, Tag, cx } from "../components/ui";
+import { CopyBox, Empty, Field, NotFound, PageHead, Tag, cx } from "../components/ui";
 import { PlayerPicker } from "../components/pickers";
 import { SessionTimeline, TimelineFilter } from "../components/timeline";
 import { SAMPLE_LOG } from "../data/seed";
 import { SYSTEMS, SYSTEM_LIST, POLICY_LABEL } from "../data/systems";
-import { buildSessionRange, deriveSessionFromMessages, fmtDate, fmtDur, sessionPlayMinutes, uid } from "../lib/time";
+import { buildSessionRange, deriveSessionFromMessages, fmtDate, fmtDur, sessionPlayMinutes, todayStr } from "../lib/time";
 import { inferSystem } from "../lib/system-guess";
 import { parseCcfoliaLog, parseCcfoliaLogZip, type ParsedLog } from "../lib/ccfolia-parser";
 import { commitLogImport, type CommitLogResult } from "../api/commands";
 import type { Channel, Log, MsgKind, Policy } from "../types";
-import { IconUpload, IconWand, IconCheck, IconShieldLock, IconSparkles, IconFileText, IconUsersGroup, IconPlus } from "../components/icons";
+import { IconUpload, IconWand, IconCheck, IconShieldLock, IconSparkles, IconFileText, IconUsersGroup, IconPlus, IconX, IconBooks } from "../components/icons";
 
 /* Step3 を終えた時点の確定前の内容。ログあり/なしの両方を同じ形で運ぶ */
 interface Draft {
@@ -43,19 +43,25 @@ export default function Upload() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [result, setResult] = useState<CommitLogResult | null>(null);
   const [committing, setCommitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const totalSteps = manual ? 3 : 4;
   const stepIndex = manual && step > 1 ? step - 1 : step;
 
   async function handleCommit() {
     if (!draft || committing) return;
+    if (!draft.meta.title.trim()) {
+      setError("セッションのタイトルを入力してください。");
+      return;
+    }
+    setError(null);
     setCommitting(true);
     try {
       let schedule = null;
       if (draft.manual) {
         const range = buildSessionRange({ dates: draft.manual.dates, startTime: draft.manual.start, endTime: draft.manual.end });
         if (!range.ok) {
-          toast(range.error ?? "日時を確認してください");
+          setError(range.error ?? "日時を確認してください");
           return;
         }
         schedule = { dates: draft.manual.dates, t0: range.t0, t1: range.t1 };
@@ -77,23 +83,27 @@ export default function Upload() {
         update
       );
       if (!r.ok) {
-        toast(r.reason ?? "記録に失敗しました");
+        setError(r.reason ?? "記録できませんでした。入力内容を確認して、もう一度お試しください。");
         return; // Step3 に留まり、入力は保持される
       }
       setResult(r);
       setStep(4);
       toast(draft.manual ? "セッションを記録しました" : attachId ? "ログを添付しました" : "ログをアップロードしました");
+    } catch {
+      setError("記録できませんでした。入力内容は保持されています。もう一度お試しください。");
     } finally {
       setCommitting(false);
     }
   }
+
+  if (attachId && !attachLog) return <NotFound what="添付先のセッション" />;
 
   return (
     <>
       <PageHead
         back={{ to: attachLog ? `/sessions/${attachLog.id}` : presetTable ? `/tables/${presetTable}` : "/sessions", label: attachLog ? attachLog.title : presetTable ? state.tables[presetTable]?.name ?? "卓" : "セッション" }}
         title={attachLog ? `「${attachLog.title}」にログを添付` : "セッションを記録"}
-        sub="ログがあればドロップするだけ。日時・システム・参加者を自動で組み立てます。ログがなければ、日時と参加者だけでも記録できます。"
+        sub={attachLog ? "ログから日時とシステムを読み取り、記録済みのセッションに追加します。" : "ココフォリアのログから取り込むか、日時と参加者を入力して記録します。"}
       />
       <Steps step={stepIndex} total={totalSteps} manual={manual} />
       {step === 1 && (
@@ -101,6 +111,7 @@ export default function Upload() {
           presetTable={presetTable}
           presetScenario={presetScenario}
           attachLog={attachLog}
+          draft={draft}
           manual={manual}
           setManual={setManual}
           onDone={(d) => {
@@ -111,25 +122,23 @@ export default function Upload() {
         />
       )}
       {step === 2 && draft && <Step2 draft={draft} setDraft={setDraft} onNext={() => setStep(3)} onBack={() => setStep(1)} />}
-      {step === 3 && draft && <Step3 draft={draft} setDraft={setDraft} attachId={attachId} presetScenario={presetScenario} committing={committing} manual={manual} onCommit={handleCommit} onBack={() => setStep(manual ? 1 : 2)} />}
+      {step === 3 && draft && <Step3 draft={draft} setDraft={setDraft} attachId={attachId} committing={committing} manual={manual} onCommit={handleCommit} onBack={() => { setError(null); setStep(manual ? 1 : 2); }} />}
+      {error && <p role="alert" className="text-sm text-error mt-3">{error}</p>}
       {step === 4 && <Step4 result={result} attachId={attachId} manual={manual} />}
     </>
   );
 }
 
 function Steps({ step, total, manual }: { step: number; total: number; manual: boolean }) {
-  const labels = manual ? ["内容の入力", "シナリオと参加者", "共有"] : ["ログを選ぶ", "分類の確認", "シナリオと参加者", "共有"];
+  const labels = manual ? ["日時を入力", "シナリオと参加者", "完了"] : ["ログを選ぶ", "ログを確認", "シナリオと参加者", "完了"];
   return (
-    <div className="mb-5">
-      <div className="steps">
-        {Array.from({ length: total }, (_, i) => (
-          <div key={i} className={cx("step-pill", step > i && "on")} />
-        ))}
-      </div>
-      <div className="text-[11.5px] text-ink2 mt-2">
-        {labels[step - 1]}
-      </div>
-    </div>
+    <ol aria-label="記録の手順" className="grid gap-2 mb-6 text-xs" style={{ gridTemplateColumns: `repeat(${total}, minmax(0, 1fr))` }}>
+      {labels.map((label, i) => (
+        <li key={label} aria-current={step === i + 1 ? "step" : undefined} className={cx("border-t-2 pt-2 leading-5", step > i ? "border-primary text-primary font-semibold" : "border-base-300 text-base-content/60")}>
+          {i + 1}. {label}
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -144,13 +153,14 @@ function buildDraft(opts: {
   const { fileName, channels, attachLog, presetTable, presetScenario, manual } = opts;
   const kinds: Record<string, MsgKind> = {};
   channels.forEach((c) => c.msgs.forEach((m) => (kinds[m.sp] = m.kind)));
-  const systemId = attachLog?.systemId ?? "coc7";
+  const guess = channels.length ? inferSystem(channels) : null;
+  const systemId = attachLog?.systemId ?? guess?.id ?? "general";
   return {
     fileName,
     channels,
     kinds,
     meta: { title: attachLog?.title ?? "", systemId },
-    guess: channels.length ? inferSystem(channels) : null,
+    guess,
     tableId: attachLog?.tableId ?? presetTable,
     scenarioId: attachLog?.scenarioId ?? presetScenario,
     newScenario: null,
@@ -167,6 +177,7 @@ function Step1({
   presetTable,
   presetScenario,
   attachLog,
+  draft,
   manual,
   setManual,
   onDone,
@@ -175,19 +186,24 @@ function Step1({
   presetTable: string;
   presetScenario: string;
   attachLog: Log | null;
+  draft: Draft | null;
   manual: boolean;
   setManual: (v: boolean) => void;
   onDone: (d: Draft) => void;
   toast: (m: string) => void;
 }) {
   const [running, setRunning] = useState(false);
-  const [parsed, setParsed] = useState<ParsedLog | null>(null);
-  const [fileInfo, setFileInfo] = useState<string | null>(null);
+  const [parsed, setParsed] = useState<ParsedLog | null>(() => draft?.channels.length ? { channels: draft.channels, kinds: draft.kinds, messageCount: draft.channels.reduce((n, c) => n + c.msgs.length, 0) } : null);
+  const [fileInfo, setFileInfo] = useState<string | null>(draft?.fileName ?? null);
+  const [error, setError] = useState<string | null>(null);
 
   async function onFiles(files: FileList | File[] | null) {
     const f = files?.[0] ?? (Array.isArray(files) ? files[0] : null);
     if (!f) return;
     setRunning(true);
+    setError(null);
+    setParsed(null);
+    setFileInfo(null);
     try {
       let p: ParsedLog | null = null;
       if (/\.(zip)$/i.test(f.name) || f.type === "application/zip") {
@@ -196,11 +212,13 @@ function Step1({
         p = parseCcfoliaLog(await f.text());
       }
       if (!p || p.messageCount === 0) {
-        toast("読み取れる発言が見つかりませんでした。CCFOLIAの書き出しログ（JSON / HTML / zip）か確認してください。");
+        setError("読み取れる発言が見つかりませんでした。ココフォリアから書き出した JSON・HTML・ZIP ファイルを選んでください。");
         return;
       }
       setParsed(p);
       setFileInfo(f.name);
+    } catch {
+      setError("ファイルを読み取れませんでした。ココフォリアからログを書き出し直して、もう一度お試しください。");
     } finally {
       setRunning(false);
     }
@@ -218,6 +236,7 @@ function Step1({
     <ManualForm
       presetTable={presetTable}
       presetScenario={presetScenario}
+      initial={draft?.manual ? draft : null}
       onBack={() => setManual(false)}
       onNext={(d) => onDone(d)}
     />
@@ -245,24 +264,20 @@ function Step1({
             出力できるのはルームマスターです。
           </p>
           <div className="flex justify-center gap-2 flex-wrap">
-            <label className={cx("btn btn-primary btn-sm", running && "btn-disabled")}>
-              <IconUpload width={15} height={15} /> ファイルを選ぶ
-              <input type="file" accept=".json,.html,.htm,.txt,.zip" className="hidden" disabled={running} onChange={(e) => onFiles(e.target.files)} />
-            </label>
+            <input type="file" aria-label="ログファイルを選ぶ" accept=".json,.html,.htm,.txt,.zip" className="file-input file-input-bordered file-input-primary file-input-sm w-full max-w-xs" disabled={running} onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
             <button className="btn btn-sm" disabled={running} onClick={finishSample}>
               サンプルログで試す
             </button>
           </div>
           {running && (
             <>
-              <Progress v={70} />
-              <div className="text-[11.5px] text-ink2">読み込み中…</div>
+              <div role="status" className="mt-3 flex justify-center items-center gap-2 text-sm"><span className="loading loading-spinner loading-sm" />読み込み中…</div>
             </>
           )}
         </div>
 
         {parsed && (
-          <div className="mt-4 anim-fade-up">
+          <div className="mt-4">
             <div className="flex flex-wrap items-center gap-2">
               <Tag v="ok"><IconCheck width={12} height={12} /> 読み取り完了</Tag>
               <span className="text-[12px] text-ink2">{fileInfo}</span>
@@ -290,7 +305,7 @@ function Step1({
             <div className="flex justify-end mt-4">
               <button
                 className="btn btn-primary"
-                onClick={() => onDone(buildDraft({ fileName: fileInfo, channels: parsed.channels, attachLog, presetTable, presetScenario, manual: null }))}
+                onClick={() => onDone(draft?.channels === parsed.channels ? draft : buildDraft({ fileName: fileInfo, channels: parsed.channels, attachLog, presetTable, presetScenario, manual: null }))}
               >
                 分類の確認へ進む
               </button>
@@ -298,13 +313,8 @@ function Step1({
           </div>
         )}
       </div>
-      {!attachLog && (
-        <p className="text-[12.5px] text-ink2 mt-3">
-          ログファイルが手元にない場合は
-          <button className="btn btn-ghost btn-xs text-primary px-1" onClick={() => setManual(true)}>日時と参加者を直接入力する</button>
-          ことで、ログなしでセッションを記録できます。ログはあとから添付できます。
-        </p>
-      )}
+      {error && <p role="alert" className="text-sm text-error mt-3">{error}</p>}
+      {!attachLog && <div className="mt-5 pt-5 border-t border-base-300 flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold text-sm">ログなしで記録</h2><p className="text-xs text-base-content/70 mt-1">ログはあとから追加できます。</p></div><button className="btn btn-outline btn-sm" onClick={() => setManual(true)}>日時と参加者を直接入力する</button></div>}
       {attachLog && <p className="text-[11px] text-ink2 mt-2">添付先「{attachLog.title}」の情報が更新されます。</p>}
     </>
   );
@@ -314,51 +324,55 @@ function Step1({
 function ManualForm({
   presetTable,
   presetScenario,
+  initial,
   onBack,
   onNext,
 }: {
   presetTable: string;
   presetScenario: string;
+  initial: Draft | null;
   onBack: () => void;
   onNext: (d: Draft) => void;
 }) {
   const { state, toast } = useStore();
-  const [title, setTitle] = useState("");
-  const [dates, setDates] = useState<string[]>([]);
-  const [start, setStart] = useState("21:00");
-  const [end, setEnd] = useState("25:00");
-  const [tableId, setTableId] = useState(presetTable);
+  const [title, setTitle] = useState(initial?.meta.title ?? "");
+  const [dates, setDates] = useState<string[]>(initial?.manual?.dates ?? [todayStr()]);
+  const [start, setStart] = useState(initial?.manual?.start ?? "21:00");
+  const [end, setEnd] = useState(initial?.manual?.end ?? "25:00");
+  const [tableId, setTableId] = useState(initial?.tableId ?? presetTable);
+  const [error, setError] = useState<string | null>(null);
   const myTables = Object.values(state.tables).filter((t) => t.memberIds.includes(state.me) || t.ownerId === state.me);
   const table = tableId ? state.tables[tableId] : null;
 
   function addDate() {
-    const last = dates.at(-1);
-    const base = last ? new Date(last + "T00:00:00Z") : new Date();
-    base.setUTCDate(base.getUTCDate() + (last ? 1 : 0));
+    const last = dates.at(-1) || todayStr();
+    const base = new Date(last + "T00:00:00Z");
+    base.setUTCDate(base.getUTCDate() + 1);
     setDates([...dates, base.toISOString().slice(0, 10)]);
   }
 
   function next() {
     if (!title.trim()) {
-      toast("タイトルを入力してください");
+      setError("タイトルを入力してください。");
       return;
     }
-    if (dates.length === 0) {
-      toast("実施日を追加してください");
+    if (dates.some((date) => !/^\d{4}-\d{2}-\d{2}$/.test(date)) || new Set(dates).size !== dates.length) {
+      setError("実施日を重複しない日付で入力してください。");
       return;
     }
-    const range = buildSessionRange({ dates, startTime: start, endTime: end });
+    const sortedDates = [...dates].sort();
+    const range = buildSessionRange({ dates: sortedDates, startTime: start, endTime: end });
     if (!range.ok) {
-      toast(range.error ?? "時刻を確認してください");
+      setError(range.error ?? "時刻を確認してください");
       return;
     }
     const members = (table?.memberIds.filter((m) => m !== state.me)) ?? [];
     onNext({
-      ...buildDraft({ fileName: null, channels: [], attachLog: null, presetTable, presetScenario, manual: null }),
-      meta: { title: title.trim(), systemId: table?.systemId ?? "general" },
+      ...(initial ?? buildDraft({ fileName: null, channels: [], attachLog: null, presetTable, presetScenario, manual: null })),
+      meta: { title: title.trim(), systemId: table?.systemId ?? initial?.meta.systemId ?? "general" },
       tableId,
-      players: members.map((m) => ({ userId: m, characterIds: [] })),
-      manual: { dates, start, end },
+      players: initial?.tableId === tableId ? initial.players : members.map((m) => ({ userId: m, characterIds: [] })),
+      manual: { dates: sortedDates, start, end },
     });
   }
 
@@ -376,19 +390,20 @@ function ManualForm({
             ))}
           </select>
         </Field>
-        <Field label="実施日" hint="複数日にまたがる場合は日を追加できます">
-          <div className="flex flex-wrap items-center gap-1.5">
+        <div className="mt-2.5">
+          <div className="text-xs font-semibold mb-1">実施日</div>
+          <div className="space-y-2">
             {dates.map((d, i) => (
-              <span key={i} className="badge badge-ghost gap-1">
-                {fmtDate(d)}
+              <div key={i} className="flex items-center gap-2">
+                <input type="date" aria-label={`実施日 ${i + 1}`} className="input input-bordered input-sm w-full bg-base-100" value={d} onChange={(e) => setDates(dates.map((date, index) => index === i ? e.target.value : date))} />
                 {dates.length > 1 && (
-                  <button onClick={() => setDates(dates.filter((_, x) => x !== i))} aria-label={`${fmtDate(d)}を削除`}>✕</button>
+                  <button className="btn btn-ghost btn-sm btn-square" onClick={() => setDates(dates.filter((_, x) => x !== i))} aria-label={`実施日 ${i + 1} を削除`}><IconX width={16} height={16} /></button>
                 )}
-              </span>
+              </div>
             ))}
             <button className="btn btn-ghost btn-xs" onClick={addDate}><IconPlus width={12} height={12} /> 日を追加</button>
           </div>
-        </Field>
+        </div>
         <div className="grid grid-cols-2 gap-x-3">
           <Field label="開始（JST）" hint="翌朝にまたがる場合は +24h で入力（例: 27:30）">
             <input className="input input-bordered input-sm w-full bg-base-100" value={start} onChange={(e) => setStart(e.target.value)} />
@@ -398,6 +413,7 @@ function ManualForm({
           </Field>
         </div>
       </div>
+      {error && <p role="alert" className="text-sm text-error mt-3">{error}</p>}
       {table && table.memberIds.length > 1 && (
         <div className="mt-3 flex items-center gap-2 text-[12px] text-base-content/70">
           <IconUsersGroup width={15} height={15} />
@@ -414,8 +430,6 @@ function ManualForm({
 
 /* ================= ステップ2: 分類の確認(ログありのみ) ================= */
 function Step2({ draft, setDraft, onNext, onBack }: { draft: Draft; setDraft: (d: Draft) => void; onNext: () => void; onBack: () => void }) {
-  const secretCount = draft.channels.filter((c) => c.secret).reduce((a, c) => a + c.msgs.length, 0);
-  const sharedChannels = draft.channels.filter((c) => !c.secret);
   const previewLog = useMemo(() => ({ channels: draft.channels } as unknown as Log), [draft]);
   const previewFilter: TimelineFilter = { query: "", channel: "all" };
 
@@ -424,20 +438,19 @@ function Step2({ draft, setDraft, onNext, onBack }: { draft: Draft; setDraft: (d
       <div className="grid sm:grid-cols-2 gap-3">
         {/* 日時の自動算出 */}
         <div className="card bg-base-100 border border-base-300 px-4 py-4">
-          <b className="text-[14px]">日時の自動算出</b>
+          <b className="text-[14px]">日時</b>
           {draft.derived ? (
             <div className="flex flex-wrap items-center gap-2 bg-success/10 border border-success/30 rounded-xl px-3 py-2 mt-2 text-[12.5px]">
               <IconWand width={14} height={14} className="text-success flex-none" />
               <span>{draft.derived.dates.map(fmtDate).join("・")} · {fmtDur(sessionPlayMinutes({ hasLog: true, channels: draft.channels, t0: draft.derived.t0, t1: draft.derived.t1 }))}</span>
-              <span className="text-[10.5px] text-ink2 w-full">ログのタイムスタンプから算出しました（あとで編集できます）</span>
             </div>
           ) : (
-            <div className="text-[12px] text-ink2 mt-1">タイムスタンプが読めませんでした。次のステップで手入力できます。</div>
+            <div className="text-[12px] text-ink2 mt-1">日時を読み取れませんでした。記録後に編集できます。</div>
           )}
         </div>
         {/* システムの推定 */}
         <div className="card bg-base-100 border border-base-300 px-4 py-4">
-          <b className="text-[14px]">システムの自動推定</b>
+          <b className="text-[14px]">システム</b>
           {draft.guess ? (
             <div className="flex flex-wrap items-center gap-2 bg-primary/10 border border-primary/30 rounded-xl px-3 py-2 mt-2 text-[12.5px]">
               <IconSparkles width={14} height={14} className="text-primary flex-none" />
@@ -454,17 +467,14 @@ function Step2({ draft, setDraft, onNext, onBack }: { draft: Draft; setDraft: (d
         <b className="text-[14px]">検出されたタブ</b>
         <p className="text-[11.5px] text-ink2 mt-0.5 mb-2 flex items-center gap-1.5">
           <IconShieldLock width={13} height={13} className="text-error" />
-          シークレットタブとシナリオ本文は、共有ビューに<b>構造的に含まれません</b>。あなた自身のビューではすべて確認できます。
+          共有するログには、シークレットタブとシナリオ本文を含めません。
         </p>
         {draft.channels.map((c) => (
-          <div key={c.id} className="flex items-center gap-3 py-2 border-b border-base-200 last:border-0">
-            <b className="text-[13px] w-28">{c.name}</b>
+          <div key={c.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 border-b border-base-200 last:border-0">
+            <b className="text-[13px] min-w-20 break-words">{c.name}</b>
             {c.secret && <Tag v="danger" className="!badge-xs">シークレット · 共有から除外</Tag>}
             <span className="text-[11px] text-ink2">
               {c.msgs.length}行 · ロール {c.msgs.filter((m) => m.type === "roll").length}件
-            </span>
-            <span className="ml-auto text-[11px] text-ink2">
-              {c.secret ? "自分のビューでのみ確認" : "共有に含まれます"}
             </span>
           </div>
         ))}
@@ -472,12 +482,11 @@ function Step2({ draft, setDraft, onNext, onBack }: { draft: Draft; setDraft: (d
 
       <div className="card bg-base-100 border border-base-300 px-4 py-4 mt-3">
         <b className="text-[14px]">発言者のラベル</b>
-        <p className="text-[11.5px] text-ink2 mt-0.5 mb-2">共有ビューでの表示ラベルです。</p>
         <div className="grid sm:grid-cols-2 gap-x-6">
           {Object.entries(draft.kinds).map(([sp, kind]) => (
             <div key={sp} className="flex items-center gap-3 py-1.5 border-b border-base-200 last:border-0">
               <b className="text-[13px] w-28 truncate">{sp}</b>
-              <select className="select select-bordered select-xs w-24 bg-base-100"
+              <select aria-label={`${sp}の役割`} className="select select-bordered select-xs w-24 bg-base-100"
                 value={kind}
                 onChange={(e) => setDraft({ ...draft, kinds: { ...draft.kinds, [sp]: e.target.value as MsgKind } })}
               >
@@ -496,9 +505,6 @@ function Step2({ draft, setDraft, onNext, onBack }: { draft: Draft; setDraft: (d
 
       <div className="flex items-center justify-end gap-2 mt-4">
         <button className="btn btn-ghost" onClick={onBack}>戻る</button>
-        <span className="text-[11.5px] text-ink2 mr-auto">
-          共有に含まれる: {sharedChannels.reduce((a, c) => a + c.msgs.length, 0)} 行（シークレット{secretCount}行と本文行は共有ビューに出ません）
-        </span>
         <button className="btn btn-primary" onClick={onNext}>シナリオと参加者へ進む</button>
       </div>
     </>
@@ -510,7 +516,6 @@ function Step3({
   draft,
   setDraft,
   attachId,
-  presetScenario,
   committing,
   manual,
   onCommit,
@@ -519,7 +524,6 @@ function Step3({
   draft: Draft;
   setDraft: (d: Draft) => void;
   attachId: string | null;
-  presetScenario: string;
   committing: boolean;
   manual: boolean;
   onCommit: () => void;
@@ -527,11 +531,12 @@ function Step3({
 }) {
   const { state, toast } = useStore();
   const [scq, setScq] = useState("");
-  const [showNew, setShowNew] = useState(false);
-  const effectiveScenario = presetScenario || draft.scenarioId;
+  const [showNew, setShowNew] = useState(Boolean(draft.newScenario));
+  const scenario = state.scenarios[draft.scenarioId];
+  const effectiveScenario = scenario?.id;
 
   const scResults = useMemo(
-    () => Object.values(state.scenarios).filter((s) => !scq.trim() || (s.title + s.author).includes(scq.trim())).slice(0, 5),
+    () => Object.values(state.scenarios).filter((s) => !scq.trim() || (s.title + s.author).toLowerCase().includes(scq.trim().toLowerCase())).slice(0, 5),
     [state.scenarios, scq]
   );
 
@@ -554,8 +559,7 @@ function Step3({
   }
   function pickScenario(id: string) {
     const sc = state.scenarios[id];
-    setDraft({ ...draft, scenarioId: id, meta: { ...draft.meta, systemId: sc.systemId }, guess: null });
-    toast(`シナリオ「${sc.title}」を設定しました（システムもシナリオに合わせました）`);
+    setDraft({ ...draft, scenarioId: id, newScenario: null, meta: { ...draft.meta, systemId: sc.systemId, title: draft.meta.title || sc.title }, guess: null });
   }
 
   return (
@@ -564,17 +568,17 @@ function Step3({
         <b className="text-[14px]">シナリオを選ぶ</b>
         {effectiveScenario && !showNew && (
           <div className="flex items-center gap-2 mt-2">
-            <Tag v="accent">{state.scenarios[effectiveScenario].emoji} {state.scenarios[effectiveScenario].title}</Tag>
+            <span className="font-semibold text-sm">{scenario?.title}</span>
             <button className="btn btn-ghost btn-xs" onClick={() => setDraft({ ...draft, scenarioId: "" })}>取り消す</button>
           </div>
         )}
         {!effectiveScenario && !showNew && (
           <>
-            <input className="input input-bordered input-sm w-full bg-base-100 mt-2" placeholder="カタログを検索、または BOOTH / TALTO のURLを貼り付け…" value={scq} onChange={(e) => setScq(e.target.value)} />
+            <input aria-label="シナリオを検索" className="input input-bordered input-sm w-full bg-base-100 mt-2" placeholder="タイトル・作者で検索…" value={scq} onChange={(e) => setScq(e.target.value)} />
             <div className="mt-2 divide-y divide-base-200">
               {scResults.map((s) => (
                 <button key={s.id} className="flex items-center gap-3 w-full py-2 text-left hover:bg-base-200/50 rounded-lg px-1" onClick={() => pickScenario(s.id)}>
-                  <span className="w-9 h-9 rounded-lg flex items-center justify-center text-lg flex-none" style={{ background: s.bg }}>{s.emoji}</span>
+                  <IconBooks width={20} height={20} className="text-base-content/60 flex-none" />
                   <span className="grow min-w-0">
                     <b className="text-[13.5px] block truncate">{s.title}</b>
                     <span className="text-[11px] text-ink2">{s.author} · {SYSTEMS[s.systemId]?.short}</span>
@@ -583,12 +587,8 @@ function Step3({
                 </button>
               ))}
             </div>
-            {scq.trim() && (
-              <p className="text-[11px] text-ink2 mt-2">
-                URLを貼ると、その公開ページからタイトルと作者を取得します。見つからない場合は
-                <button className="btn btn-ghost btn-xs text-primary px-1" onClick={() => setShowNew(true)}>手動で新規登録</button>
-              </p>
-            )}
+            {scResults.length === 0 && <p className="text-xs text-base-content/70 mt-2">一致するシナリオがありません。</p>}
+            <button className="btn btn-ghost btn-sm text-primary mt-2" onClick={() => setShowNew(true)}>シナリオを新しく登録</button>
           </>
         )}
         {showNew && (
@@ -608,28 +608,29 @@ function Step3({
                 </select>
               </Field>
             </div>
-            <button className="btn btn-ghost btn-xs mt-1" onClick={() => setShowNew(false)}>既存から選ぶ</button>
+            <button className="btn btn-ghost btn-xs mt-1" onClick={() => { setShowNew(false); setDraft({ ...draft, newScenario: null }); }}>既存から選ぶ</button>
           </div>
         )}
       </div>
 
       <div className="card bg-base-100 border border-base-300 px-4 py-4 mt-3">
         <b className="text-[14px]">卓（メンバーを自動で入れます）</b>
-        <select className="select select-bordered select-sm bg-base-100" value={draft.tableId} onChange={(e) => selectTable(e.target.value)}>
+        <select aria-label="卓を選ぶ" className="select select-bordered select-sm bg-base-100 w-full mt-2" value={draft.tableId} onChange={(e) => selectTable(e.target.value)}>
           <option value="">— 卓を選ばずに進む —</option>
-          {Object.values(state.tables).map((t) => (
+          {Object.values(state.tables).filter((t) => t.ownerId === state.me || t.memberIds.includes(state.me)).map((t) => (
             <option key={t.id} value={t.id}>{SYSTEMS[t.systemId ?? ""]?.short ?? "汎"} {t.name}（{t.memberIds.length}人）</option>
           ))}
         </select>
       </div>
 
       <div className="card bg-base-100 border border-base-300 px-4 py-4 mt-3">
-        <b className="text-[14px]">参加者のリンク</b>
+        <b className="text-[14px]">参加者</b>
         <p className="text-[11.5px] text-ink2 mt-0.5 mb-2">
-          同意フォームは不要です。本人はあとから自分で外せます。追加は検索から。
+          参加者とキャラクターは、記録したあとでも追加できます。
         </p>
         <PlayerPicker
           state={state}
+          exclude={[state.me]}
           selected={draft.players.map((p) => p.userId)}
           onChange={(ids) => setDraft({ ...draft, players: ids.map((id) => draft.players.find((p) => p.userId === id) ?? { userId: id, characterIds: [] }) })}
           placeholder="ユーザー名で検索して追加…"
@@ -643,17 +644,16 @@ function Step3({
               <div key={p.userId} className="flex flex-wrap items-center gap-2.5 py-2 border-b border-base-200 last:border-0">
                 <span className="w-6 h-6 rounded-full inline-flex items-center justify-center text-[11px] font-extrabold text-white flex-none" style={{ background: u.color }}>{u.name[0]}</span>
                 <b className="text-[13px] w-20">{u.name}</b>
-                <select className="select select-bordered select-sm bg-base-100" value={p.characterIds[0] ?? ""} onChange={(e) => setChar(p.userId, e.target.value)}>
+                <select aria-label={`${u.name}のキャラクター`} className="select select-bordered select-sm bg-base-100 max-w-full grow" value={p.characterIds[0] ?? ""} onChange={(e) => setChar(p.userId, e.target.value)}>
                   <option value="">キャラクター: なし（あとで）</option>
                   {chars.map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
-                  <option value="__import__">取り込む（CCFOLIA JSON / いあきゃら / 保管所）</option>
                 </select>
               </div>
             );
           })}
-          {draft.players.length === 0 && <p className="text-[11.5px] text-ink2 py-1">参加者なしで進めます（あとから参加者タブで追加できます）。</p>}
+          {draft.players.length === 0 && <p className="text-xs text-base-content/70 py-1">あなたの記録として保存します。</p>}
         </div>
       </div>
 
@@ -668,7 +668,7 @@ function Step3({
             hint={draft.guess && draft.meta.systemId === draft.guess.id ? undefined : "シナリオを選ぶと、シナリオのシステムに合わせます"}
           >
             <div className="flex items-center gap-2">
-              <select className="select select-bordered select-sm bg-base-100" value={draft.meta.systemId} onChange={(e) => setDraft({ ...draft, meta: { ...draft.meta, systemId: e.target.value }, guess: null })}>
+              <select aria-label="システム" className="select select-bordered select-sm bg-base-100 w-full min-w-0" value={draft.meta.systemId} onChange={(e) => setDraft({ ...draft, meta: { ...draft.meta, systemId: e.target.value }, guess: null })}>
                 {SYSTEM_LIST.map((s) => (
                   <option key={s.id} value={s.id}>{s.short} {s.name}</option>
                 ))}
@@ -707,7 +707,7 @@ function Step4({ result, attachId, manual }: { result: CommitLogResult | null; a
     <div className="card bg-base-100 border border-base-300 text-center px-6 py-10">
       <h2 className="text-lg font-extrabold mt-2">{manual ? "セッションを記録しました" : "ログをアップロードしました"}</h2>
       <p className="text-[12px] text-ink2 mt-1">
-        {manual ? "ログはあとからセッション詳細から添付できます。" : "シークレットタブとシナリオ本文は共有ビューに含まれません。"}
+        メンバー限定で記録しました。共有範囲はセッションの「共有」から変更できます。
       </p>
       <div className="max-w-md mx-auto mt-4">
         <CopyBox text={`${location.origin}${location.pathname}#/share/l/${result.slug}`} />
