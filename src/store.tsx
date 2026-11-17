@@ -65,6 +65,7 @@ interface StoreApi {
   enterDemo: (userId?: string) => void;
   refreshProfile: () => void;
   exportData: () => string;
+  importData: (next: State) => void;
 }
 
 const Ctx = createContext<StoreApi>(null!);
@@ -80,6 +81,7 @@ export function StoreProvider({ children, initialState, storageKey = KEY, authUs
   const [state, setState] = useState<State>(initial.state);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [otherTabUpdated, setOtherTabUpdated] = useState(false);
+  const [dataCorrupt, setDataCorrupt] = useState(initial.issue === "corrupt");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [cloudStatus, setCloudStatus] = useState<StoreApi["cloudStatus"]>(authUser ? "saving" : "idle");
   const [retry, setRetry] = useState(0);
@@ -212,6 +214,16 @@ export function StoreProvider({ children, initialState, storageKey = KEY, authUs
         if (authUser) setState((prev) => ({ ...prev, users: { ...prev.users, [authUser.uid]: { ...prev.users[authUser.uid], ...firebaseUserProfile(authUser) } } }));
       },
       exportData: () => initial.issue === "corrupt" ? (localStorage.getItem(storageKey) ?? JSON.stringify(stateRef.current)) : JSON.stringify(stateRef.current, null, 2),
+      importData: (next) => {
+        if (authUser && next.me !== authUser.uid) throw new Error("このアカウントの記録を選んでください。");
+        if (dataCorrupt) {
+          const raw = localStorage.getItem(storageKey);
+          if (raw) localStorage.setItem(`${storageKey}-backup-${Date.now()}`, raw);
+        }
+        blockedRef.current = false;
+        setDataCorrupt(false);
+        setState({ ...next, entered: true });
+      },
       update: (fn) =>
         setState((prev) => {
           const next = structuredClone(prev);
@@ -225,10 +237,10 @@ export function StoreProvider({ children, initialState, storageKey = KEY, authUs
       },
       saveError,
       dismissSaveError: () => setSaveError(null),
-      dataCorrupt: initial.issue === "corrupt",
+      dataCorrupt,
       otherTabUpdated,
     }),
-    [state, saveError, otherTabUpdated, initial.issue, authUser, cloudStatus]
+    [state, saveError, otherTabUpdated, initial.issue, authUser, cloudStatus, dataCorrupt]
   );
 
   return (

@@ -29,7 +29,7 @@ export function ThemeSync() {
 }
 
 export default function Settings() {
-  const { state, update, toast, authUser, cloudStatus, enterDemo, exportData, refreshProfile, retrySave, saveError } = useStore();
+  const { state, update, toast, authUser, cloudStatus, enterDemo, exportData, importData, refreshProfile, retrySave, saveError } = useStore();
   const nav = useNavigate();
   const me = state.users[state.me];
   const [mode, setMode] = useState<ThemeMode>(currentThemeMode);
@@ -105,7 +105,7 @@ export default function Settings() {
             const imported = parseSavedState(await file.text());
             if (!imported) { toast("卓譜の記録として読み込めませんでした。ファイルを確認してください。"); return; }
             if (authUser && imported.me !== authUser.uid) { toast("このアカウントの記録を選んでください。"); return; }
-            update((s) => { Object.assign(s, imported); s.entered = true; }); toast("記録を読み込みました");
+            importData(imported); toast("記録を読み込みました");
           } catch { toast("ファイルを読み込めませんでした。もう一度お試しください。"); }
           event.target.value = "";
         }} /></label>
