@@ -11,6 +11,8 @@ node scripts/ops.ts deploy --setup   # first time / when build settings or publi
 node scripts/ops.ts deploy           # later deployments
 ```
 
+Deploy Now's Next.js builder accepts only npm (`package-lock.json`; pnpm and yarn are rejected). The repository stays on pnpm: `deploy` converts only the uploaded copy, pinning direct dependencies to the versions pnpm resolved, generating `package-lock.json` and dropping pnpm-only files. `node scripts/ops.ts deploy --local-build` runs the same install and build on that copy locally without uploading.
+
 `deploy` uploads the Git-tracked source (never `.env*` or `node_modules`) to a temporary directory and runs `lolipop deploy`; Deploy Now installs and builds in the cloud with the settings in `DEPLOY_BUILD` (`scripts/ops.ts`). `pnpm run build` runs `next build` and then copies `public/` and `.next/static` into `.next/standalone` (Next.js leaves them out of the standalone output). `--setup` also writes the build settings and the public `NEXT_PUBLIC_FIREBASE_*` values from `.env.local` to the project environment; they are inlined at build time.
 
 The deployment command submits an asynchronous build. A successful upload is not proof of readiness: confirm the returned deployment reaches `DEPLOYMENT_STATUS_READY` and visit the public site before reporting success.

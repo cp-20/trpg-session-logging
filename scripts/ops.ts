@@ -71,10 +71,42 @@ function runCmd(command: string, args: string[], cwd = ROOT): void {
 /** LOLIPOP! Deploy Now のビルド設定。Next.js の standalone 出力をサーバーとして動かす */
 const DEPLOY_BUILD = {
   framework: "next",
-  install: "npx -y pnpm@12.11.2 install --frozen-lockfile",
-  build: "npx -y pnpm@12.11.2 run build",
+  install: "npm ci --ignore-scripts",
+  build: "npm run build",
   output: ".next/standalone",
 };
+
+/**
+ * Deploy Now の Next.js ビルドは npm（package-lock.json）しか受け付けない。
+ * リポジトリは pnpm のまま、送る複製だけを npm 用にする: 直接の依存は pnpm が解決した
+ * 版に固定し、package-lock.json を作り、pnpm 専用の設定を外す。
+ */
+function prepareNpmSource(staging: string): void {
+  const resolved = JSON.parse(
+    execFileSync("pnpm", ["list", "--json", "--depth", "0"], { cwd: ROOT, encoding: "utf8" }),
+  ) as {
+    dependencies?: Record<string, { version: string }>;
+    devDependencies?: Record<string, { version: string }>;
+  }[];
+  const versions: Record<string, string> = {};
+  for (const group of [resolved[0]?.dependencies ?? {}, resolved[0]?.devDependencies ?? {}]) {
+    for (const [name, info] of Object.entries(group)) versions[name] = info.version;
+  }
+  const pkgPath = join(staging, "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, unknown> & {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  for (const field of ["dependencies", "devDependencies"] as const) {
+    for (const name of Object.keys(pkg[field] ?? {})) {
+      if (versions[name]) pkg[field]![name] = versions[name]!;
+    }
+  }
+  delete pkg.packageManager;
+  writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+  for (const f of ["pnpm-lock.yaml", "pnpm-workspace.yaml"]) rmSync(join(staging, f), { force: true });
+  runCmd("npm", ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"], staging);
+}
 /** ビルド時に埋め込む公開設定（Firebase のブラウザ用設定は秘密ではない）。値は .env.local から読む */
 const PUBLIC_ENV_KEYS = [
   "NEXT_PUBLIC_FIREBASE_API_KEY",
@@ -130,8 +162,12 @@ async function cmdDeploy(args: string[]): Promise<void> {
     for (const key of PUBLIC_ENV_KEYS) {
       const value = env[key];
       if (!value) throw new Error(`${key} is missing in .env.local`);
-      const verb = existing.includes(`"${key}"`) ? "update" : "create";
-      lolipop(["env", verb, key, value, "--project", LOLIPOP_PROJECT]);
+      // create は値を位置引数で、update は --value で受け取る
+      if (existing.includes(`"${key}"`)) {
+        lolipop(["env", "update", key, "--value", value, "--project", LOLIPOP_PROJECT]);
+      } else {
+        lolipop(["env", "create", key, value, "--project", LOLIPOP_PROJECT]);
+      }
     }
   }
   const files = execFileSync("git", ["ls-files", "-co", "--exclude-standard"], {
@@ -143,6 +179,21 @@ async function cmdDeploy(args: string[]): Promise<void> {
   const staging = mkdtempSync(join(tmpdir(), "takufu-deploy-"));
   try {
     for (const f of files) cpSync(join(ROOT, f), join(staging, f), { recursive: true });
+    prepareNpmSource(staging);
+    if (args.includes("--local-build")) {
+      // クラウドと同じ手順を手元で試す（アップロードしない）
+      const env = { ...process.env, ...readEnvLocal() };
+      for (const [cmd, ...rest] of [DEPLOY_BUILD.install.split(" "), DEPLOY_BUILD.build.split(" ")]) {
+        const r = spawnSync(cmd!, rest, { cwd: staging, stdio: "inherit", env });
+        if (r.status !== 0) throw new Error(`${cmd} ${rest.join(" ")} failed`);
+      }
+      if (!existsSync(join(staging, ".next/standalone/server.js")))
+        throw new Error("standalone server.js missing");
+      if (!existsSync(join(staging, ".next/standalone/.next/static")))
+        throw new Error("static assets missing");
+      console.log("Local build OK (nothing uploaded).");
+      return;
+    }
     lolipop(["deploy", "--project", LOLIPOP_PROJECT, "--json"], staging);
     console.log(
       `Check status: node ${cli} project show --project ${LOLIPOP_PROJECT} --json\nSite: https://takufu.lolipop-now.app`,
