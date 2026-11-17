@@ -1,82 +1,143 @@
 rules_version = '2';
-
-// 卓譜 (Takufu) — Firestore セキュリティルール v1
-//
-// 認可の基本方針(plan.md):
-//  - サインイン済み(uid != null)のみ読み書き
-//  - ログの本文は伏せ字済みのものだけを保存し、シークレットは保存しない(クライアント契約)
-//  - 閲覧可否の最終判断は将来 Worker/Rules で行う。この v1 は「書き込みは所有者のみ、
-//    読み取りは認証済みまで」を最小境界とする
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function ownUser(userId) { return signedIn() && request.auth.uid == userId; }
+    function owner(data) { return signedIn() && data.ownerId == request.auth.uid; }
 
-    function signedIn() {
-      return request.auth != null;
-    }
-    function uid() {
-      return request.auth.uid;
-    }
-    function isOwner(doc) {
-      return signedIn() && doc.ownerId == uid();
-    }
-    function isParticipant(doc) {
-      return signedIn() && doc.players[uid()] != null;
-    }
-
-    // セッション(ログ)メタデータ
-    match /sessions/{sessionId} {
-      // 読み取り: 所有者・参加者、または共有範囲が公開のもの
-      // (members/passed の细粒度判定はアプリ側ゲート+将来のWorkerに委譲)
-      allow get: if isOwner(resource.data) || isParticipant(resource.data) || resource.data.scope == "public";
-      allow list: if signedIn();
-      allow create: if signedIn()
-        && request.resource.data.ownerId == uid()
-        && request.resource.data.scope in ["members", "passed", "public"];
-      // 変更は所有者のみ。共有範囲・参加者の改変は所有者か本人が行える
-      allow update: if isOwner(resource.data);
-      allow delete: if isOwner(resource.data);
-
-      // ログ本文(zstd済みのJSONを chunks に分割して保存する想定)
-      match /logBody/{docId} {
-        allow read: if isOwner(get(/databases/$(database)/documents/sessions/$(sessionId)));
-        allow write: if isOwner(get(/databases/$(database)/documents/sessions/$(sessionId)));
-      }
-
-      // 参加者ドキュメント(将来の participants コレクション)
-      match /participants/{uid} {
-        // 本人は自分の参加状態(hidden/unlink)を変更できる
-        allow read: if isOwner(get(/databases/$(database)/documents/sessions/$(sessionId))) || request.auth.uid == uid;
-        allow create: if isOwner(get(/databases/$(database)/documents/sessions/$(sessionId)))
-          || request.auth.uid == uid;
-        allow update: if isOwner(get(/databases/$(database)/documents/sessions/$(sessionId))) || request.auth.uid == uid;
-        allow delete: if isOwner(get(/databases/$(database)/documents/sessions/$(sessionId))) || request.auth.uid == uid;
-      }
-    }
-
-    // キャラクター(ユーザー帰属)
-    match /characters/{characterId} {
-      allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.ownerId == uid();
-      allow update, delete: if signedIn() && resource.data.ownerId == uid();
-    }
-
-    // シナリオカタログ(メタデータのみ・追加自由/編集は作者)
-    match /scenarios/{scenarioId} {
-      allow read: if signedIn();
-      allow create: if signedIn();
-      allow update, delete: if signedIn() && resource.data.claimedBy == uid();
-    }
-
-    // ユーザープロフィール
     match /users/{userId} {
-      allow read: if signedIn();
-      allow create: if signedIn() && userId == uid();
-      allow update, delete: if signedIn() && userId == uid();
+      allow read, write: if ownUser(userId);
+      match /workspace/{document} {
+        allow read, delete: if ownUser(userId);
+        allow create, update: if ownUser(userId)
+          && request.resource.data.keys().hasOnly(['revision', 'chunkCount', 'updatedAt'])
+          && request.resource.data.revision is string
+          && request.resource.data.chunkCount is int
+          && request.resource.data.chunkCount > 0 && request.resource.data.chunkCount <= 200;
+      }
+      match /revisions/{revision}/chunks/{chunkId} {
+        allow read, delete: if ownUser(userId);
+        allow create: if ownUser(userId)
+          && request.resource.data.keys().hasOnly(['data'])
+          && request.resource.data.data is string;
+      }
     }
 
-    // 単一writer/期待リビジョン競合などの操作ログ(将来)
-    match /audit/{docId} {
-      allow read, write: if signedIn();
+    function share(slug) {
+      return get(/databases/$(database)/documents/sharedLogs/$(slug)).data;
+    }
+    function canReadShare(slug, revision) {
+      let data = share(slug);
+      return data.revision != 'revoked' && data.revision == revision && (
+        owner(data)
+        || (signedIn() && (
+          exists(/databases/$(database)/documents/sharedLogs/$(slug)/members/$(request.auth.uid))
+            ? get(/databases/$(database)/documents/sharedLogs/$(slug)/members/$(request.auth.uid)).data.linked == true
+            : request.auth.uid in data.memberIds))
+        || (data.scope == 'public' && data.scenarioPolicy == 'public')
+        || (signedIn() && data.scope == 'passed' && data.scenarioPolicy == 'public'
+          && exists(/databases/$(database)/documents/sharedLogs/$(slug)/access/$(request.auth.uid)))
+      );
+    }
+    function validMember() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['inviteId', 'hidden', 'linked', 'displayName', 'color', 'image'])
+        && data.inviteId is string && data.hidden is bool && data.linked is bool
+        && data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 100
+        && data.color is string && data.color.matches('^#[0-9a-fA-F]{6}$')
+        && data.image is string && data.image.size() <= 4096;
+    }
+    function validShare() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['ownerId', 'scope', 'memberIds', 'scenarioPolicy', 'revision', 'chunkCount'])
+        && data.ownerId == request.auth.uid
+        && data.scope in ['members', 'passed', 'public']
+        && data.scenarioPolicy in ['unknown', 'members', 'public']
+        && (data.scope == 'members' || data.scenarioPolicy == 'public')
+        && data.memberIds is list && data.memberIds.size() <= 500
+        && data.revision is string
+        && data.chunkCount is int && data.chunkCount > 0 && data.chunkCount <= 200;
+    }
+
+    match /sharedLogs/{slug} {
+      // Only access metadata: no title, names, log text or profile data.
+      allow get: if true;
+      allow list: if false;
+      allow create: if signedIn() && validShare();
+      allow update: if owner(resource.data) && validShare();
+      allow delete: if false;
+
+      match /revisions/{revision}/chunks/{chunkId} {
+        allow read: if owner(resource.data) || canReadShare(slug, revision);
+        allow create: if signedIn()
+          && request.resource.data.keys().hasOnly(['data', 'ownerId'])
+          && request.resource.data.ownerId == request.auth.uid
+          && request.resource.data.data is string
+          && (!exists(/databases/$(database)/documents/sharedLogs/$(slug)) || owner(share(slug)));
+        allow delete: if owner(resource.data);
+      }
+      match /access/{userId} {
+        allow get, delete: if ownUser(userId);
+        allow create, update: if ownUser(userId)
+          && share(slug).scope == 'passed' && share(slug).scenarioPolicy == 'public'
+          && request.resource.data.keys().hasOnly(['passed'])
+          && request.resource.data.passed == true;
+      }
+      match /members/{userId} {
+        allow get, list: if ownUser(userId) || owner(share(slug))
+          || (resource.data.hidden == false && resource.data.linked == true && canReadShare(slug, share(slug).revision));
+        allow create: if ownUser(userId) && validMember() && (
+          owner(share(slug)) || userId in share(slug).memberIds || (
+            request.resource.data.hidden == false && request.resource.data.linked == true
+            && get(/databases/$(database)/documents/sharedInvites/$(request.resource.data.inviteId)).data.slug == slug
+            && get(/databases/$(database)/documents/sharedInvites/$(request.resource.data.inviteId)).data.ownerId == share(slug).ownerId
+            && get(/databases/$(database)/documents/sharedInvites/$(request.resource.data.inviteId)).data.expiresAt > request.time));
+        allow update: if (
+          ownUser(userId) && validMember()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hidden', 'linked', 'displayName', 'color', 'image']))
+          || (owner(share(slug)) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linked'])
+            && request.resource.data.linked == false);
+        allow delete: if false;
+      }
+    }
+    match /sharedInvites/{token} {
+      allow get: if resource.data.expiresAt > request.time
+        && exists(/databases/$(database)/documents/sharedLogs/$(resource.data.slug))
+        && share(resource.data.slug).revision != 'revoked';
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['slug', 'ownerId', 'title', 'systemId', 'scenarioTitle', 'expiresAt'])
+        && request.resource.data.ownerId == request.auth.uid
+        && owner(share(request.resource.data.slug))
+        && token.size() >= 32
+        && request.resource.data.title is string && request.resource.data.systemId is string
+        && request.resource.data.scenarioTitle is string
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt <= request.time + duration.value(31, 'd');
+      allow delete: if owner(resource.data);
+    }
+    match /sharedCharacters/{characterId} {
+      allow get: if true;
+      allow list, delete: if false;
+      allow create, update: if signedIn()
+        && (!exists(/databases/$(database)/documents/sharedCharacters/$(characterId)) || owner(resource.data))
+        && request.resource.data.keys().hasOnly(['ownerId', 'enabled', 'revision', 'chunkCount'])
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.enabled is bool
+        && request.resource.data.revision is string
+        && request.resource.data.chunkCount is int && request.resource.data.chunkCount > 0 && request.resource.data.chunkCount <= 200;
+      match /revisions/{revision}/chunks/{chunkId} {
+        allow read: if owner(resource.data) || (
+          get(/databases/$(database)/documents/sharedCharacters/$(characterId)).data.enabled == true
+          && get(/databases/$(database)/documents/sharedCharacters/$(characterId)).data.revision == revision);
+        allow create: if signedIn()
+          && request.resource.data.keys().hasOnly(['data', 'ownerId'])
+          && request.resource.data.ownerId == request.auth.uid && request.resource.data.data is string
+          && (!exists(/databases/$(database)/documents/sharedCharacters/$(characterId))
+            || owner(get(/databases/$(database)/documents/sharedCharacters/$(characterId)).data));
+        allow delete: if owner(resource.data);
+      }
     }
   }
 }

@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { download, todayStr } from "../lib/time";
 
 interface Props {
   children: ReactNode;
@@ -28,11 +29,8 @@ export class ErrorBoundary extends Component<Props, State> {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-base-200">
         <div className="card bg-base-100 border border-base-300 max-w-md w-full px-6 py-7 text-center">
-          <div className="text-3xl">😵</div>
-          <h1 className="text-lg font-bold mt-2">予期しないエラーが発生しました</h1>
-          <p className="text-[11.5px] text-ink2 mt-2 break-all text-left max-h-32 overflow-y-auto bg-base-200/60 rounded-lg p-2">
-            {String(this.state.error?.stack ?? this.state.error)}
-          </p>
+          <h1 className="text-lg font-bold mt-2">画面を表示できませんでした</h1>
+          <p className="text-sm text-ink2 mt-3 leading-7">再読み込みして、もう一度お試しください。保存した記録は削除されません。</p>
           <div className="flex justify-center gap-2 mt-4">
             <button
               className="btn btn-primary btn-sm"
@@ -47,17 +45,16 @@ export class ErrorBoundary extends Component<Props, State> {
               className="btn btn-ghost btn-sm"
               onClick={() => {
                 try {
-                  localStorage.removeItem("takufu-state-v4");
+                  const backup = Object.fromEntries(Object.keys(localStorage).filter((key) => key === "takufu-state-v4" || key.startsWith("takufu-cloud-")).map((key) => [key, localStorage.getItem(key)]));
+                  download(`takufu-backup-${todayStr()}.json`, JSON.stringify(backup, null, 2));
                 } catch {
                   /* noop */
                 }
-                location.reload();
               }}
             >
-              データをリセットして再読み込み
+              記録をダウンロード
             </button>
           </div>
-          <p className="text-[10.5px] text-ink2 mt-3">このエラーは開発者ログに記録されます（本実装では Sentry を想定）。</p>
         </div>
       </div>
     );

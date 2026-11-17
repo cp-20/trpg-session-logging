@@ -1,12 +1,8 @@
 {
   "firestore": {
+    "database": "takufu",
     "rules": "firestore.rules",
-    "indexes": "firestore.indexes.json",
-    "databases": {
-      "takufu": {
-        "rules": "firestore.rules"
-      }
-    }
+    "indexes": "firestore.indexes.json"
   },
   "emulators": {
     "auth": {

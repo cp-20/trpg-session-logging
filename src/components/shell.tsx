@@ -8,20 +8,23 @@ import {
   IconPlus, IconX,
 } from "./icons";
 import { SYSTEMS } from "../data/systems";
+import { download, todayStr } from "../lib/time";
 
 function SaveBanners() {
-  const { saveError, dataCorrupt, otherTabUpdated } = useStore();
+  const { saveError, dataCorrupt, otherTabUpdated, retrySave } = useStore();
   const banners: { text: string; kind: "warning" | "error" }[] = [];
   if (otherTabUpdated) banners.push({ text: "別のタブでデータが更新されました。このタブでの変更は保存されていません。", kind: "warning" });
   if (saveError) banners.push({ text: saveError, kind: "error" });
-  if (dataCorrupt) banners.push({ text: "保存データが破損しているため、このセッションでは保存していません。設定からJSONをエクスポートし、データをリセットしてください。", kind: "error" });
+  if (dataCorrupt) banners.push({ text: "保存した記録を読み込めませんでした。元の記録を保護するため、今はサンプルを表示しています。", kind: "error" });
   if (banners.length === 0) return null;
   return (
     <div className="space-y-2 mb-4">
       {banners.map((b, i) => (
-        <div key={i} role="alert" className={`alert ${b.kind} text-[12.5px] py-2.5`}>
+        <div key={i} role="alert" className={`alert alert-${b.kind} text-[12.5px] py-2.5`}>
           <IconAlert width={16} height={16} className="flex-none" />
           <span className="grow">{b.text}</span>
+          {saveError && <button className="btn btn-xs" onClick={retrySave}>もう一度保存</button>}
+          {dataCorrupt && <button className="btn btn-xs" onClick={() => download(`takufu-backup-${todayStr()}.json`, localStorage.getItem("takufu-state-v4") ?? "")}>元の記録をダウンロード</button>}
           {b.kind === "warning" && (
             <button className="btn btn-xs" onClick={() => location.reload()}>
               再読み込みして最新を反映
@@ -62,7 +65,7 @@ export function Shell() {
 }
 
 function Sidebar() {
-  const { state } = useStore();
+  const { state, authUser, cloudStatus } = useStore();
   const nav = useNavigate();
   const loc = useLocation();
   const me = state.users[state.me];
@@ -88,7 +91,7 @@ function Sidebar() {
     <aside className="bg-base-100 border-r border-base-300 h-full w-60 flex flex-col py-4 px-3 gap-1">
       <Link to="/sessions" className="px-2 pb-2 block">
         <span className="font-extrabold text-lg tracking-tight">卓譜</span>
-        <span className="block text-[9px] font-semibold text-ink2 tracking-[0.14em]">TAKUFU · モック</span>
+        {!authUser && <span className="block text-xs text-ink2 mt-1">サンプルでお試し中</span>}
       </Link>
       <GlobalSearch />
       <button className="btn btn-primary btn-sm mt-2 mb-1" onClick={() => nav("/upload")}>
@@ -117,6 +120,7 @@ function Sidebar() {
       )}
 
       <div className="mt-auto pt-2 border-t border-base-300">
+        {authUser && <p className="text-xs text-ink2 px-2 pb-2" role="status">{cloudStatus === "saved" ? "保存済み" : cloudStatus === "saving" ? "保存中…" : cloudStatus === "error" ? "未同期の記録があります" : ""}</p>}
         <Link to={`/users/${state.me}`} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-base-200">
           <Avatar u={me} size={28} />
           <span className="leading-tight">

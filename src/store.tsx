@@ -1,8 +1,13 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { z } from "zod";
+import { parseSavedState, RestoredStateSchema } from "./lib/state-schema";
+export { RestoredStateSchema };
 import type { State } from "./types";
 import { seedState } from "./data/seed";
+import type { User as FirebaseUser } from "firebase/auth";
+import type { User } from "./types";
+import { firebaseUserProfile } from "./lib/auth";
+import { saveCloudState, publishSharedLog, deleteSharedLog, publishSharedCharacter, deleteSharedCharacter, updateSharedMembership } from "./lib/cloud-state";
 
 const KEY = "takufu-state-v4";
 
@@ -23,34 +28,6 @@ export function resetData() {
  * localStorage から復元するデータの最低限の検証(zod)。
  * looseObject なので未知キーは保持(前方互換)。不整合なら seed へフォールバック。
  */
-export const RestoredStateSchema = z.object({
-  me: z.string().min(1),
-  entered: z.boolean(),
-  prefs: z.looseObject({ hideSelfOnShare: z.boolean() }),
-  users: z.record(z.string(), z.looseObject({ id: z.string(), name: z.string(), color: z.string(), accounts: z.array(z.unknown()) })),
-  tables: z.record(z.string(), z.looseObject({ id: z.string(), name: z.string(), ownerId: z.string(), memberIds: z.array(z.string()) })),
-  characters: z.record(z.string(), z.looseObject({ id: z.string(), ownerId: z.string(), name: z.string(), sessions: z.array(z.unknown()), growth: z.array(z.unknown()) })),
-  scenarios: z.record(z.string(), z.looseObject({ id: z.string(), title: z.string(), policy: z.enum(["public", "members", "unknown"]) })),
-  logs: z.record(
-    z.string(),
-    z.looseObject({
-      id: z.string(),
-      title: z.string(),
-      systemId: z.string(),
-      ownerId: z.string(),
-      scope: z.enum(["members", "passed", "public"]),
-      hasLog: z.boolean(),
-      dates: z.array(z.string()),
-      t0: z.number(),
-      t1: z.number(),
-      slug: z.string().min(1),
-      channels: z.array(z.unknown()),
-      players: z.record(z.string(), z.unknown()),
-    })
-  ),
-  editRequests: z.array(z.unknown()),
-});
-
 /** 復元結果: 正常 / データなし / 破損(自動上書きしない) */
 type RestoreResult = { state: State; issue: "none" | "missing" | "corrupt" };
 
@@ -58,10 +35,9 @@ function restore(): RestoreResult {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { state: seedState(), issue: "missing" };
-    const parsed = RestoredStateSchema.safeParse(JSON.parse(raw));
-    if (parsed.success) return { state: parsed.data as unknown as State, issue: "none" };
-    // 破損しているが、データを上書きしない(seedも使わず、保存も停止)
-    try { return { state: JSON.parse(raw) as unknown as State, issue: "corrupt" }; } catch { return { state: seedState(), issue: "missing" }; }
+    const parsed = parseSavedState(raw);
+    if (parsed) return { state: parsed, issue: "none" };
+    return { state: seedState(), issue: "corrupt" };
   } catch {
     return { state: seedState(), issue: "corrupt" };
   }
@@ -83,16 +59,36 @@ interface StoreApi {
   dataCorrupt: boolean;
   /** 別タブで更新があった(このタブの保存を停止中) */
   otherTabUpdated: boolean;
+  authUser: FirebaseUser | null;
+  cloudStatus: "idle" | "saving" | "saved" | "error";
+  retrySave: () => void;
+  enterDemo: (userId?: string) => void;
+  refreshProfile: () => void;
+  exportData: () => string;
 }
 
 const Ctx = createContext<StoreApi>(null!);
 
-export function StoreProvider({ children }: { children: ReactNode }) {
-  const initial = useMemo(() => restore(), []);
+export function emptyState(user: User): State {
+  return { me: user.id, entered: true, users: { [user.id]: user }, prefs: { hideSelfOnShare: false }, tables: {}, characters: {}, scenarios: {}, logs: {}, editRequests: [] };
+}
+
+export function StoreProvider({ children, initialState, storageKey = KEY, authUser = null, cloudRevision = null }: {
+  children: ReactNode; initialState?: State; storageKey?: string; authUser?: FirebaseUser | null; cloudRevision?: string | null;
+}) {
+  const initial = useMemo(() => initialState ? { state: initialState, issue: "none" as const } : restore(), []);
   const [state, setState] = useState<State>(initial.state);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [otherTabUpdated, setOtherTabUpdated] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [cloudStatus, setCloudStatus] = useState<StoreApi["cloudStatus"]>(authUser ? "saving" : "idle");
+  const [retry, setRetry] = useState(0);
+  const revision = useRef(cloudRevision);
+  const lastSavedState = useRef<State | null>(null);
+  const queue = useRef(Promise.resolve());
+  const alive = useRef(true);
+  const published = useRef(new Map(Object.values(initial.state.logs).filter((l) => l.ownerId === authUser?.uid).map((l) => [l.slug, ""])));
+  const publishedCharacters = useRef(new Map(Object.values(initial.state.characters).filter((c) => c.ownerId === authUser?.uid).map((c) => [c.id, ""])));
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -100,12 +96,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const blockedRef = useRef(persistBlocked || initial.issue === "corrupt");
 
   const persist = () => {
-    if (blockedRef.current || staleRef.current) return;
+    if (persistBlocked || blockedRef.current || staleRef.current) return;
     try {
-      localStorage.setItem(KEY, JSON.stringify(stateRef.current));
-      setSaveError(null);
+      localStorage.setItem(storageKey, JSON.stringify(stateRef.current));
+      if (authUser) localStorage.setItem(`${storageKey}-pending`, stateRef.current === lastSavedState.current ? "false" : "true");
+      if (!authUser) setSaveError(null);
     } catch {
-      setSaveError("端末に保存できません（容量または設定の問題）。再読み込み前にJSONをエクスポートしてください。");
+      setSaveError("この端末に保存できません。記録をダウンロードしてから、空き容量を確認してください。");
     }
   };
 
@@ -116,32 +113,105 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!authUser || blockedRef.current || staleRef.current) return;
+      setCloudStatus("saving");
+      queue.current = queue.current.then(async () => {
+        if (!alive.current || staleRef.current) return;
+        try {
+          revision.current = await saveCloudState(authUser.uid, state, revision.current);
+          lastSavedState.current = state;
+          if (!alive.current) return;
+          try {
+            localStorage.setItem(`${storageKey}-cloud-revision`, revision.current);
+            if (stateRef.current === state) {
+              localStorage.setItem(storageKey, JSON.stringify(state));
+              localStorage.setItem(`${storageKey}-pending`, "false");
+            }
+          } catch { /* Cloud save succeeded; the cache is best effort. */ }
+          const owned = Object.values(state.logs).filter((l) => l.ownerId === authUser.uid);
+          const slugs = new Set(owned.map((l) => l.slug));
+          for (const slug of published.current.keys()) {
+            if (!slugs.has(slug)) { await deleteSharedLog(slug); published.current.delete(slug); }
+          }
+          for (const log of owned) {
+            const signature = JSON.stringify([log, state.users, state.prefs, log.scenarioId ? state.scenarios[log.scenarioId] : null]);
+            if (published.current.get(log.slug) === signature) continue;
+            await publishSharedLog(log, state);
+            published.current.set(log.slug, signature);
+          }
+          for (const log of Object.values(state.logs).filter((l) => l.ownerId !== authUser.uid)) {
+            const membership = log.players[authUser.uid];
+            if (membership) await updateSharedMembership(log.slug, { linked: membership.linked, hidden: membership.hidden });
+          }
+          const characters = Object.values(state.characters).filter((c) => c.ownerId === authUser.uid);
+          const characterIds = new Set(characters.map((c) => c.id));
+          for (const id of publishedCharacters.current.keys()) {
+            if (!characterIds.has(id)) { await deleteSharedCharacter(id); publishedCharacters.current.delete(id); }
+          }
+          for (const character of characters) {
+            const signature = JSON.stringify([character, state.logs, state.users[authUser.uid]]);
+            if (publishedCharacters.current.get(character.id) === signature) continue;
+            await publishSharedCharacter(character, state);
+            publishedCharacters.current.set(character.id, signature);
+          }
+          if (alive.current) { setSaveError(null); setCloudStatus(stateRef.current === state ? "saved" : "saving"); }
+        } catch (error) {
+          if (alive.current) {
+            setSaveError(error instanceof Error ? error.message : "記録を同期できませんでした。通信状態を確認して、もう一度保存してください。");
+            setCloudStatus("error");
+          }
+        }
+      });
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [state, retry, authUser]);
+
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+
   /* 単一writer: 他タブの更新を検知したら保存を停止し、再読み込みを促す */
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key !== KEY || e.newValue === null) return;
+      if (e.key !== storageKey || e.newValue === null) return;
       staleRef.current = true;
       setOtherTabUpdated(true);
     };
     const flushOnUnload = () => {
-      if (blockedRef.current || staleRef.current) return;
+      if (persistBlocked || blockedRef.current || staleRef.current) return;
       try {
-        localStorage.setItem(KEY, JSON.stringify(stateRef.current));
+        localStorage.setItem(storageKey, JSON.stringify(stateRef.current));
+        if (authUser) localStorage.setItem(`${storageKey}-pending`, stateRef.current === lastSavedState.current ? "false" : "true");
       } catch {
         /* noop */
       }
     };
     window.addEventListener("storage", onStorage);
     window.addEventListener("beforeunload", flushOnUnload);
+    window.addEventListener("pagehide", flushOnUnload);
     return () => {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("beforeunload", flushOnUnload);
+      window.removeEventListener("pagehide", flushOnUnload);
     };
   }, []);
 
   const api = useMemo<StoreApi>(
     () => ({
       state,
+      authUser,
+      cloudStatus,
+      retrySave: () => setRetry((n) => n + 1),
+      enterDemo: (userId = "u_mikan") => setState((prev) => {
+        const next = structuredClone(prev.users[userId] ? prev : seedState());
+        next.me = userId;
+        next.entered = true;
+        return next;
+      }),
+      refreshProfile: () => {
+        if (authUser) setState((prev) => ({ ...prev, users: { ...prev.users, [authUser.uid]: { ...prev.users[authUser.uid], ...firebaseUserProfile(authUser) } } }));
+      },
+      exportData: () => initial.issue === "corrupt" ? (localStorage.getItem(storageKey) ?? JSON.stringify(stateRef.current)) : JSON.stringify(stateRef.current, null, 2),
       update: (fn) =>
         setState((prev) => {
           const next = structuredClone(prev);
@@ -158,13 +228,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dataCorrupt: initial.issue === "corrupt",
       otherTabUpdated,
     }),
-    [state, saveError, otherTabUpdated, initial.issue]
+    [state, saveError, otherTabUpdated, initial.issue, authUser, cloudStatus]
   );
 
   return (
     <Ctx.Provider value={api}>
       {children}
-      <div className="toast toast-bottom toast-center z-[99] pointer-events-none">
+      <div className="toast toast-bottom toast-center z-[99] pointer-events-none" role="status" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className="alert alert-neutral py-2 px-4 text-[13px] shadow-lg">
             <span>{t.msg}</span>

@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import { getFirestore, connectFirestoreEmulator, type Firestore } from "firebase/firestore";
 
 /**
  * Firebase 接続。
@@ -38,7 +38,12 @@ export function getFirebaseApp(): FirebaseApp | null {
 export function getTakufuFirestore(): Firestore | null {
   const a = getFirebaseApp();
   if (!a) return null;
-  if (!fs) fs = getFirestore(a, FIRESTORE_DATABASE_ID);
+  if (!fs) {
+    fs = getFirestore(a, FIRESTORE_DATABASE_ID);
+    if (import.meta.env.VITE_FIREBASE_USE_EMULATORS === "true") connectFirestoreEmulator(fs,
+      import.meta.env.VITE_FIRESTORE_EMULATOR_HOST || "127.0.0.1",
+      Number(import.meta.env.VITE_FIRESTORE_EMULATOR_PORT || 8080));
+  }
   return fs;
 }
 

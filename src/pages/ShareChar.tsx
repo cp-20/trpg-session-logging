@@ -1,21 +1,45 @@
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useStore } from "../store";
 import { CharAvatar, Empty, NotFound, Tag, rollCls } from "../components/ui";
 import { SYSTEMS } from "../data/systems";
 import { fmtDate } from "../lib/time";
 import { IconDice, IconTrendingUp, IconUsersGroup } from "../components/icons";
+import type { Character, State } from "../types";
+import { fetchSharedCharacter, type SharedCharacterData } from "../lib/cloud-state";
+import { isFirebaseConfigured } from "../lib/firebase";
 
 export default function ShareChar() {
   const { id } = useParams();
   const { state } = useStore();
   const c = state.characters[id ?? ""];
-  if (!c) return <NotFound what="キャラクター" />;
+  if (c) return <ShareCharView state={state} c={c} />;
+  return <RemoteCharacter id={id ?? ""} />;
+}
+function RemoteCharacter({ id }: { id: string }) {
+  const { state } = useStore();
+  const [data, setData] = useState<SharedCharacterData | null>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "missing" | "error">("loading");
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    let alive = true; setStatus("loading");
+    if (!isFirebaseConfigured || !id) { setStatus("missing"); return; }
+    fetchSharedCharacter(id).then((shared) => { if (alive) { setData(shared); setStatus(shared ? "ready" : "missing"); } }).catch(() => { if (alive) setStatus("error"); });
+    return () => { alive = false; };
+  }, [id, retry]);
+  if (status === "loading") return <div className="max-w-xl mx-auto p-8" role="status">カルテを読み込んでいます…</div>;
+  if (status === "error") return <main className="max-w-xl mx-auto p-8"><p role="alert">カルテを読み込めませんでした。</p><button className="btn btn-sm mt-4" onClick={() => setRetry((n) => n + 1)}>もう一度読み込む</button></main>;
+  if (!data) return <NotFound what="キャラクターの共有ページ" />;
+  const view = { ...state, users: { ...state.users, [data.owner.id]: data.owner } };
+  return <ShareCharView state={view} c={data.character} publicLogs={data.publicLogs} remote />;
+}
+function ShareCharView({ state, c, publicLogs, remote = false }: { state: State; c: Character; publicLogs?: Record<string, string>; remote?: boolean }) {
   const sys = SYSTEMS[c.systemId];
   const owner = state.users[c.ownerId];
-  const isOwner = state.entered && c.ownerId === state.me;
+  const isOwner = !remote && state.entered && c.ownerId === state.me;
   const share = c.share;
 
-  if (!share.enabled && !isOwner) {
+  if ((!share.enabled || share.scope === "private") && !isOwner) {
     return (
       <div className="max-w-xl mx-auto px-4 py-16">
         <div className="card bg-base-100 border border-base-300">
@@ -36,7 +60,7 @@ export default function ShareChar() {
     <div className="max-w-xl mx-auto px-4 py-6 pb-16">
       {isOwner && (
         <div className="bg-base-100 border border-base-300 rounded-xl px-4 py-2.5 mb-4 flex items-center gap-3">
-          <span className="text-[11.5px] text-ink2">🔍 所有者プレビュー</span>
+          <span className="text-[11.5px] text-ink2">所有者プレビュー</span>
           {!share.enabled && <Tag v="warn">非公開（このリンクは他人には見えません）</Tag>}
         </div>
       )}
@@ -47,7 +71,7 @@ export default function ShareChar() {
         <h1 className="text-2xl font-extrabold mt-3">{c.name}</h1>
         <p className="text-[12.5px] text-ink2 mt-0.5">{c.archetype}</p>
         <div className="flex flex-wrap justify-center gap-1.5 mt-3">
-          <Tag v="gray">{sys?.emoji} {sys?.short}</Tag>
+          <Tag v="gray">{sys?.short}</Tag>
           <Tag v="gray">所有: {owner.name}</Tag>
           {share.includeProfile && c.tags.map((t) => (
             <Tag key={t} v="accent">{t}</Tag>
@@ -105,8 +129,8 @@ export default function ShareChar() {
                 ))}
                 {s.rolls.length > 3 && <span className="text-[10.5px] text-ink2 self-center">ほか {s.rolls.length - 3}件</span>}
               </div>
-              {s.logId && state.logs[s.logId]?.scope === "public" ? (
-                <a className="text-[11px] link mt-1 inline-block" href={`#/share/l/${s.logId}`}>公開ログを開く →</a>
+              {s.logId && (publicLogs?.[s.logId] || (!remote && state.logs[s.logId]?.scope === "public")) ? (
+                <a className="text-[11px] link mt-1 inline-block" href={`#/share/l/${publicLogs?.[s.logId] || state.logs[s.logId]?.slug}`}>公開ログを開く →</a>
               ) : s.logId && state.logs[s.logId] ? (
                 <span className="text-[11px] text-ink2 mt-1 inline-block">メンバー限定のログ</span>
               ) : null}

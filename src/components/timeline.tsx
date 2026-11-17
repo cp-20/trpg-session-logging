@@ -94,7 +94,7 @@ export function SessionTimeline({
       if (mode === "share" && c.secret) return; // シークレットタブは共有に含まれない
       if (filter.channel !== "all" && c.id !== filter.channel) return;
       c.msgs.forEach((m) => {
-        if (mode === "share" && m.type === "note") return; // シナリオ本文は共有しない
+        if (mode === "share" && (m.type === "note" || m.roll?.secret)) return;
         const q = filter.query.trim().toLowerCase();
         if (q && !((m.text ?? "").toLowerCase().includes(q) || m.sp.toLowerCase().includes(q) || (m.roll?.cmd ?? "").toLowerCase().includes(q))) return;
         msgs.push({ m, chName: c.secret ? `${c.name}(シークレット)` : c.name !== "メイン" ? c.name : undefined });

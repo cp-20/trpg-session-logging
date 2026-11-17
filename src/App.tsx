@@ -1,5 +1,6 @@
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
-import { StoreProvider, useStore } from "./store";
+import { useStore } from "./store";
+import { WorkspaceProvider } from "./workspace";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Shell } from "./components/shell";
 import SignIn from "./pages/SignIn";
@@ -14,7 +15,7 @@ import Scenarios from "./pages/Scenarios";
 import ScenarioDetail from "./pages/ScenarioDetail";
 import ScenarioNew from "./pages/ScenarioNew";
 import UserDetail from "./pages/UserDetail";
-import Settings from "./pages/Settings";
+import Settings, { ThemeSync } from "./pages/Settings";
 import ShareLog from "./pages/ShareLog";
 import ShareChar from "./pages/ShareChar";
 import ClaimInvite from "./pages/ClaimInvite";
@@ -48,7 +49,8 @@ function Root() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <StoreProvider>
+      <ThemeSync />
+      <WorkspaceProvider>
         <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           {/* 共有ビューは未サインインでも開ける公開ページ */}
@@ -57,7 +59,7 @@ export default function App() {
           <Route path="*" element={<Root />} />
         </Routes>
       </HashRouter>
-    </StoreProvider>
+    </WorkspaceProvider>
     </ErrorBoundary>
   );
 }

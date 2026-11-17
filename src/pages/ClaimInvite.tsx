@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "../store";
 import { Avatar, CharAvatar, Empty, Field, NotFound, PageHead, Tag } from "../components/ui";
@@ -6,6 +6,8 @@ import { SYSTEMS } from "../data/systems";
 import { fmtDates } from "../lib/time";
 import type { Msg } from "../types";
 import { IconLink, IconUserPlus } from "../components/icons";
+import { getSharedInvite, acceptSharedInvite, type SharedInvite } from "../lib/cloud-state";
+import { authErrorMessage } from "../lib/auth";
 
 /**
  * 招待リンク着地ページ。
@@ -13,6 +15,47 @@ import { IconLink, IconUserPlus } from "../components/icons";
  * 紐付けは任意(同意フォームなし)で、本人はあとから外せる。
  */
 export default function ClaimInvite() {
+  const { id } = useParams();
+  const { state, authUser } = useStore();
+  if (!authUser || state.logs[id ?? ""]) return <LocalClaimInvite />;
+  return <RemoteClaimInvite token={id ?? ""} />;
+}
+function RemoteClaimInvite({ token }: { token: string }) {
+  const { update, toast } = useStore();
+  const nav = useNavigate();
+  const [invite, setInvite] = useState<SharedInvite | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getSharedInvite(token).then((value) => { if (alive) setInvite(value); }).catch(() => { if (alive) setError("招待を読み込めませんでした。通信状態を確認して、もう一度お試しください。"); }).finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [token]);
+  if (loading) return <p role="status">招待を確認しています…</p>;
+  if (!invite) return <><PageHead title="招待を開けませんでした" /><p className="text-sm leading-7">{error || "招待の有効期限が切れているか、共有が終了しています。招待した方に確認してください。"}</p></>;
+  return <>
+    <PageHead title="この卓への参加" />
+    <h2 className="text-xl font-bold mt-6">{invite.title}</h2>
+    <p className="text-sm text-base-content/70 mt-2">{SYSTEMS[invite.systemId]?.name}{invite.scenarioTitle ? ` · ${invite.scenarioTitle}` : ""}</p>
+    <button className="btn btn-primary mt-6" disabled={busy} onClick={async () => {
+      setBusy(true); setError(null);
+      try {
+        const shared = await acceptSharedInvite(token);
+        update((s) => {
+          const me = s.users[s.me];
+          Object.assign(s.users, shared.users); s.users[s.me] = me;
+          s.logs[shared.log.id] = { ...shared.log, players: { ...shared.log.players, [s.me]: { linked: true, hidden: s.prefs.hideSelfOnShare, characterIds: [] } } };
+          if (shared.scenario) s.scenarios[shared.scenario.id] = shared.scenario;
+        });
+        toast("この卓に参加しました。"); nav(`/sessions/${shared.log.id}`);
+      } catch (cause) { setError(authErrorMessage(cause)); }
+      finally { setBusy(false); }
+    }}>{busy ? "参加しています…" : "この卓に参加する"}</button>
+    {error && <p className="text-sm text-error mt-4" role="alert">{error}</p>}
+  </>;
+}
+function LocalClaimInvite() {
   const { id } = useParams();
   const { state, update, toast } = useStore();
   const nav = useNavigate();
@@ -69,7 +112,7 @@ export default function ClaimInvite() {
       <div className="card bg-base-100 border border-base-300 px-5 py-4 mb-4">
         <b className="text-[16px]">{log.title}</b>
         <div className="text-[12px] text-base-content/70 mt-1 flex flex-wrap gap-x-3 gap-y-1">
-          <span>{sys?.emoji} {sys?.name}</span>
+          <span>{sys?.name}</span>
           <span>{fmtDates(log.dates)}</span>
           <span>KP: {kp.name}</span>
           <span>参加 {Object.keys(log.players).length}人</span>
