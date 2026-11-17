@@ -1,27 +1,30 @@
-# 卓譜
+# 卓譜 (Takufu)
 
-TRPG session records, CCFOLIA logs and character sheets, built with Vite, React, TypeScript, daisyUI and Firebase.
+TRPGのセッションログ・探索者・卓の記録を管理するWebアプリケーション（Vite + React + TypeScript + daisyUI + Firebase）。
 
 ```sh
-npm ci
+pnpm install
 cp .env.example .env.local
-# Fill the public Firebase web app configuration in .env.local.
-npm run dev
+pnpm run dev
 ```
 
-Sign in with Google, or open the local sample data. Actual accounts start with empty records; demo records are never uploaded automatically.
+## 検証・開発コマンド
 
 ```sh
-npm run check        # Types, unit tests, production build
-npm run test:e2e     # Browser journeys
-npm run test:smoke   # Route coverage against the running dev server
-firebase emulators:start --only auth,firestore --project takufu-app
-npm run check:emulator
-VITE_FIREBASE_USE_EMULATORS=true npm test -- src/lib/cloud-state.emulator.test.ts
+pnpm run lint           # oxlint + oxfmt + デザイン/設計ルール検査 (scripts/lint-design.ts)
+pnpm run fmt            # oxfmt によるコード整形
+pnpm run check          # lint + typecheck + unit test + production build
+pnpm run test:e2e       # Playwright E2E テスト
+pnpm run review         # 全画面をデスクトップ・モバイル・ダークで撮影し、デザイン検査の結果と .impeccable/review/ に出す
+pnpm run gen:data       # モックデータ (src/data/generated.json) の再生成
 ```
 
-Firebase project `takufu-app` uses the named Firestore database `takufu`. Private workspaces use chunked generations with revision checks. Shared logs use separate filtered data and server authorization. Invites expire after 30 days. OAuth secrets belong in Firebase's provider configuration, never in `VITE_*` environment variables.
+## 運用・デプロイ (`scripts/ops.ts`)
 
-See [deployment](docs/DEPLOYMENT.md), [design](DESIGN.md) and [handoff decisions](docs/HANDOFF.md). The original mock architecture is recorded in `docs/ARCHITECTURE.md`; Firebase Auth, persistence and shared views have since been implemented.
+```sh
+pnpm run check:firebase # Firebase Auth プロバイダ・許可ドメイン確認
+pnpm run deploy:rules   # Firestore ルール (takufu データベース) のデプロイ
+pnpm run deploy         # Lolipop (takufu.lolipop-now.app) へのビルド＆デプロイ
+```
 
-CCFOLIA JSON / HTML / ZIP logs and JSON / ZIP character imports are supported. Discord and BOOTH/TALTO verification are not implemented; their settings remain marked as preparation. X linking requires a configured Firebase Twitter provider; opening X's report composer works independently.
+UI を触るときは [DESIGN.md](DESIGN.md)（規則）と [docs/design-feedback.md](docs/design-feedback.md)（過去の指摘と検査の対応）を、運用は [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) を参照してください。
