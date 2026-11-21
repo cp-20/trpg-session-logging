@@ -1,18 +1,13 @@
 "use client";
 /**
- * 画面全体の土台。記録はブラウザ（とログイン時はクラウド）にあるので、
- * サーバーでは描画せず、ブラウザに載ってから描画する（描画結果の食い違いを起こさない）。
+ * 画面全体の土台。
+ * - BaseProviders: すべての画面。テーマとエラー表示だけで、記録は読まない（LP・規約などはサーバーで描画される）。
+ * - StoreProviders（store-providers.tsx。別のファイルにして、公開ページの JS に記録と Firebase を載せない）: 記録を使う画面（アプリ本体・共有ページ・ログイン・サンプル開始）。記録はブラウザ
+ *   （とログイン時はクラウド）にあるので、サーバーでは描画せず、ブラウザに載ってから描画する。
  */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { ErrorBoundary } from "../components/ErrorBoundary";
-import { ThemeSync } from "../screens/Settings";
-import { WorkspaceProvider } from "../workspace";
-
-function useMounted() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  return mounted;
-}
+import { ThemeSync } from "../components/ThemeSync";
 
 /** 開発中だけ、画面上でコメントを残すレビュー機能（live-ui-review）を読み込む */
 function DevReviewOverlay() {
@@ -31,14 +26,12 @@ function DevReviewOverlay() {
   return null;
 }
 
-export function Providers({ children }: { children: ReactNode }) {
-  const mounted = useMounted();
-  if (!mounted) return null;
+export function BaseProviders({ children }: { children: ReactNode }) {
   return (
     <ErrorBoundary>
       <ThemeSync />
       <DevReviewOverlay />
-      <WorkspaceProvider>{children}</WorkspaceProvider>
+      {children}
     </ErrorBoundary>
   );
 }

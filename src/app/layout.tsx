@@ -1,10 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
-import "@fontsource/noto-sans-jp/400.css";
-import "@fontsource/noto-sans-jp/500.css";
-import "@fontsource/noto-sans-jp/700.css";
+import "@fontsource-variable/noto-sans-jp";
 import "../styles.css";
-import { Providers } from "./providers";
+import { BaseProviders } from "./providers";
 
 export const metadata: Metadata = {
   title: "卓譜",
@@ -26,7 +24,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body>
-        <Providers>{children}</Providers>
+        <BaseProviders>{children}</BaseProviders>
       </body>
     </html>
   );

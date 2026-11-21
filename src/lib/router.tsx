@@ -17,14 +17,18 @@ import { useCallback } from "react";
 export function Link({
   to,
   replace,
+  prefetch,
   children,
   ...rest
-}: { to: string; replace?: boolean; children?: ReactNode } & Omit<
-  AnchorHTMLAttributes<HTMLAnchorElement>,
-  "href"
->) {
+}: {
+  to: string;
+  replace?: boolean;
+  /** false: 先読みしない（公開ページから記録を使う画面へのリンク。Firebase の JS を先に落とさない） */
+  prefetch?: boolean;
+  children?: ReactNode;
+} & Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href">) {
   return (
-    <NextLink href={to} replace={replace} {...rest}>
+    <NextLink href={to} replace={replace} prefetch={prefetch} {...rest}>
       {children}
     </NextLink>
   );
