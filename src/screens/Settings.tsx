@@ -1,8 +1,19 @@
-import { useEffect, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "../lib/router";
-import { IconDownload, IconLock, IconSettings, IconUpload } from "../components/icons";
+import {
+  IconChevronRight,
+  IconDownload,
+  IconLock,
+  IconPencil,
+  IconSearch,
+  IconSettings,
+  IconUpload,
+} from "../components/icons";
 import {
   EmptyState,
+  Field,
+  FieldError,
+  LoadMore,
   Modal,
   NotFound,
   PageHead,
@@ -11,55 +22,30 @@ import {
   SettingRow,
   Toggle,
   cx,
+  useVisibleCount,
 } from "../components/ui";
-import { Avatar, ProviderIcon } from "../components/identity";
+import { Avatar, ProviderIcon, readAvatarImageFile } from "../components/identity";
 import { authErrorMessage, linkXAccount, signOutAccount, unlinkXAccount } from "../lib/auth";
 import { parseSavedState } from "../lib/state-schema";
+import { LEGAL_LINKS } from "../lib/rights";
+import { isFirebaseConfigured } from "../lib/firebase";
+import {
+  GOOGLE_BUSY_DAYS,
+  fetchGoogleBusyRanges,
+  listGoogleCalendars,
+  requestGoogleCalendarAccess,
+} from "../lib/google-calendar";
+import { compactBusyRanges } from "../lib/schedule";
+import { fmtDate, jstDate, jstTime } from "../lib/format";
+import type { GoogleBusyPrefs } from "../types";
 import { download, todayStr } from "../lib/time";
 import { resetData, useStore } from "../store";
 import { CharacterCard } from "./Characters";
 import { SessionRow } from "./Sessions";
+import { applyTheme, currentThemeMode, type ThemeMode } from "../lib/theme";
 
-type ThemeMode = "dark" | "system" | "light";
-export function currentThemeMode(): ThemeMode {
-  try {
-    const mode = localStorage.getItem("takufu-theme");
-    return mode === "dark" || mode === "light" ? mode : "system";
-  } catch {
-    return "system";
-  }
-}
-export function resolveTheme(mode: ThemeMode): string {
-  return mode === "dark" || (mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches)
-    ? "takufuDark"
-    : "takufu";
-}
-export function applyTheme(mode: ThemeMode): void {
-  try {
-    localStorage.setItem("takufu-theme", mode);
-  } catch {
-    /* Appearance still works without browser storage. */
-  }
-  document.documentElement.setAttribute("data-theme", resolveTheme(mode));
-  window.dispatchEvent(new Event("takufu-theme-change"));
-}
-export function ThemeSync() {
-  useEffect(() => {
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const update = () =>
-      document.documentElement.setAttribute("data-theme", resolveTheme(currentThemeMode()));
-    update();
-    media.addEventListener("change", update);
-    window.addEventListener("storage", update);
-    window.addEventListener("takufu-theme-change", update);
-    return () => {
-      media.removeEventListener("change", update);
-      window.removeEventListener("storage", update);
-      window.removeEventListener("takufu-theme-change", update);
-    };
-  }, []);
-  return null;
-}
+export { applyTheme, currentThemeMode, resolveTheme, type ThemeMode } from "../lib/theme";
+export { ThemeSync } from "../components/ThemeSync";
 
 export default function Settings() {
   const {
@@ -86,6 +72,7 @@ export default function Settings() {
 
   const x = me.accounts.find((account) => account.provider === "x" && account.status === "linked");
   const google = me.accounts.find((account) => account.provider === "google");
+  const discord = me.accounts.find((account) => account.provider === "discord");
 
   async function connectX(remove = false) {
     setBusy(true);
@@ -139,7 +126,7 @@ export default function Settings() {
             </p>
           </div>
           <Link className="btn btn-sm" to={`/users/${state.me}`}>
-            マイページ
+            プロフィール
           </Link>
         </div>
         {!authUser && (
@@ -150,11 +137,35 @@ export default function Settings() {
           </SettingRow>
         )}
         <SettingRow
+          icon={<ProviderIcon provider="google" size={28} />}
+          title="Google"
+          desc={
+            authUser
+              ? google?.status === "linked"
+                ? google.email || me.email || google.displayName || "連携済み"
+                : "連携していません"
+              : "サンプルでは未連携"
+          }
+        >
+          {authUser && (
+            <span className="text-sm text-ink2">{google?.status === "linked" ? "連携中" : "未連携"}</span>
+          )}
+        </SettingRow>
+        <SettingRow
+          icon={<ProviderIcon provider="discord" size={28} />}
+          title="Discord"
+          desc={
+            discord?.status === "linked"
+              ? discord.displayName || discord.username || me.name
+              : authUser
+                ? "連携準備中"
+                : "サンプルでは未連携"
+          }
+        />
+        <SettingRow
           icon={<ProviderIcon provider="x" size={28} />}
           title="X"
-          desc={
-            authUser ? x?.displayName || (x ? me.name : "連携していません") : "サンプルでは連携できません"
-          }
+          desc={authUser ? x?.displayName || (x ? me.name : "連携していません") : "サンプルでは未連携"}
         >
           {authUser && (
             <button className="btn btn-sm" disabled={busy} onClick={() => connectX(Boolean(x))}>
@@ -162,9 +173,9 @@ export default function Settings() {
             </button>
           )}
         </SettingRow>
-        <SettingRow title={authUser ? "サインアウト" : "お試しを終える"}>
+        <SettingRow title={authUser ? "ログアウト" : "お試しを終える"}>
           <button className="btn btn-sm" disabled={busy} onClick={signOut}>
-            {authUser ? "サインアウト" : "最初の画面へ"}
+            {authUser ? "ログアウト" : "最初の画面へ"}
           </button>
         </SettingRow>
       </div>
@@ -227,6 +238,8 @@ export default function Settings() {
           />
         </SettingRow>
       </div>
+
+      <GoogleCalendarSettings />
 
       <SectionTitle sub={syncText}>データ</SectionTitle>
       <div className="surface list">
@@ -297,6 +310,20 @@ export default function Settings() {
         </p>
       )}
 
+      <SectionTitle>このサービスについて</SectionTitle>
+      <nav aria-label="このサービスについて" className="surface list">
+        {LEGAL_LINKS.map((l) => (
+          <Link
+            key={l.to}
+            to={l.to}
+            className="row-interactive flex items-center justify-between gap-3 px-4 py-3.5 text-sm font-bold sm:px-5"
+          >
+            {l.label}
+            <IconChevronRight width={16} height={16} className="text-ink2" aria-hidden />
+          </Link>
+        ))}
+      </nav>
+
       {demoPicker && (
         <Modal title="表示する利用者" onClose={() => setDemoPicker(false)}>
           <div className="space-y-1">
@@ -353,34 +380,397 @@ export default function Settings() {
   );
 }
 
+/* ================= Google カレンダーの空き時間 =================
+ * 本人が明示的にオンにしたときだけ読む。オフが既定。
+ * 読むのは「予定が入っている時間帯」とカレンダーの名前だけで、予定の件名などは読まない。
+ */
+
+type CalendarChoice = GoogleBusyPrefs["calendars"][number];
+
+function CalendarChooser({
+  calendars,
+  onChange,
+}: {
+  calendars: CalendarChoice[];
+  onChange: (next: CalendarChoice[]) => void;
+}) {
+  return (
+    <ul className="list rounded-box border border-base-300" aria-label="照らし合わせに使うカレンダー">
+      {calendars.map((c) => (
+        <li key={c.id} className="flex items-center gap-3 px-4 py-2.5">
+          <span className="min-w-0 flex-1 truncate text-sm">{c.name}</span>
+          <Toggle
+            label={`${c.name}を使う`}
+            on={c.on}
+            onChange={(on) => onChange(calendars.map((x) => (x.id === c.id ? { ...x, on } : x)))}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** 何を読み、何を保存するか。許可の前に必ず見せる */
+function GoogleCalendarScope() {
+  return (
+    <dl className="grid gap-y-3 text-sm leading-relaxed">
+      <div>
+        <dt className="font-semibold">読み取るもの</dt>
+        <dd className="text-ink2">
+          カレンダーの名前の一覧と、選んだカレンダーの今日から{GOOGLE_BUSY_DAYS}
+          日間の「予定が入っている時間帯」。
+        </dd>
+      </div>
+      <div>
+        <dt className="font-semibold">読み取らないもの</dt>
+        <dd className="text-ink2">予定のタイトル・説明・場所・参加者。予定の作成や変更もしません。</dd>
+      </div>
+      <div>
+        <dt className="font-semibold">保存するもの</dt>
+        <dd className="text-ink2">
+          予定が入っている時間帯と、カレンダーの名前。あなたのアカウントにだけ保存し、ほかの人には見せません。Google
+          の許可はその場の取り込みにだけ使い、保存しません。オフにすると保存した時間帯を消します。
+        </dd>
+      </div>
+      <div>
+        <dt className="font-semibold">使い方</dt>
+        <dd className="text-ink2">
+          日程調整の候補の時間（開始から長さぶん）と重なるときだけ「自分の予定あり」と出します。同じ日でも時間が重ならなければ出しません。
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
+function GoogleCalendarSettings() {
+  const { state, update, authUser } = useStore();
+  const g = state.prefs.googleBusy;
+  const available = isFirebaseConfigured && Boolean(authUser);
+  const [consent, setConsent] = useState<
+    null | { step: "explain" } | { step: "choose"; token: string; calendars: CalendarChoice[] }
+  >(null);
+  const [choosing, setChoosing] = useState<CalendarChoice[] | null>(null);
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function fetchAndSave(token: string, calendars: CalendarChoice[], consentedAt: string) {
+    const ids = calendars.filter((c) => c.on).map((c) => c.id);
+    const ranges = compactBusyRanges(await fetchGoogleBusyRanges(token, ids), Date.now());
+    update((s) => {
+      s.prefs.googleBusy = {
+        consentedAt,
+        calendars,
+        countAllDay: s.prefs.googleBusy?.countAllDay ?? false,
+        ranges,
+        syncedAt: new Date().toISOString(),
+      };
+    });
+  }
+
+  async function allow() {
+    setWorking(true);
+    setError(null);
+    try {
+      const token = await requestGoogleCalendarAccess();
+      const list = await listGoogleCalendars(token);
+      // 既定はメインのカレンダーだけ。祝日・誕生日などを数えて「予定あり」が増えないように
+      setConsent({
+        step: "choose",
+        token,
+        calendars: list.map((c) => ({ id: c.id, name: c.name, on: c.primary })),
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Google カレンダーに接続できませんでした。");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function importChosen() {
+    if (consent?.step !== "choose") return;
+    setWorking(true);
+    setError(null);
+    try {
+      await fetchAndSave(consent.token, consent.calendars, new Date().toISOString());
+      setConsent(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Google カレンダーの予定を取得できませんでした。");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  /** 取り込み直す（カレンダーの選択を変えたときも） */
+  async function resync(calendars: CalendarChoice[]) {
+    if (!g) return;
+    setWorking(true);
+    setError(null);
+    try {
+      const token = await requestGoogleCalendarAccess();
+      await fetchAndSave(token, calendars, g.consentedAt);
+      setChoosing(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Google カレンダーの予定を取得できませんでした。");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  function saveChoice(calendars: CalendarChoice[]) {
+    if (!g) return;
+    const fetched = new Set(g.ranges.map((r) => r.calendarId));
+    const wasOn = new Set(g.calendars.filter((c) => c.on).map((c) => c.id));
+    const added = calendars.some((c) => c.on && !wasOn.has(c.id) && !fetched.has(c.id));
+    if (added) {
+      void resync(calendars);
+      return;
+    }
+    const on = new Set(calendars.filter((c) => c.on).map((c) => c.id));
+    update((s) => {
+      const cur = s.prefs.googleBusy;
+      if (!cur) return;
+      cur.calendars = calendars;
+      cur.ranges = cur.ranges.filter((r) => on.has(r.calendarId));
+    });
+    setChoosing(null);
+  }
+
+  function turnOff() {
+    update((s) => {
+      delete s.prefs.googleBusy;
+    });
+  }
+
+  const onNames = g?.calendars.filter((c) => c.on).map((c) => c.name) ?? [];
+  const syncedMs = g?.syncedAt ? Date.parse(g.syncedAt) : NaN;
+  const syncedLabel = Number.isFinite(syncedMs)
+    ? `${fmtDate(jstDate(syncedMs / 1000))} ${jstTime(syncedMs / 1000)}`
+    : null;
+
+  return (
+    // SectionTitle は先頭の子だと上の余白が消えるので、区画の余白はここで持つ
+    <section id="google-calendar" aria-labelledby="settings-google-calendar" className="mt-10">
+      <SectionTitle>
+        <span id="settings-google-calendar">カレンダー</span>
+      </SectionTitle>
+      <div className="surface list">
+        <SettingRow
+          icon={<ProviderIcon provider="google" size={28} />}
+          title="Google カレンダーの空き時間を使う"
+          desc={
+            g
+              ? "日程調整の候補と時間が重なると「自分の予定あり」と出します。オフにすると取り込んだ時間帯を消します。"
+              : !available
+                ? "お試し中は使えません（ログインが必要）。オンにするまで Google カレンダーは読み取りません。"
+                : "日程調整の候補と自分の予定が重なるかを確かめます。オンにすると、読み取る内容の説明が先に出ます。"
+          }
+        >
+          <Toggle
+            label="Google カレンダーの空き時間を使う"
+            on={Boolean(g)}
+            disabled={!available && !g}
+            onChange={(on) => {
+              setError(null);
+              if (on) setConsent({ step: "explain" });
+              else turnOff();
+            }}
+          />
+        </SettingRow>
+        {g && (
+          <>
+            <SettingRow
+              title="使うカレンダー"
+              desc={onNames.length > 0 ? onNames.join("、") : "選んでいません"}
+            >
+              <button type="button" className="btn btn-sm" onClick={() => setChoosing(g.calendars)}>
+                選ぶ
+              </button>
+            </SettingRow>
+            <SettingRow
+              title="終日の予定も数える"
+              desc="オフのときは、旅行や記念日のような終日の予定では「自分の予定あり」と出しません。"
+            >
+              <Toggle
+                label="終日の予定も数える"
+                on={g.countAllDay}
+                onChange={(on) =>
+                  update((s) => {
+                    if (s.prefs.googleBusy) s.prefs.googleBusy.countAllDay = on;
+                  })
+                }
+              />
+            </SettingRow>
+            <SettingRow
+              title="取り込み直す"
+              desc={
+                syncedLabel
+                  ? `最後に取り込んだのは ${syncedLabel}。予定を変えたら取り込み直してください。`
+                  : undefined
+              }
+            >
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={working || !available}
+                onClick={() => void resync(g.calendars)}
+              >
+                {working ? "取り込み中…" : "取り込み直す"}
+              </button>
+            </SettingRow>
+          </>
+        )}
+      </div>
+      {error && !consent && !choosing && (
+        <p role="alert" className="mt-2 text-sm text-error">
+          {error}
+        </p>
+      )}
+
+      {consent && (
+        <Modal
+          title="Google カレンダーの空き時間を使う"
+          onClose={() => setConsent(null)}
+          foot={
+            <>
+              <button type="button" className="btn btn-quiet" onClick={() => setConsent(null)}>
+                キャンセル
+              </button>
+              {consent.step === "explain" ? (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={working}
+                  onClick={() => void allow()}
+                >
+                  {working ? "接続中…" : "Google で許可する"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={working || !consent.calendars.some((c) => c.on)}
+                  onClick={() => void importChosen()}
+                >
+                  {working ? "取り込み中…" : "このカレンダーで使う"}
+                </button>
+              )}
+            </>
+          }
+        >
+          {consent.step === "explain" ? (
+            <GoogleCalendarScope />
+          ) : (
+            <>
+              <p className="mb-3 text-sm text-ink2">
+                照らし合わせに使うカレンダーを選んでください。祝日や誕生日のカレンダーを入れると、遊べる日まで「予定あり」になります。
+              </p>
+              <CalendarChooser
+                calendars={consent.calendars}
+                onChange={(calendars) => setConsent({ ...consent, calendars })}
+              />
+            </>
+          )}
+          <FieldError text={error} />
+        </Modal>
+      )}
+
+      {choosing && (
+        <Modal
+          title="使うカレンダー"
+          onClose={() => setChoosing(null)}
+          foot={
+            <>
+              <button type="button" className="btn btn-quiet" onClick={() => setChoosing(null)}>
+                キャンセル
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={working || !choosing.some((c) => c.on)}
+                onClick={() => saveChoice(choosing)}
+              >
+                保存
+              </button>
+            </>
+          }
+        >
+          <CalendarChooser calendars={choosing} onChange={setChoosing} />
+          <FieldError text={error} />
+        </Modal>
+      )}
+    </section>
+  );
+}
+
 /* ================= ユーザー詳細ページ ================= */
+const USER_CHAR_PAGE = 6;
+const USER_CHAR_STEP = 12;
+const USER_LOG_PAGE = 10;
+const USER_LOG_STEP = 20;
+
 export function UserDetail() {
   const { id } = useParams<{ id?: string }>();
-  const { state } = useStore();
+  /* 別の人のページへ移ったら、編集中の内容・検索・表示件数をすべて最初に戻す */
+  return <UserDetailView key={id ?? ""} id={id} />;
+}
+
+function UserDetailView({ id }: { id: string | undefined }) {
+  const { state, update } = useStore();
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [bioDraft, setBioDraft] = useState("");
+  const [imageDraft, setImageDraft] = useState("");
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [charQ, setCharQ] = useState("");
+  const deferredCharQ = useDeferredValue(charQ);
+  const [charCount, setCharCount] = useVisibleCount(USER_CHAR_PAGE, [deferredCharQ]);
+  const [logCount, setLogCount] = useState(USER_LOG_PAGE);
+
   const user = state.users[id ?? ""];
+  const chars = useMemo(
+    () => (user ? Object.values(state.characters).filter((c) => c.ownerId === user.id) : []),
+    [user, state.characters],
+  );
+  const filteredChars = useMemo(() => {
+    const q = deferredCharQ.trim().toLowerCase();
+    if (!q) return chars;
+    return chars.filter((c) => (c.name + c.archetype + c.tags.join()).toLowerCase().includes(q));
+  }, [chars, deferredCharQ]);
+  const logs = useMemo(
+    () =>
+      user
+        ? Object.values(state.logs)
+            .filter((l) => l.ownerId === user.id || l.players[user.id])
+            .sort((a, b) => b.t0 - a.t0)
+        : [],
+    [user, state.logs],
+  );
+  const isMe = user?.id === state.me;
+  const together = useMemo(
+    () => (isMe || !user ? [] : logs.filter((l) => l.players[state.me] || l.ownerId === state.me)),
+    [isMe, user, logs, state.me],
+  );
+  const shownLogs = isMe ? logs : together.length > 0 ? together : logs;
+
   if (!user) return <NotFound what="ユーザー" />;
-  const isMe = user.id === state.me;
 
   if (!isMe && user.profilePublic === false) {
     return (
-      <>
+      <div className="max-w-4xl">
         <PageHead lead={<Avatar u={user} size={64} />} title={user.name} />
         <div className="surface">
           <EmptyState kind="permission" title="プロフィールは非公開です" />
         </div>
-      </>
+      </div>
     );
   }
 
-  const chars = Object.values(state.characters).filter((c) => c.ownerId === user.id);
-  const logs = Object.values(state.logs)
-    .filter((l) => l.ownerId === user.id || l.players[user.id])
-    .sort((a, b) => b.t0 - a.t0);
-  const together = isMe ? [] : logs.filter((l) => l.players[state.me] || l.ownerId === state.me);
-  const shownLogs = isMe ? logs : together.length > 0 ? together : logs;
+  const shownChars = filteredChars.slice(0, charCount);
+  const visibleLogs = shownLogs.slice(0, logCount);
 
   return (
-    <>
+    <div className="max-w-4xl">
       <PageHead
         lead={<Avatar u={user} size={64} />}
         title={user.name}
@@ -400,14 +790,161 @@ export function UserDetail() {
         }
         actions={
           isMe ? (
-            <Link className="btn" to="/settings">
-              <IconSettings width={16} height={16} /> 設定
-            </Link>
+            <>
+              <button
+                type="button"
+                className="btn btn-quiet"
+                onClick={() => {
+                  setNameDraft(user.name);
+                  setBioDraft(user.bio ?? "");
+                  setImageDraft(user.image ?? "");
+                  setImageError(null);
+                  setProfileError(null);
+                  setEditingProfile(true);
+                }}
+              >
+                <IconPencil width={16} height={16} /> プロフィールを編集
+              </button>
+              <Link className="btn" to="/settings">
+                <IconSettings width={16} height={16} /> 設定
+              </Link>
+            </>
           ) : undefined
         }
       />
 
-      <SectionTitle>キャラクター</SectionTitle>
+      {isMe && editingProfile && (
+        <Modal
+          title="プロフィールを編集"
+          onClose={() => setEditingProfile(false)}
+          foot={
+            <>
+              <button type="button" className="btn btn-quiet" onClick={() => setEditingProfile(false)}>
+                キャンセル
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const trimmedName = nameDraft.trim();
+                  if (!trimmedName) {
+                    setProfileError("表示名を入力してください");
+                    return;
+                  }
+                  update((s) => {
+                    const target = s.users[s.me]!;
+                    target.name = trimmedName;
+                    target.bio = bioDraft.trim() || undefined;
+                    target.image = imageDraft || undefined;
+                  });
+                  setEditingProfile(false);
+                }}
+              >
+                保存
+              </button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <Avatar u={{ ...user, image: imageDraft || undefined }} size={56} />
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="btn btn-sm cursor-pointer">
+                  画像を選ぶ
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    aria-label="プロフィール画像を選ぶ"
+                    onChange={async (e) => {
+                      const input = e.currentTarget;
+                      const file = input.files?.[0];
+                      if (!file) return;
+                      setImageError(null);
+                      try {
+                        const compressed = await readAvatarImageFile(file, {
+                          maxSize: 128,
+                          maxChars: 3800,
+                        });
+                        setImageDraft(compressed);
+                      } catch (err) {
+                        setImageError(err instanceof Error ? err.message : "画像を読み込めませんでした");
+                      } finally {
+                        input.value = "";
+                      }
+                    }}
+                  />
+                </label>
+                {imageDraft && (
+                  <button
+                    type="button"
+                    className="btn btn-quiet btn-sm"
+                    onClick={() => {
+                      setImageDraft("");
+                      setImageError(null);
+                    }}
+                  >
+                    初期アイコンに戻す
+                  </button>
+                )}
+              </div>
+            </div>
+            <FieldError text={imageError} />
+
+            <Field label="表示名" noMargin>
+              <input
+                id="user-name-input"
+                className={cx("input w-full", profileError && "input-error")}
+                aria-invalid={profileError ? "true" : undefined}
+                value={nameDraft}
+                onChange={(e) => {
+                  setNameDraft(e.target.value);
+                  if (profileError) setProfileError(null);
+                }}
+              />
+              <FieldError text={profileError} />
+            </Field>
+
+            <Field label="自己紹介" noMargin>
+              <textarea
+                id="user-bio-input"
+                className="textarea w-full text-sm leading-relaxed"
+                rows={3}
+                placeholder="好きなシステムや遊ぶ時間帯など"
+                value={bioDraft}
+                onChange={(e) => setBioDraft(e.target.value)}
+              />
+            </Field>
+          </div>
+        </Modal>
+      )}
+
+      <SectionTitle
+        right={
+          chars.length > USER_CHAR_PAGE ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="input input-sm flex w-44 items-center gap-1.5">
+                <IconSearch width={14} height={14} className="shrink-0 opacity-50" aria-hidden />
+                <input
+                  type="search"
+                  className="min-w-0 grow"
+                  placeholder="キャラを検索"
+                  aria-label="キャラクターを検索"
+                  value={charQ}
+                  onChange={(e) => setCharQ(e.target.value)}
+                />
+              </label>
+              {isMe && (
+                <Link className="btn btn-quiet btn-sm" to="/characters">
+                  すべて見る
+                </Link>
+              )}
+            </div>
+          ) : undefined
+        }
+      >
+        キャラクター
+      </SectionTitle>
       {chars.length === 0 ? (
         <div className="surface">
           <EmptyState
@@ -422,15 +959,42 @@ export function UserDetail() {
             }
           />
         </div>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {chars.map((c) => (
-            <CharacterCard key={c.id} c={c} />
-          ))}
+      ) : filteredChars.length === 0 ? (
+        <div className="surface">
+          <EmptyState
+            kind="filtered"
+            action={
+              <button type="button" className="btn btn-sm" onClick={() => setCharQ("")}>
+                検索を解除
+              </button>
+            }
+          />
         </div>
+      ) : (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {shownChars.map((c) => (
+              <CharacterCard key={c.id} c={c} />
+            ))}
+          </div>
+          <LoadMore
+            shown={shownChars.length}
+            total={filteredChars.length}
+            step={USER_CHAR_STEP}
+            onMore={() => setCharCount((n) => n + USER_CHAR_STEP)}
+          />
+        </>
       )}
 
-      <SectionTitle>
+      <SectionTitle
+        right={
+          isMe && shownLogs.length > USER_LOG_PAGE ? (
+            <Link className="btn btn-quiet btn-sm" to="/sessions">
+              すべて見る
+            </Link>
+          ) : undefined
+        }
+      >
         {isMe ? "参加したセッション" : together.length > 0 ? "一緒に遊んだセッション" : "参加したセッション"}
       </SectionTitle>
       {shownLogs.length === 0 ? (
@@ -438,12 +1002,20 @@ export function UserDetail() {
           <EmptyState kind="first" title="セッションはまだありません" />
         </div>
       ) : (
-        <div className="surface list">
-          {shownLogs.map((l) => (
-            <SessionRow key={l.id} log={l} href={`/sessions/${l.id}`} showKp={false} />
-          ))}
-        </div>
+        <>
+          <div className="surface list">
+            {visibleLogs.map((l) => (
+              <SessionRow key={l.id} log={l} href={`/sessions/${l.id}`} showKp={false} />
+            ))}
+          </div>
+          <LoadMore
+            shown={visibleLogs.length}
+            total={shownLogs.length}
+            step={USER_LOG_STEP}
+            onMore={() => setLogCount((n) => n + USER_LOG_STEP)}
+          />
+        </>
       )}
-    </>
+    </div>
   );
 }

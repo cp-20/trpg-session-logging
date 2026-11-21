@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams } from "../lib/router";
-import { IconBooks, IconExternal, IconLock, IconSearch, IconTrendingUp } from "../components/icons";
-import { SessionTimeline, TimelineFilter } from "../components/timeline";
-import { EmptyState, LogoMark, Select, SysBadge, cx } from "../components/ui";
+import { IconBooks, IconExternal, IconLock, IconTrendingUp } from "../components/icons";
+import { LogReaderBar, RecordingLinkContext, SessionTimeline, TimelineFilter } from "../components/timeline";
+import { EmptyState, LegalLinks, LogoMark, StatBar, StatChange, SysBadge, cx } from "../components/ui";
 import { Avatar, CharAvatar } from "../components/identity";
-import { SYSTEMS } from "../data/systems";
+import { SessionMediaSection, recordingLinksAt } from "../components/media";
+import { SYSTEMS, carriedStats } from "../data/systems";
+import { SheetView } from "../components/sheet";
+import { SYSTEM_RIGHTS } from "../lib/rights";
 import { authErrorMessage, signInWithGoogle } from "../lib/auth";
 import {
   confirmPlayedLog,
@@ -21,17 +24,20 @@ import { fmtDate, fmtDates, fmtDur, jstTime, sessionPlayMinutes } from "../lib/t
 import { useStore } from "../store";
 import type { Character, Log, State } from "../types";
 
-/* ---------- 共有ページの外枠（サインインなしでも読める静かな読書面） ---------- */
+/* ---------- 共有ページの外枠（ログインなしでも読める静かな読書面） ---------- */
 function ShareFrame({
   children,
   action,
   narrow,
+  systemIds,
 }: {
   children: ReactNode;
   action?: ReactNode;
   narrow?: boolean;
+  /** 本文で扱うシステム。二次創作物である旨をフッターに出す */
+  systemIds?: string[];
 }) {
-  const width = narrow ? "max-w-2xl" : "max-w-3xl";
+  const width = narrow ? "max-w-2xl" : "max-w-4xl";
   return (
     <div className="min-h-screen bg-base-200">
       <header className="border-b border-base-300 bg-base-100">
@@ -44,6 +50,20 @@ function ShareFrame({
         </div>
       </header>
       <main className={cx("mx-auto px-4 pb-20 pt-8 sm:px-6", width)}>{children}</main>
+      <footer className={cx("mx-auto px-4 pb-12 sm:px-6", width)}>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-base-300 pt-6 text-xs text-ink2">
+          {systemIds && systemIds.some((id) => SYSTEM_RIGHTS[id]) && (
+            <span className="basis-full">
+              {systemIds
+                .map((id) => SYSTEMS[id]?.name)
+                .filter(Boolean)
+                .join("・")}{" "}
+              の二次創作物を含みます。
+            </span>
+          )}
+          <LegalLinks />
+        </div>
+      </footer>
     </div>
   );
 }
@@ -60,18 +80,25 @@ function RemoteShare({ slug }: { slug: string }) {
   const { state, authUser } = useStore();
   const [shared, setShared] = useState<SharedLogData | null>(null);
   const [scope, setScope] = useState<"members" | "passed" | "public" | null>(null);
-  const [status, setStatus] = useState<"loading" | "missing" | "gate" | "ready" | "error">("loading");
+  const canFetch = isFirebaseConfigured && Boolean(slug);
+  const [status, setStatus] = useState<"loading" | "missing" | "gate" | "ready" | "error">(
+    canFetch ? "loading" : "missing",
+  );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [retry, setRetry] = useState(0);
 
+  /* 読み込み直す条件が変わったら、描画中に読み込み中へ戻す（Effect で戻すと古い結果が一瞬映る） */
+  const fetchKey = JSON.stringify([slug, authUser?.uid ?? null, retry]);
+  const [statusKey, setStatusKey] = useState(fetchKey);
+  if (statusKey !== fetchKey) {
+    setStatusKey(fetchKey);
+    setStatus(canFetch ? "loading" : "missing");
+  }
+
   useEffect(() => {
     let alive = true;
-    setStatus("loading");
-    if (!isFirebaseConfigured || !slug) {
-      setStatus("missing");
-      return;
-    }
+    if (!isFirebaseConfigured || !slug) return;
     (async () => {
       try {
         const access = await getSharedLogAccess(slug);
@@ -161,7 +188,7 @@ function RemoteShare({ slug }: { slug: string }) {
                   }
                 }}
               >
-                Google でサインイン
+                Google でログイン
               </button>
             ) : (
               scope === "passed" && (
@@ -191,10 +218,10 @@ function RemoteShare({ slug }: { slug: string }) {
             {status === "error"
               ? error
               : !authUser
-                ? "Google でサインインすると、読めるかどうかを確認します。"
+                ? "Google でログインすると、読めるかどうかを確認します。"
                 : scope === "passed"
                   ? "このシナリオをプレイ済みなら、記録を開けます。"
-                  : "参加者として登録されたアカウントでサインインしてください。"}
+                  : "参加者として登録されたアカウントでログインしてください。"}
           </p>
           {error && status !== "error" && (
             <p role="alert" className="mt-3 text-error">
@@ -227,6 +254,11 @@ function ShareLogView({
   const gateResult = evaluateShareGate(log, viewerId, { asPassed });
   const gate = serverAuthorized || gateResult.visible ? null : gateResult.reason;
   const visibleMembers = visibleShareMembers(log, { hideSelfOnShare: state.prefs.hideSelfOnShare, viewerId });
+  const mediaViewer = {
+    viewerId,
+    isMember: Boolean(viewerId && (viewerId === log.ownerId || log.players[viewerId])),
+    hasPassed: asPassed || Boolean(serverAuthorized),
+  };
   const channels = log.channels;
   const kpUser = state.users[log.ownerId];
   const kpLink = log.players[log.ownerId];
@@ -252,7 +284,7 @@ function ShareLogView({
   );
 
   return (
-    <ShareFrame>
+    <ShareFrame systemIds={[log.systemId]}>
       <header>
         <div className="meta">
           <SysBadge sys={sys} />
@@ -279,7 +311,7 @@ function ShareLogView({
               kpChar ? <CharAvatar c={kpChar} size={36} /> : <Avatar u={kpUser} size={36} />,
               kpChar?.name ?? kpUser.name,
               kpChar ? kpUser.name : undefined,
-              "進行",
+              "GM",
             )}
           {castMembers.map((u) => {
             const user = state.users[u];
@@ -357,42 +389,33 @@ function ShareLogView({
               </section>
             )}
 
+            <SessionMediaSection
+              className="mb-8"
+              log={log}
+              state={state}
+              editable={false}
+              viewer={mediaViewer}
+            />
+
             <section aria-label="ログ">
-              <div className="sticky top-0 z-20 -mx-4 mb-3 flex flex-wrap items-center gap-2 bg-base-200/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6">
-                <label className="input flex min-w-0 basis-full items-center gap-2 sm:flex-1 sm:basis-auto">
-                  <IconSearch width={16} height={16} className="shrink-0 opacity-50" aria-hidden />
-                  <input
-                    type="search"
-                    aria-label="本文・発言者で絞り込み"
-                    className="min-w-0 grow"
-                    placeholder="本文・発言者で絞り込み…"
-                    value={filter.query}
-                    onChange={(e) => setFilter({ ...filter, query: e.target.value })}
-                  />
-                </label>
-                {channels.length > 1 && (
-                  <Select
-                    ariaLabel="タブで絞り込む"
-                    value={filter.channel}
-                    onChange={(v) => setFilter({ ...filter, channel: v })}
-                    options={[
-                      { value: "all", label: "すべてのタブ" },
-                      ...channels.map((c) => ({
-                        value: c.id,
-                        label: `${c.name}${c.secret ? "（シークレット）" : ""}`,
-                      })),
-                    ]}
-                    className="max-w-full"
-                  />
-                )}
-              </div>
+              <LogReaderBar
+                log={log}
+                state={state}
+                filter={filter}
+                onChange={setFilter}
+                stickyClassName="sticky top-0 z-20 -mx-4 px-4 sm:-mx-6 sm:px-6"
+              />
               {channels.length === 0 ? (
                 <div className="surface">
                   <EmptyState kind="permission" title="表示できるログがありません" />
                 </div>
               ) : (
                 <div className="surface px-1 py-2 sm:px-3 sm:py-3">
-                  <SessionTimeline log={log} state={state} mode="share" filter={filter} />
+                  <RecordingLinkContext.Provider
+                    value={(ts) => recordingLinksAt(log, ts, mediaViewer)[0]?.href}
+                  >
+                    <SessionTimeline log={log} state={state} mode="share" filter={filter} />
+                  </RecordingLinkContext.Provider>
                 </div>
               )}
             </section>
@@ -415,15 +438,21 @@ export function ShareChar() {
 function RemoteCharacter({ id }: { id: string }) {
   const { state } = useStore();
   const [data, setData] = useState<SharedCharacterData | null>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | "missing" | "error">("loading");
+  const canFetch = isFirebaseConfigured && Boolean(id);
+  const [status, setStatus] = useState<"loading" | "ready" | "missing" | "error">(
+    canFetch ? "loading" : "missing",
+  );
   const [retry, setRetry] = useState(0);
+  /* 読み込み直す条件が変わったら、描画中に読み込み中へ戻す */
+  const fetchKey = JSON.stringify([id, retry]);
+  const [statusKey, setStatusKey] = useState(fetchKey);
+  if (statusKey !== fetchKey) {
+    setStatusKey(fetchKey);
+    setStatus(canFetch ? "loading" : "missing");
+  }
   useEffect(() => {
     let alive = true;
-    setStatus("loading");
-    if (!isFirebaseConfigured || !id) {
-      setStatus("missing");
-      return;
-    }
+    if (!isFirebaseConfigured || !id) return;
     fetchSharedCharacter(id)
       .then((shared) => {
         if (alive) {
@@ -526,7 +555,7 @@ function ShareCharView({
     : undefined;
 
   return (
-    <ShareFrame narrow>
+    <ShareFrame narrow systemIds={[c.systemId]}>
       {isOwner && (
         <div className="mb-6 flex flex-wrap items-center gap-2 rounded-box border border-base-300 bg-base-100 px-4 py-3 text-sm">
           <span className="font-semibold">共有ページのプレビュー</span>
@@ -565,31 +594,37 @@ function ShareCharView({
         </div>
       )}
 
-      {share.includeStats && sys && sys.stats.length > 0 && (
-        <dl className="surface mt-6 grid grid-cols-2 divide-base-300 sm:grid-cols-4 [&>div]:px-4 [&>div]:py-3">
-          {sys.stats.map((st) => (
-            <div key={st.key}>
-              <dt className="eyebrow">{st.label}</dt>
-              <dd className="mt-0.5 text-2xl font-bold tabular-nums">
-                {st.key === "san" && sanNow != null ? sanNow : (c.stats[st.key] ?? "-")}
-                {st.max && <span className="ml-0.5 text-xs font-normal text-ink2">/ {st.max}</span>}
-              </dd>
-            </div>
-          ))}
+      {share.includeStats && carriedStats(sys).some((st) => c.stats[st.key] != null) && (
+        <dl className="surface mt-6 grid gap-4 p-4 sm:grid-cols-2 sm:p-5">
+          {carriedStats(sys)
+            .filter((st) => c.stats[st.key] != null)
+            .map((st) => (
+              <StatBar
+                key={st.key}
+                label={st.label}
+                value={st.key === "san" && sanNow != null ? sanNow : c.stats[st.key]}
+                max={st.max}
+              />
+            ))}
         </dl>
+      )}
+      {share.includeStats && c.sheet && (
+        <div className="mt-6">
+          <SheetView sheet={c.sheet} systemId={c.systemId} />
+        </div>
       )}
 
       {share.includeSessions && sessions.length > 0 && (
         <section className="mt-8" aria-label="セッション履歴">
           <h2 className="mb-3 text-base font-bold sm:text-lg">セッション履歴</h2>
-          <ol className="surface list">
+          <ol className="surface tl">
             {sessions.map((s) => {
               const slugOrNull = s.logId
                 ? publicLogs?.[s.logId] ||
                   (!remote && state.logs[s.logId]?.scope === "public" ? state.logs[s.logId]?.slug : undefined)
                 : undefined;
               return (
-                <li key={s.logId} className="px-4 py-3.5 sm:px-5">
+                <li key={s.logId} className="tlitem py-4 pr-4 sm:pr-5">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
                     <b data-user-content className="text-sm sm:text-base">
                       {s.title}
@@ -600,16 +635,8 @@ function ShareCharView({
                     <div className="meta mt-1 text-xs text-base-content">
                       {Object.entries(s.delta).map(([k, d]) => {
                         const def = sys?.stats.find((x) => x.key === k);
-                        const diff = d.after - d.before;
                         return (
-                          <span key={k} className="tabular-nums">
-                            <span className="text-ink2">{def?.label ?? k}</span> {d.before}→{d.after}
-                            {diff !== 0 && (
-                              <span className={diff < 0 ? "ml-1 text-error" : "ml-1 text-success"}>
-                                {diff > 0 ? `+${diff}` : diff}
-                              </span>
-                            )}
-                          </span>
+                          <StatChange key={k} label={def?.label ?? k} before={d.before} after={d.after} />
                         );
                       })}
                     </div>

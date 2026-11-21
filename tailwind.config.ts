@@ -2,11 +2,11 @@ import daisyui from "daisyui";
 import type { Config } from "tailwindcss";
 
 const config: Config & { daisyui?: Record<string, unknown> } = {
-  content: ["./src/**/*.{ts,tsx}"],
+  content: ["./src/**/*.{ts,tsx}", "!./src/**/*.test.{ts,tsx}", "!./src/test/**"],
   theme: {
     extend: {
       fontFamily: {
-        sans: ["Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", "sans-serif"],
+        sans: ["Noto Sans JP Variable", "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", "sans-serif"],
       },
     },
   },
@@ -16,7 +16,7 @@ const config: Config & { daisyui?: Record<string, unknown> } = {
     themes: [
       {
         takufu: {
-          primary: "#b84724",
+          primary: "#ab4120",
           "primary-content": "#fffaf5",
           secondary: "#68594c",
           "secondary-content": "#fffdf9",
@@ -44,25 +44,25 @@ const config: Config & { daisyui?: Record<string, unknown> } = {
       },
       {
         takufuDark: {
-          primary: "#d9734c",
-          "primary-content": "#1c120d",
-          secondary: "#a8998a",
+          primary: "#e5845f",
+          "primary-content": "#1a100b",
+          secondary: "#aba094",
           "secondary-content": "#14110f",
           accent: "#dfa84e",
           "accent-content": "#18120e",
-          neutral: "#2d2621",
-          "neutral-content": "#d6cbc0",
-          "base-100": "#231e1a",
-          "base-200": "#1a1613",
-          "base-300": "#362e28",
-          "base-content": "#d6cbc0",
-          info: "#6bb2c8",
+          neutral: "#2b2520",
+          "neutral-content": "#dcd2c7",
+          "base-100": "#221d19",
+          "base-200": "#161311",
+          "base-300": "#383029",
+          "base-content": "#dcd2c7",
+          info: "#72b8ce",
           "info-content": "#121d21",
-          success: "#62ba8c",
+          success: "#66be90",
           "success-content": "#101f17",
-          warning: "#e8a93a",
+          warning: "#eaa93b",
           "warning-content": "#1f1708",
-          error: "#e86a5e",
+          error: "#eb6d61",
           "error-content": "#211110",
           "--rounded-box": "0.75rem",
           "--rounded-btn": "0.5rem",

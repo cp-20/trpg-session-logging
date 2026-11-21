@@ -10,13 +10,25 @@ import {
   IconUpload,
   IconX,
 } from "../components/icons";
-import { EmptyState, Field, FieldError, Modal, NotFound, PageHead, SectionTitle, cx } from "../components/ui";
+import {
+  EmptyState,
+  Field,
+  FieldError,
+  LoadMore,
+  Modal,
+  NotFound,
+  PageHead,
+  SectionTitle,
+  SplitLayout,
+  cx,
+  useVisibleCount,
+} from "../components/ui";
 import { Avatar, AvatarStack, PlayerPicker } from "../components/identity";
 import { unansweredCount } from "../lib/schedule";
 import { fmtDate, todayStr, uid } from "../lib/time";
 import { useStore } from "../store";
 import type { Log, State, Table, TableEvent } from "../types";
-import { EventDetailModal, EventRow } from "./Calendar";
+import { EventDetailModal, EventRow, PollDetailModal } from "./Calendar";
 import { SessionRow } from "./Sessions";
 
 /** 卓詳細で検索欄を出すセッション数のしきい値 */
@@ -43,7 +55,7 @@ function Members({ ids, state }: { ids: string[]; state: State }) {
   const users = ids.map((id) => state.users[id]).filter((u): u is NonNullable<typeof u> => Boolean(u));
   return (
     <span className="flex min-w-0 items-center gap-2.5 text-sm text-ink2">
-      <AvatarStack people={users.map((user) => ({ kind: "user", user }) as const)} size={24} max={6} />
+      <AvatarStack people={users.map((user) => ({ kind: "user", user }) as const)} size={26} max={6} />
       <span className="min-w-0 truncate">{users.map((u) => u.name).join("、")}</span>
     </span>
   );
@@ -54,24 +66,37 @@ export default function Tables() {
   const [newTable, setNewTable] = useState(false);
   const today = todayStr();
 
-  const tables = useMemo(() => {
+  const { tables, nextEventByTable } = useMemo(() => {
+    const nextMap = new Map<string, TableEvent>();
+    for (const ev of Object.values(state.events ?? {})) {
+      if (ev.status === "poll" || !ev.tableId || ev.date < today) continue;
+      const prev = nextMap.get(ev.tableId);
+      if (!prev || ev.date < prev.date || (ev.date === prev.date && ev.startTime < prev.startTime)) {
+        nextMap.set(ev.tableId, ev);
+      }
+    }
+    const lastMap = new Map<string, number>();
+    for (const l of Object.values(state.logs)) {
+      if (!l.tableId) continue;
+      const prev = lastMap.get(l.tableId) ?? 0;
+      if (l.t0 > prev) lastMap.set(l.tableId, l.t0);
+    }
     const mine = Object.values(state.tables).filter(
       (t) => t.memberIds.includes(state.me) || t.ownerId === state.me,
     );
-    const lastPlayed = (t: Table) => tableSessions(state, t.id)[0]?.t0 ?? 0;
-    const nextDate = (t: Table) => tableUpcoming(state, t.id, today)[0]?.date ?? "";
     // 次の予定がある卓を日付の近い順に、残りは最後に遊んだ順に
-    return mine.sort((a, b) => {
-      const na = nextDate(a);
-      const nb = nextDate(b);
+    mine.sort((a, b) => {
+      const na = nextMap.get(a.id)?.date ?? "";
+      const nb = nextMap.get(b.id)?.date ?? "";
       if (na && nb) return na.localeCompare(nb);
       if (na || nb) return na ? -1 : 1;
-      return lastPlayed(b) - lastPlayed(a);
+      return (lastMap.get(b.id) ?? 0) - (lastMap.get(a.id) ?? 0);
     });
-  }, [state, today]);
+    return { tables: mine, nextEventByTable: nextMap };
+  }, [state.tables, state.events, state.logs, state.me, today]);
 
   return (
-    <>
+    <div className="max-w-4xl">
       <PageHead
         title="卓"
         actions={
@@ -98,20 +123,22 @@ export default function Tables() {
       ) : (
         <div className="surface list">
           {tables.map((t) => {
-            const next = tableUpcoming(state, t.id, today)[0];
+            const next = nextEventByTable.get(t.id);
             return (
               <Link
                 key={t.id}
                 to={`/tables/${t.id}`}
-                className="row-interactive flex items-center gap-4 px-4 py-4 sm:px-5"
+                className="group row-interactive flex items-center gap-4 px-4 py-4 sm:px-5"
               >
                 <div className="min-w-0 flex-1">
-                  <h2 className="truncate text-base font-bold leading-snug">{t.name}</h2>
+                  <h2 className="truncate text-base font-bold leading-snug transition-colors group-hover:text-primary">
+                    {t.name}
+                  </h2>
                   <div className="mt-1.5">
                     <Members ids={t.memberIds} state={state} />
                   </div>
                   {(t.note || next) && (
-                    <div className="meta mt-1.5">
+                    <div className="meta mt-1.5 text-xs sm:text-sm">
                       {t.note && <span className="min-w-0 truncate">{t.note}</span>}
                       {next && (
                         <span className="min-w-0 truncate text-base-content">
@@ -133,7 +160,7 @@ export default function Tables() {
       )}
 
       {newTable && <NewTableModal onClose={() => setNewTable(false)} />}
-    </>
+    </div>
   );
 }
 
@@ -147,11 +174,13 @@ function TableMetaFields({
   errors,
   namePlaceholder,
   notePlaceholder,
+  includeNote = true,
 }: {
   register: UseFormRegister<TableFormValues>;
   errors: FieldErrors<TableFormValues>;
   namePlaceholder?: string;
   notePlaceholder?: string;
+  includeNote?: boolean;
 }) {
   return (
     <>
@@ -166,9 +195,11 @@ function TableMetaFields({
         />
         <FieldError text={errors.name?.message} />
       </Field>
-      <Field label="いつ遊ぶか・メモ（任意）">
-        <input className="input w-full" placeholder={notePlaceholder} {...register("note")} />
-      </Field>
+      {includeNote && (
+        <Field label="メモ（任意）">
+          <input className="input w-full" placeholder={notePlaceholder} {...register("note")} />
+        </Field>
+      )}
     </>
   );
 }
@@ -193,8 +224,7 @@ function NewTableModal({ onClose }: { onClose: () => void }) {
         id,
         name: values.name.trim(),
         ownerId: s.me,
-        memberIds: [s.me, ...members],
-        note: values.note.trim() || undefined,
+        memberIds: [s.me, ...members.filter((m) => m !== s.me)],
         createdAt: new Date().toISOString(),
       };
     });
@@ -222,15 +252,24 @@ function NewTableModal({ onClose }: { onClose: () => void }) {
           register={register}
           errors={errors}
           namePlaceholder="例: 廃校部"
-          notePlaceholder="例: 隔週土曜 21:00〜"
+          includeNote={false}
         />
-        <Field label="メンバー" hint={`${state.users[state.me]?.name ?? "あなた"}は自動で入ります`}>
-          <PlayerPicker state={state} selected={members} onChange={setMembers} exclude={[state.me]} />
+        <Field label="メンバー">
+          <PlayerPicker
+            state={state}
+            selected={members}
+            onChange={setMembers}
+            fixedIds={[state.me]}
+            fixedLabel="自分"
+          />
         </Field>
       </form>
     </Modal>
   );
 }
+
+const SESSION_PAGE_SIZE = 15;
+const SESSION_STEP = 20;
 
 export function TableDetail() {
   const { id } = useParams<{ id?: string }>();
@@ -239,6 +278,8 @@ export function TableDetail() {
   const [editing, setEditing] = useState(false);
   const [q, setQ] = useState("");
   const [openEvent, setOpenEvent] = useState<TableEvent | null>(null);
+  const [pollTarget, setPollTarget] = useState<{ id: string; mode: "view" | "answer" } | null>(null);
+  const [visibleCount, setVisibleCount] = useVisibleCount(SESSION_PAGE_SIZE, [id, q]);
   const today = todayStr();
 
   const table = state.tables[id ?? ""];
@@ -248,11 +289,18 @@ export function TableDetail() {
     [state, table, today],
   );
   const polls = useMemo(() => (table ? tablePolls(state, table.id) : []), [state, table]);
+  const openPoll = useMemo(
+    () => (pollTarget ? (polls.find((ev) => ev.id === pollTarget.id) ?? null) : null),
+    [pollTarget, polls],
+  );
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return needle ? sessions.filter((l) => l.title.toLowerCase().includes(needle)) : sessions;
+  }, [sessions, q]);
   if (!table) return <NotFound what="卓" />;
 
   const isOwner = table.ownerId === state.me;
-  const needle = q.trim().toLowerCase();
-  const shown = needle ? sessions.filter((l) => l.title.toLowerCase().includes(needle)) : sessions;
+  const shownList = shown.slice(0, visibleCount);
   const recordHref = `/upload?table=${table.id}`;
 
   function addMember(uid2: string) {
@@ -266,119 +314,113 @@ export function TableDetail() {
     });
   }
 
-  return (
-    <>
-      <PageHead
-        back={{ to: "/tables", label: "卓" }}
-        title={table.name}
-        sub={
-          <div className="flex flex-col gap-1.5">
-            <Members ids={table.memberIds} state={state} />
-            {table.note && <span>{table.note}</span>}
-          </div>
-        }
-        actions={
-          <>
-            <button className="btn" onClick={() => setEditing(true)}>
-              <IconPencil width={16} height={16} /> 編集
-            </button>
-            <button className="btn btn-primary" onClick={() => nav({ to: recordHref })}>
-              <IconPlus width={17} height={17} /> この卓で記録
-            </button>
-          </>
-        }
-      />
-
-      <SectionTitle>次の予定</SectionTitle>
-      <div className="surface list">
-        {upcomingEvents.map((ev) => (
-          <EventRow
-            key={ev.id}
-            ev={ev}
-            state={state}
-            showTable={false}
-            onOpen={() => setOpenEvent(ev)}
-            trailing={<RsvpTally ev={ev} />}
-          />
-        ))}
-        {polls.map((ev) => {
-          const waiting = unansweredCount(ev, state.me) > 0;
-          return (
-            <Link
+  const mainCol = (
+    <div className="space-y-8">
+      <section aria-label="次の予定">
+        <SectionTitle>次の予定</SectionTitle>
+        <div className="surface list">
+          {upcomingEvents.map((ev) => (
+            <EventRow
               key={ev.id}
-              to="/calendar"
-              className="row-interactive flex items-center gap-3 px-4 py-3.5 text-sm sm:px-5"
-            >
-              <IconCalendarTime width={18} height={18} className="shrink-0 text-warning" aria-hidden />
-              <span className="min-w-0 flex-1 truncate">
-                <span className="text-ink2">日程調整中</span>{" "}
-                <span className="font-semibold">{ev.title}</span>
-              </span>
-              <span className={cx("shrink-0", waiting ? "font-semibold text-warning" : "text-ink2")}>
-                {waiting ? "返事する" : "カレンダーで見る"}
-              </span>
-              <IconChevronRight width={16} height={16} className="shrink-0 text-ink3" aria-hidden />
-            </Link>
-          );
-        })}
-        {upcomingEvents.length === 0 && polls.length === 0 && (
-          <div className="flex flex-col items-start gap-3 px-4 py-4 text-sm text-ink2 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-            <span>決まっている予定はありません。</span>
-            <Link to="/calendar" className="btn btn-sm">
-              <IconCalendarTime width={15} height={15} /> 予定を立てる
-            </Link>
-          </div>
-        )}
-      </div>
-
-      <SectionTitle
-        right={
-          sessions.length >= SEARCH_THRESHOLD ? (
-            <label className="input input-sm flex w-40 items-center gap-1.5 sm:w-52">
-              <IconSearch width={14} height={14} className="shrink-0 opacity-50" aria-hidden />
-              <input
-                type="search"
-                className="min-w-0 grow"
-                placeholder="この卓で検索"
-                aria-label="この卓のセッションを検索"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-              />
-            </label>
-          ) : undefined
-        }
-      >
-        セッション
-      </SectionTitle>
-      <div className="surface">
-        {sessions.length === 0 ? (
-          <EmptyState
-            kind="first"
-            title="この卓の記録はまだありません"
-            action={
-              <button className="btn btn-primary" onClick={() => nav({ to: recordHref })}>
-                <IconUpload width={16} height={16} /> セッションを記録
+              ev={ev}
+              state={state}
+              showTable={false}
+              onOpen={() => setOpenEvent(ev)}
+              metaRight={<RsvpTally ev={ev} />}
+            />
+          ))}
+          {polls.map((ev) => {
+            const waiting = unansweredCount(ev, state.me) > 0;
+            return (
+              <button
+                key={ev.id}
+                type="button"
+                onClick={() => setPollTarget({ id: ev.id, mode: "view" })}
+                className="row-interactive flex w-full items-center gap-3 px-4 py-3.5 text-left text-sm sm:px-5"
+              >
+                <IconCalendarTime width={18} height={18} className="shrink-0 text-warning" aria-hidden />
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="text-ink2">日程調整中</span>{" "}
+                  <span className="font-semibold">{ev.title}</span>
+                </span>
+                <span className={cx("shrink-0", waiting ? "font-semibold text-primary" : "text-ink2")}>
+                  {waiting ? "返事待ち" : "回答済み"}
+                </span>
+                <IconChevronRight width={16} height={16} className="shrink-0 text-ink3" aria-hidden />
               </button>
-            }
-          />
-        ) : shown.length === 0 ? (
-          <EmptyState
-            kind="filtered"
-            action={
-              <button className="btn btn-sm" onClick={() => setQ("")}>
-                検索を解除
-              </button>
-            }
-          />
-        ) : (
-          <div className="list">
-            {shown.map((l) => (
-              <SessionRow key={l.id} log={l} href={`/sessions/${l.id}`} context="table" />
-            ))}
-          </div>
-        )}
-      </div>
+            );
+          })}
+          {upcomingEvents.length === 0 && polls.length === 0 && (
+            <div className="flex flex-col items-start gap-3 px-4 py-4 text-sm text-ink2 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+              <span>決まっている予定はありません。</span>
+              <Link to="/calendar" className="btn btn-sm">
+                <IconCalendarTime width={15} height={15} /> 予定を立てる
+              </Link>
+            </div>
+          )}
+        </div>
+      </section>
 
+      <section aria-label="セッション">
+        <SectionTitle
+          right={
+            sessions.length >= SEARCH_THRESHOLD ? (
+              <label className="input input-sm flex w-40 items-center gap-1.5 sm:w-52">
+                <IconSearch width={14} height={14} className="shrink-0 opacity-50" aria-hidden />
+                <input
+                  type="search"
+                  className="min-w-0 grow"
+                  placeholder="この卓で検索"
+                  aria-label="この卓のセッションを検索"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                />
+              </label>
+            ) : undefined
+          }
+        >
+          セッション
+        </SectionTitle>
+        <div className="surface">
+          {sessions.length === 0 ? (
+            <EmptyState
+              kind="first"
+              title="この卓の記録はまだありません"
+              action={
+                <button className="btn" onClick={() => nav({ to: recordHref })}>
+                  <IconUpload width={16} height={16} /> セッションを記録
+                </button>
+              }
+            />
+          ) : shown.length === 0 ? (
+            <EmptyState
+              kind="filtered"
+              action={
+                <button className="btn btn-sm" onClick={() => setQ("")}>
+                  検索を解除
+                </button>
+              }
+            />
+          ) : (
+            <div className="list">
+              {shownList.map((l) => (
+                <SessionRow key={l.id} log={l} href={`/sessions/${l.id}`} context="table" />
+              ))}
+            </div>
+          )}
+        </div>
+        <LoadMore
+          shown={shownList.length}
+          total={shown.length}
+          step={SESSION_STEP}
+          onMore={() => setVisibleCount((n) => n + SESSION_STEP)}
+        />
+      </section>
+    </div>
+  );
+
+  const asideCol = (
+    <section aria-label="メンバー">
       <SectionTitle>メンバー</SectionTitle>
       <div className="surface">
         <ul className="list">
@@ -412,22 +454,56 @@ export function TableDetail() {
         {isOwner && (
           <div className="border-t border-base-300 px-4 py-4 sm:px-5">
             <div className="eyebrow mb-2">メンバーを追加</div>
-            <div className="max-w-md">
-              <PlayerPicker
-                state={state}
-                selected={[]}
-                onChange={(ids) => ids.forEach(addMember)}
-                exclude={table.memberIds}
-                placeholder="名前で検索"
-                quickLabel="ほかの卓で一緒に遊んだ人"
-                quickIds={suggestMembers(state, table.id)}
-              />
-            </div>
+            <PlayerPicker
+              state={state}
+              selected={[]}
+              onChange={(ids) => ids.forEach(addMember)}
+              exclude={table.memberIds}
+              placeholder="名前で検索"
+              quickLabel="ほかの卓で一緒に遊んだ人"
+              quickIds={suggestMembers(state, table.id)}
+            />
           </div>
         )}
       </div>
+    </section>
+  );
+
+  return (
+    <>
+      <PageHead
+        back={{ to: "/tables", label: "卓" }}
+        title={table.name}
+        sub={
+          <div className="flex flex-col gap-1.5">
+            <Members ids={table.memberIds} state={state} />
+            {table.note && <span>{table.note}</span>}
+          </div>
+        }
+        actions={
+          <>
+            <button className="btn" onClick={() => setEditing(true)}>
+              <IconPencil width={16} height={16} /> 編集
+            </button>
+            <button className="btn btn-primary" onClick={() => nav({ to: recordHref })}>
+              <IconPlus width={17} height={17} /> この卓で記録
+            </button>
+          </>
+        }
+      />
+
+      <SplitLayout asideWidth="sm" stickyAside main={mainCol} aside={asideCol} />
 
       {editing && <EditTableModal table={table} onClose={() => setEditing(false)} />}
+      {openPoll && (
+        <PollDetailModal
+          key={openPoll.id}
+          event={openPoll}
+          state={state}
+          initialMode={pollTarget?.mode}
+          onClose={() => setPollTarget(null)}
+        />
+      )}
       {openEvent && (
         <EventDetailModal
           event={openEvent}
@@ -458,7 +534,7 @@ function RsvpTally({ ev }: { ev: TableEvent }) {
       className="hidden shrink-0 gap-2 text-xs text-ink2 tabular-nums sm:flex"
       aria-label={`参加可 ${ok}人、未定 ${maybe}人、不可 ${ng}人`}
     >
-      <span className="font-semibold text-success">◯ {ok}</span>
+      <span className="font-semibold text-base-content">◯ {ok}</span>
       {maybe > 0 && <span>△ {maybe}</span>}
       {ng > 0 && <span>× {ng}</span>}
     </span>
@@ -518,7 +594,11 @@ function EditTableModal({ table, onClose }: { table: Table; onClose: () => void 
       }
     >
       <form onSubmit={handleSubmit(onSubmit)}>
-        <TableMetaFields register={register} errors={errors} />
+        <TableMetaFields
+          register={register}
+          errors={errors}
+          notePlaceholder="例: キャンペーンの概要や連絡事項"
+        />
       </form>
     </Modal>
   );

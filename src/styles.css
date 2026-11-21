@@ -3,10 +3,14 @@
 @tailwind utilities;
 
 :root {
-  font-size: 16px;
+  font-size: 100%;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --dur-fast: 150ms;
   --dur-normal: 200ms;
+}
+
+html {
+  scrollbar-gutter: stable;
 }
 
 html,
@@ -16,7 +20,7 @@ body {
 body {
   min-height: 100vh;
   color: var(--fallback-bc, oklch(var(--bc) / 1));
-  font-family: "Noto Sans JP", "Hiragino Sans", sans-serif;
+  font-family: "Noto Sans JP Variable", "Noto Sans JP", "Hiragino Sans", sans-serif;
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "palt" 0;
   line-height: 1.6;
@@ -31,15 +35,19 @@ body {
  * ============================================================ */
 .btn {
   animation: none;
+  /* daisyUI の .btn が付ける薄い影を消す。段階は塗りと枠で示す（影は使わない） */
+  box-shadow: none;
   font-weight: 600;
   min-height: 2.5rem;
-  height: 2.5rem;
-  padding-left: 1rem;
-  padding-right: 1rem;
+  height: auto;
+  max-width: 100%;
+  padding: 0.375rem 1rem;
   gap: 0.375rem;
   font-size: 0.875rem;
+  line-height: 1.35;
   flex-wrap: nowrap;
-  white-space: nowrap;
+  white-space: normal;
+  text-align: center;
   transition:
     transform var(--dur-fast) ease-out,
     background-color var(--dur-fast) ease,
@@ -48,17 +56,21 @@ body {
 }
 .btn-sm {
   min-height: 2.25rem;
-  height: 2.25rem;
-  padding-left: 0.75rem;
-  padding-right: 0.75rem;
+  height: auto;
+  padding: 0.25rem 0.75rem;
   font-size: 0.8125rem;
 }
 .btn-xs {
   min-height: 1.75rem;
-  height: 1.75rem;
-  padding-left: 0.6rem;
-  padding-right: 0.6rem;
+  height: auto;
+  padding: 0.15rem 0.6rem;
   font-size: 0.75rem;
+}
+.btn:not(.btn-square):not(.btn-circle):has(> svg:first-child) {
+  padding-left: 0.75rem;
+}
+.btn-sm:not(.btn-square):not(.btn-circle):has(> svg:first-child) {
+  padding-left: 0.6rem;
 }
 .btn-primary svg {
   stroke-width: 2.3;
@@ -76,15 +88,16 @@ body {
 }
 
 @layer components {
+  /* 押せるカード。影は使わず、ホバーは枠と面の色だけで示す（DESIGN.md §3） */
   .card-interactive {
     @apply card border border-base-300 bg-base-100;
     transition:
       border-color var(--dur-fast) ease,
-      box-shadow var(--dur-fast) ease;
+      background-color var(--dur-fast) ease;
   }
   .card-interactive:hover {
-    border-color: oklch(var(--bc) / 0.22);
-    box-shadow: 0 2px 10px rgba(34, 28, 23, 0.06);
+    border-color: oklch(var(--bc) / 0.24);
+    background-color: color-mix(in oklch, oklch(var(--b1)) 96%, oklch(var(--bc)));
   }
 }
 
@@ -94,8 +107,8 @@ body {
   ):not(.btn-quiet),
 .btn.btn-outline {
   background-color: oklch(var(--b1));
-  /* 静止時の枠は控えめに、ホバーで枠だけをはっきりさせる（面の色はほぼ変えない） */
-  border: 1px solid oklch(var(--bc) / 0.13);
+  /* 静止時の枠はごく控えめに、ホバーで枠と面をはっきりさせる */
+  border: 1px solid oklch(var(--bc) / 0.1);
   color: oklch(var(--bc));
 }
 
@@ -123,8 +136,8 @@ body {
   ):not(.btn-quiet):focus-visible,
 .btn-outline:hover,
 .btn-outline:focus-visible {
-  background-color: color-mix(in oklch, oklch(var(--b1)) 96%, oklch(var(--bc))) !important;
-  border-color: oklch(var(--bc) / 0.34) !important;
+  background-color: color-mix(in oklch, oklch(var(--b1)) 93%, oklch(var(--bc))) !important;
+  border-color: oklch(var(--bc) / 0.45) !important;
   color: oklch(var(--bc)) !important;
 }
 
@@ -144,15 +157,45 @@ body {
   font-size: 0.9375rem;
 }
 .input {
-  height: 2.5rem;
+  height: auto;
   min-height: 2.5rem;
+  max-width: 100%;
+  padding-block: 0.375rem;
+}
+.input-sm {
+  height: auto;
+  min-height: 2.25rem;
+  padding-block: 0.25rem;
+  font-size: 0.875rem;
 }
 .input:focus,
 .input:focus-within,
 .textarea:focus {
-  outline: 2px solid oklch(var(--p) / 0.35);
-  outline-offset: 0;
-  border-color: oklch(var(--p) / 0.7);
+  outline: 2px solid oklch(var(--p));
+  outline-offset: 2px;
+  border-color: oklch(var(--p));
+}
+.input input:focus,
+.input input:focus-visible {
+  outline: none;
+}
+/* 数値入力のブラウザ標準の上下ボタンは出さない（増減は NumberInput の −/＋ で） */
+.input[type="number"],
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* 日付入力: ポインタ端末では DateInput の暦を使うので、ブラウザ標準の暦アイコンを隠す */
+input[type="date"][data-picker]::-webkit-calendar-picker-indicator {
+  display: none;
+}
+input[type="date"] {
+  font-variant-numeric: tabular-nums;
 }
 .input::placeholder,
 .textarea::placeholder {
@@ -169,9 +212,22 @@ body {
   background-color: oklch(var(--b1) / 1);
   border: 1px solid oklch(var(--b3) / 1);
   border-radius: var(--rounded-box, 0.75rem);
-}
-.card {
   box-shadow: none;
+}
+
+/*
+ * 浮かぶ層（Select の選択肢・Menu・HoverCard・候補の一覧）。
+ * 影はここだけに許す例外: 下の内容と重なるので、枠だけでは境目が読めない（lint:no-shadow）。
+ */
+.popover {
+  background-color: oklch(var(--b1) / 1);
+  border: 1px solid oklch(var(--b3) / 1);
+  border-radius: var(--rounded-box, 0.75rem);
+  box-shadow: 0 6px 20px -4px oklch(0.2 0.02 50 / 0.16);
+}
+[data-theme="takufuDark"] .popover {
+  border-color: oklch(var(--bc) / 0.18);
+  box-shadow: 0 6px 20px -4px oklch(0 0 0 / 0.5);
 }
 
 .list > * + * {
@@ -184,13 +240,20 @@ body {
 .row-interactive:hover {
   background-color: oklch(var(--b2) / 0.6);
 }
-.row-interactive:first-child {
-  border-top-left-radius: var(--rounded-box, 0.75rem);
-  border-top-right-radius: var(--rounded-box, 0.75rem);
+/*
+ * 行のホバー背景は .list の端の行でだけ面の角に合わせて丸める。
+ * 行を <li> で包むと :first-child / :last-child が行ごとに成り立ち、すべての行の角が丸まるので、
+ * 位置は .list の子で判定する。
+ */
+.list > .row-interactive:first-child,
+.list > :first-child > .row-interactive {
+  border-top-left-radius: calc(var(--rounded-box, 0.75rem) - 1px);
+  border-top-right-radius: calc(var(--rounded-box, 0.75rem) - 1px);
 }
-.row-interactive:last-child {
-  border-bottom-left-radius: var(--rounded-box, 0.75rem);
-  border-bottom-right-radius: var(--rounded-box, 0.75rem);
+.list > .row-interactive:last-child,
+.list > :last-child > .row-interactive {
+  border-bottom-left-radius: calc(var(--rounded-box, 0.75rem) - 1px);
+  border-bottom-right-radius: calc(var(--rounded-box, 0.75rem) - 1px);
 }
 
 /* メタ情報の並び。折り返しても行頭に区切り記号が残らないよう、記号ではなく間隔で区切る */
@@ -217,10 +280,10 @@ body {
   @apply flex-none w-24 sm:w-32 shrink-0 font-bold text-sm flex flex-col gap-0.5 overflow-hidden pt-0.5;
 }
 .msg .who .kind {
-  @apply text-xs font-medium text-base-content/55;
+  @apply text-xs font-medium text-base-content/65;
 }
 .msg .time {
-  @apply text-xs text-base-content/50 ml-2 flex-none pt-1;
+  @apply text-xs text-base-content/65 ml-2 flex-none pt-1;
   font-variant-numeric: tabular-nums;
 }
 .msg .body {
@@ -246,7 +309,7 @@ body {
 
 /* ---------- シーン区切り・メモ行 ---------- */
 .noterow {
-  @apply flex items-center gap-3 px-3 py-2 my-1.5 text-xs text-base-content/60;
+  @apply flex items-center gap-3 px-3 py-2 my-1.5 text-xs text-base-content/65;
 }
 
 /* ---------- 日付区切り ---------- */
@@ -261,18 +324,18 @@ body {
 
 /* ---------- キャラクター履歴タイムライン ---------- */
 .tl {
-  @apply relative pl-7;
+  @apply relative pl-8 sm:pl-9;
 }
 .tl::before {
   content: "";
-  @apply absolute left-2.5 top-2 bottom-2 w-0.5 bg-base-300;
+  @apply absolute left-[15px] sm:left-[19px] top-6 bottom-6 w-px bg-base-300;
 }
 .tlitem {
-  @apply relative py-3.5 border-b border-base-300/70 last:border-0;
+  @apply relative border-b border-base-300/80 last:border-0;
 }
 .tlitem::before {
   content: "";
-  @apply absolute -left-[22px] top-5 w-3 h-3 rounded-full bg-base-100 border-2 border-primary;
+  @apply absolute -left-[21px] top-[1.35rem] size-2.5 rounded-full bg-base-100 border-2 border-primary;
 }
 
 /* ---------- ドロップゾーン ---------- */
@@ -289,7 +352,7 @@ body {
   scrollbar-width: none;
 }
 .tabs .tab {
-  @apply px-3 sm:px-4 py-3 text-sm font-semibold text-base-content/60 border-b-2 border-transparent -mb-px min-h-11 whitespace-nowrap transition-colors duration-150;
+  @apply px-3 sm:px-4 py-3 text-sm font-semibold text-base-content/75 border-b-2 border-transparent -mb-px min-h-11 whitespace-nowrap transition-colors duration-150;
   height: auto;
 }
 .tabs .tab:hover {
@@ -304,10 +367,10 @@ body {
   color: oklch(var(--bc) / 1);
 }
 .text-ink2 {
-  color: oklch(var(--bc) / 0.66);
+  color: oklch(var(--bc) / 0.75);
 }
 .text-ink3 {
-  color: oklch(var(--bc) / 0.5);
+  color: oklch(var(--bc) / 0.65);
 }
 .font-display {
   font-family: inherit;
@@ -315,9 +378,60 @@ body {
 ::selection {
   background: oklch(var(--p) / 0.2);
 }
-:focus-visible {
+:focus-visible,
+.toggle:focus-visible,
+.btn:has(> input.sr-only:focus-visible),
+.drop:has(> input.sr-only:focus-visible),
+label:has(> input.sr-only:focus-visible) {
   outline: 2px solid oklch(var(--p));
   outline-offset: 2px;
+}
+.row-interactive:focus-visible,
+.card-interactive:focus-visible,
+.tabs .tab:focus-visible,
+nav a:focus-visible,
+[data-calendar-day]:focus-visible,
+[role="option"]:focus-visible,
+[role="menuitem"]:focus-visible,
+[role="radio"]:focus-visible {
+  outline: 2px solid oklch(var(--p));
+  outline-offset: -2px;
+}
+main#main-content:focus {
+  outline: none;
+}
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 100;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip-path: none;
+  padding: 0.625rem 1rem;
+  border-radius: var(--rounded-btn, 0.5rem);
+  background-color: oklch(var(--p));
+  color: oklch(var(--pc));
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-decoration: none;
+  outline: 2px solid oklch(var(--bc));
+  outline-offset: 2px;
+}
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
 }
 input,
 textarea {
@@ -350,5 +464,679 @@ textarea {
 }
 
 .page {
-  @apply max-w-5xl;
+  @apply max-w-6xl;
+}
+
+/* ---------- 関連するもの（src/components/media.tsx） ---------- */
+/* 種類の印: 主色の薄地に主色のアイコン */
+.media-kind-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.625rem;
+  background-color: oklch(var(--p) / 0.1);
+  color: oklch(var(--p));
+  outline: 2px solid oklch(var(--b1));
+}
+/* サムネイルの上の再生ボタン: 暗幕の上に明るい文字（テーマによらず読める） */
+.media-play {
+  background-color: oklch(0.18 0.01 50 / 0.78);
+  color: oklch(0.97 0.01 80);
+  transition: background-color 0.15s ease;
+}
+.group:hover .media-play,
+.group:focus-visible .media-play {
+  background-color: oklch(var(--p));
+  color: oklch(var(--pc));
+}
+/* まだ何もないとき: 破線の枠で「ここに足せる」ことを示す */
+.media-empty {
+  border: 1.5px dashed oklch(var(--bc) / 0.22);
+  background-color: oklch(var(--b1) / 0.6);
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+.media-empty:hover {
+  border-color: oklch(var(--p) / 0.6);
+  background-color: oklch(var(--b1));
+}
+
+/* ---------- LP（src/screens/Landing.tsx）: 卓報告ポスター ----------
+ * X の #卓報告 に流れてくるものをタイルにして貼ったポスター。柿色の地・温かい白・焦げ茶のインク・山吹の目印（アプリ本体の暖色と揃える）。
+ * 色はダイスの結果（クリティカル=緑、ファンブル・SAN 減少=赤）にだけ意味を持たせる。見出しはデラゴシック。
+ * 生成物の典型（くすんだクリーム地に明朝とテラコッタ）にはせず、鮮やかな面と極太ゴシックで押す。影は使わず、焦げ茶の線で縁取る。
+ */
+/* LP の書体は LP に出る文字だけに絞ったファイル（scripts/subset-lp-fonts.ts。@font-face は Landing.tsx の LpFonts）。後ろの候補は端末の書体だけにする:
+ * 読み込み中の代わりの表示で Web フォント（Noto Sans JP の分割ファイル）を呼ばないため */
+/* LP のページでは body ごと LP の書体にする（外枠の外に出る要素や portal が Noto Sans JP の分割ファイルを呼ばないように） */
+:root:has(.pst-root) body,
+.pst-root {
+  --pst-font-sans:
+    "Takufu LP Sans", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", Meiryo,
+    sans-serif;
+  --pst-font-display: "Takufu LP Display", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+  font-family: var(--pst-font-sans);
+}
+.pst-root :is(button, input, textarea, select) {
+  font-family: inherit;
+}
+.pst-hero,
+.pst-header,
+.pst-light,
+.pst-yellow {
+  --pst-field: #bf3a16;
+  --pst-ink: #2b140c;
+  --pst-ink-2: #6b3f2d;
+  --pst-paper: #fff9f1;
+  --pst-yellow: #ffc233;
+  --pst-crit: #2bbf73;
+  --pst-red: #c8102e;
+  --pst-on-dark-2: #f5cdb9;
+  --pst-tint: #ffe9dc;
+}
+.pst-display {
+  font-family: var(--pst-font-display, sans-serif);
+  font-weight: 400;
+  letter-spacing: 0;
+  word-break: auto-phrase;
+}
+.pst-header {
+  background-color: var(--pst-field);
+  color: var(--pst-paper);
+}
+.pst-logo {
+  color: var(--pst-paper);
+}
+.pst-hero {
+  overflow: hidden;
+  background-color: var(--pst-field);
+  color: var(--pst-paper);
+}
+.pst-light {
+  background-color: var(--pst-paper);
+  color: var(--pst-ink);
+}
+.pst-yellow {
+  background-color: var(--pst-yellow);
+  color: var(--pst-ink);
+}
+.pst-h1 {
+  font-size: clamp(2.75rem, 8.6vw, 6rem);
+  line-height: 1.08;
+}
+.pst-h2 {
+  font-size: clamp(1.875rem, 5vw, 3.5rem);
+  line-height: 1.15;
+}
+.pst-lead {
+  max-width: 38rem;
+  font-size: 1.0625rem;
+  line-height: 1.9;
+  color: var(--pst-paper);
+}
+.pst-body {
+  max-width: 40rem;
+  font-size: 1.0625rem;
+  line-height: 1.9;
+  color: var(--pst-ink-2);
+}
+.pst-fine {
+  max-width: 44rem;
+  font-size: 0.875rem;
+  line-height: 1.8;
+}
+.pst-on-dark {
+  color: var(--pst-paper);
+}
+
+/* 操作。地ごとに塗りを変える */
+.pst-btn {
+  display: inline-flex;
+  height: 3.25rem;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid transparent;
+  border-radius: 0.875rem;
+  padding: 0 1.5rem;
+  font-size: 1rem;
+  font-weight: 700;
+  transition:
+    transform 0.12s ease,
+    background-color 0.15s ease;
+}
+.pst-btn:active {
+  transform: scale(0.98);
+}
+.pst-btn:focus-visible {
+  outline: 3px solid var(--pst-yellow);
+  outline-offset: 3px;
+}
+.pst-btn-sm {
+  height: 2.25rem;
+  border-radius: 0.625rem;
+  padding: 0 0.875rem;
+  font-size: 0.875rem;
+}
+.pst-btn-solid {
+  background-color: var(--pst-paper);
+  color: var(--pst-field);
+}
+.pst-btn-solid:hover {
+  background-color: var(--pst-yellow);
+  color: var(--pst-ink);
+}
+.pst-btn-line {
+  border-color: var(--pst-paper);
+  color: var(--pst-paper);
+}
+.pst-btn-line:hover {
+  background-color: rgb(255 255 255 / 0.12);
+}
+.pst-btn-ink {
+  background-color: var(--pst-ink);
+  color: var(--pst-paper);
+}
+.pst-btn-ink:hover {
+  background-color: var(--pst-field);
+}
+.pst-btn-ink-line {
+  border-color: var(--pst-ink);
+  color: var(--pst-ink);
+}
+.pst-btn-ink-line:hover {
+  background-color: rgb(43 20 12 / 0.08);
+}
+.pst-yellow .pst-btn:focus-visible,
+.pst-light .pst-btn:focus-visible {
+  outline-color: var(--pst-field);
+}
+
+/* 流れるタイルの帯 */
+.pst-wall {
+  margin-top: 3.5rem;
+  padding-bottom: 4rem;
+}
+.pst-row {
+  overflow: hidden;
+  padding: 0.75rem 0;
+}
+.pst-row-track {
+  display: flex;
+  width: max-content;
+  align-items: center;
+  animation: pst-marquee 80s linear infinite;
+}
+.pst-row.is-reverse .pst-row-track {
+  animation-duration: 95s;
+  animation-direction: reverse;
+}
+.pst-row:hover .pst-row-track {
+  animation-play-state: paused;
+}
+@keyframes pst-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.pst-tile {
+  position: relative;
+  flex: none;
+  margin-right: 1.25rem;
+  border: 2px solid var(--pst-ink);
+  border-radius: 1rem;
+  background-color: var(--pst-paper);
+  padding: 1rem 1.125rem;
+  color: var(--pst-ink);
+}
+.pst-row-track > .pst-tile:nth-child(odd),
+.pst-row-track > .contents > .pst-tile:nth-child(odd) {
+  transform: rotate(-1.4deg);
+}
+.pst-row-track > .pst-tile:nth-child(even),
+.pst-row-track > .contents > .pst-tile:nth-child(even) {
+  transform: rotate(1.1deg);
+}
+.pst-tile-tag {
+  display: inline-block;
+  border-radius: 0.375rem;
+  background-color: var(--pst-field);
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--pst-paper);
+}
+.pst-tile-title {
+  margin-top: 0.375rem;
+  font-size: 1.375rem;
+  line-height: 1.25;
+}
+.pst-tile-meta {
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--pst-ink-2);
+}
+.pst-tile-meta.pst-on-dark {
+  color: var(--pst-on-dark-2);
+}
+.pst-portrait {
+  flex: none;
+  border: 2px solid var(--pst-ink);
+  border-radius: 999px;
+  background-color: var(--pst-paper);
+}
+.pst-tile-report {
+  width: 19rem;
+  padding-right: 6rem;
+}
+.pst-stamp {
+  position: absolute;
+  right: 0.875rem;
+  top: 1.5rem;
+  border: 3px solid var(--pst-red);
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  font-family: var(--pst-font-display, sans-serif);
+  font-size: 1rem;
+  line-height: 1.2;
+  color: var(--pst-red);
+  transform: rotate(8deg);
+}
+.pst-tile-dice {
+  width: 11rem;
+}
+.pst-dice-num {
+  font-size: 4rem;
+  line-height: 1;
+  margin: 0.25rem 0 0.5rem;
+}
+.pst-band {
+  display: inline-block;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+.pst-band-sm {
+  margin-left: 0.25rem;
+  padding: 0.0625rem 0.5rem;
+  font-size: 0.75rem;
+}
+.pst-band-crit {
+  background-color: var(--pst-crit);
+  color: var(--pst-ink);
+}
+.pst-band-fumble {
+  background-color: var(--pst-red);
+  color: var(--pst-paper);
+}
+.pst-tile-quote {
+  width: 20rem;
+}
+.pst-quote {
+  margin-top: 0.625rem;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.7;
+}
+.pst-tile-san {
+  width: 15rem;
+  background-color: var(--pst-yellow);
+}
+.pst-san-from {
+  font-size: 1.75rem;
+}
+.pst-san-loss {
+  font-size: 3rem;
+  line-height: 1.1;
+  color: var(--pst-red);
+}
+.pst-tile-rec {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  border: 2px solid var(--pst-ink);
+  border-radius: 1rem;
+  background-color: var(--pst-ink);
+  padding: 1rem 1.25rem;
+  color: var(--pst-paper);
+}
+.pst-row .pst-tile-rec {
+  width: 17rem;
+}
+.pst-play {
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background-color: var(--pst-yellow);
+  color: var(--pst-ink);
+}
+.pst-tile-portrait {
+  display: flex;
+  width: 19rem;
+  align-items: center;
+  gap: 1rem;
+}
+.pst-tile-poll {
+  width: 15rem;
+}
+.pst-poll-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--pst-field);
+}
+.pst-tile-secret {
+  width: 18rem;
+  background-color: var(--pst-ink);
+  color: var(--pst-paper);
+}
+.pst-tile-growth {
+  width: 15rem;
+}
+.pst-growth {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0.25rem 1rem;
+  margin-top: 0.375rem;
+  font-size: 0.875rem;
+}
+.pst-growth b {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.pst-loss-text {
+  color: var(--pst-red);
+}
+
+/* タイルが集まった先のページ（作例） */
+.pst-sheet {
+  overflow: hidden;
+  border: 2px solid var(--pst-ink);
+  border-radius: 1.25rem;
+  background-color: var(--pst-paper);
+  color: var(--pst-ink);
+}
+.pst-sheet-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 2px solid var(--pst-ink);
+  background-color: var(--pst-tint);
+  padding: 1.25rem 1.5rem;
+}
+.pst-sheet-title {
+  font-size: clamp(1.375rem, 3vw, 2rem);
+  line-height: 1.2;
+}
+.pst-sheet-body {
+  display: grid;
+  gap: 2rem;
+  padding: 1.5rem;
+}
+@media (min-width: 1024px) {
+  .pst-sheet-body {
+    grid-template-columns: 1.5fr 1fr;
+    gap: 2.5rem;
+  }
+}
+.pst-sheet-label {
+  margin-bottom: 0.625rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--pst-ink-2);
+}
+.pst-sheet-log {
+  position: relative;
+}
+.pst-log-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  border-radius: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.9375rem;
+  line-height: 1.7;
+}
+.pst-log-line.is-marked {
+  background-color: var(--pst-yellow);
+}
+.pst-log-time {
+  width: 2.75rem;
+  flex: none;
+  padding-top: 0.125rem;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--pst-ink-2);
+}
+.is-marked .pst-log-time {
+  color: var(--pst-ink);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.pst-log-dice {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 0.5rem;
+  background-color: var(--pst-tint);
+  padding: 0.25rem 0.625rem;
+  font-size: 0.875rem;
+}
+.pst-note {
+  display: inline-block;
+  margin: 0.75rem 0 0 3.5rem;
+  border: 2px solid var(--pst-ink);
+  border-radius: 0.5rem;
+  background-color: var(--pst-paper);
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  transform: rotate(-1.5deg);
+}
+.pst-sheet-side {
+  display: grid;
+  align-content: start;
+  gap: 1.75rem;
+}
+.pst-rec-inline {
+  padding: 0.75rem 1rem;
+}
+/* 押せる切り替えは 1 つの枠にまとめ、選んでいるものだけを墨で塗る（LP で唯一の選択 UI） */
+.pst-filter-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  border: 2px solid var(--pst-ink);
+  border-radius: 0.625rem;
+  background-color: var(--pst-paper);
+  padding: 2px;
+}
+.pst-filter-btn {
+  display: inline-flex;
+  height: 1.875rem;
+  align-items: center;
+  border-radius: 0.375rem;
+  padding: 0 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--pst-ink-2);
+  transition: background-color 0.15s ease;
+}
+.pst-filter-btn:hover {
+  background-color: var(--pst-tint);
+  color: var(--pst-ink);
+}
+.pst-filter-btn.is-active {
+  background-color: var(--pst-ink);
+  color: var(--pst-paper);
+}
+.pst-filter-btn:focus-visible {
+  outline: 3px solid var(--pst-field);
+  outline-offset: 2px;
+}
+.pst-log-line.is-secret {
+  background-color: var(--pst-ink);
+  color: var(--pst-paper);
+}
+.is-secret .pst-log-time {
+  color: var(--pst-on-dark-2);
+}
+
+/* 卓譜でできること（2x2 のポスター標本グリッド） */
+.pst-section-border {
+  border-top: 2px solid var(--pst-ink);
+}
+.pst-spec-grid {
+  display: grid;
+  border: 2px solid var(--pst-ink);
+  border-radius: 1.25rem;
+  overflow: hidden;
+  background-color: var(--pst-ink);
+  gap: 2px;
+}
+@media (min-width: 768px) {
+  .pst-spec-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.pst-spec {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--pst-paper);
+  padding: 1.75rem;
+}
+.pst-spec-head {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  color: var(--pst-field);
+}
+.pst-spec-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--pst-ink);
+}
+.pst-spec-desc {
+  margin-top: 0.75rem;
+  font-size: 0.9375rem;
+  line-height: 1.8;
+  color: var(--pst-ink-2);
+}
+.pst-spec-sample {
+  margin-top: auto;
+  padding-top: 1.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.pst-mini-time {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.375rem;
+  background-color: var(--pst-yellow);
+  padding: 0.125rem 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--pst-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* 対応システム・連携ツール */
+.pst-group-label {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--pst-on-dark-2);
+}
+.pst-pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+}
+.pst-pill-list li {
+  border: 2px solid var(--pst-ink);
+  border-radius: 0.75rem;
+  background-color: var(--pst-paper);
+  padding: 0.5rem 0.875rem;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--pst-ink);
+}
+.pst-hero ::selection,
+.pst-light ::selection,
+.pst-yellow ::selection {
+  background-color: var(--pst-yellow);
+  color: var(--pst-ink);
+}
+.pst-hero ::selection {
+  background-color: var(--pst-paper);
+  color: var(--pst-field);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pst-row-track {
+    animation: none;
+  }
+  .pst-row {
+    overflow-x: auto;
+  }
+}
+
+/* ---------- Google のログインボタン（Google ブランドガイドラインの独自ボタンの指定） ---------- */
+.gsi-btn {
+  display: inline-flex;
+  height: 40px;
+  min-width: max-content;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid #747775;
+  border-radius: 4px;
+  background-color: #ffffff;
+  padding: 0 12px;
+  color: #1f1f1f;
+  font-family: "Google Sans", var(--font-sans, inherit), sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  transition: background-color 0.15s ease;
+}
+.gsi-btn img {
+  width: 20px;
+  height: auto;
+}
+.gsi-btn:hover:not(:disabled) {
+  background-color: color-mix(in srgb, #ffffff 92%, #1f1f1f);
+}
+.gsi-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+[data-theme="takufuDark"] .gsi-btn {
+  border-color: #8e918f;
+  background-color: #131314;
+  color: #e3e3e3;
+}
+[data-theme="takufuDark"] .gsi-btn:hover:not(:disabled) {
+  background-color: color-mix(in srgb, #131314 90%, #e3e3e3);
 }

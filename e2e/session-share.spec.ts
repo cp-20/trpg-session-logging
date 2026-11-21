@@ -6,8 +6,9 @@ import { expect, test } from "@playwright/test";
  * (Kimi のテスト戦略相談で最優先とされた 1 本)
  */
 test("作成したログは永続化され、passed にすると外部ユーザーが自己申告で読める", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: /サンプルデータをそのまま見る/ }).click({ force: true });
+  // サンプルを始める（LP のボタンの行き先。LP からの導線は public-pages で確かめる）
+  await page.goto("/demo");
+  await page.waitForURL(/\/home$/);
 
   // 1. セッション作成(ログなし): 統合された /upload フローから入る
   await page.goto("/upload");

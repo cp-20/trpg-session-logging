@@ -2,8 +2,9 @@ import { expect, test } from "@playwright/test";
 
 test("手入力の日付を変更でき、戻っても入力を失わず、不正な日時を保存しない", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
-  await page.getByRole("button", { name: /サンプルデータをそのまま見る/ }).click({ force: true });
+  // サンプルを始める（LP のボタンの行き先。LP からの導線は public-pages で確かめる）
+  await page.goto("/demo");
+  await page.waitForURL(/\/home$/);
   await page.goto("/upload");
   await page.getByRole("button", { name: "ログなしで記録する" }).click({ force: true });
   await page.getByLabel("タイトル", { exact: true }).fill("二日間のセッション");

@@ -7,8 +7,9 @@ import { expect, test } from "@playwright/test";
  * 3. セッション参加者に反映され、永続化されている
  */
 test("招待リンクから別ユーザーが自己紐付けでき、参加者に反映される", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: /サンプルデータをそのまま見る/ }).click({ force: true });
+  // サンプルを始める（LP のボタンの行き先。LP からの導線は public-pages で確かめる）
+  await page.goto("/demo");
+  await page.waitForURL(/\/home$/);
 
   // KP(みかん)がログなしセッションを作成(統合された /upload フローから)
   await page.goto("/upload");

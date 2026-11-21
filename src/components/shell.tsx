@@ -1,9 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 import { buildFeedIcs, publishFeed } from "../lib/calendar-feed";
 import { Link, usePathname } from "../lib/router";
 import { download, todayStr } from "../lib/time";
-import { useStore } from "../store";
+import { useStoreState, useSyncStatus } from "../store";
 import {
   IconAlert,
   IconBooks,
@@ -15,14 +15,14 @@ import {
   IconSettings,
   IconUsersGroup,
 } from "./icons";
-import { LogoMark, cx } from "./ui";
-import { Avatar } from "./identity";
+import { LogoMark, TableMark, cx } from "./ui";
+import { Avatar, CharAvatar } from "./identity";
 
 type NavItem = { to: string; label: string; short: string; Icon: ComponentType<SVGProps<SVGSVGElement>> };
 
 /** 主要な行き先。デスクトップはサイドバー、モバイルは下部タブで同じ並びを使う */
 const NAV: NavItem[] = [
-  { to: "/", label: "ホーム", short: "ホーム", Icon: IconHome },
+  { to: "/home", label: "ホーム", short: "ホーム", Icon: IconHome },
   { to: "/sessions", label: "セッション", short: "記録", Icon: IconListDetails },
   { to: "/calendar", label: "カレンダー", short: "予定", Icon: IconCalendar },
   { to: "/tables", label: "卓", short: "卓", Icon: IconUsersGroup },
@@ -32,11 +32,11 @@ const NAV: NavItem[] = [
 
 function useActive() {
   const pathname = usePathname();
-  return (to: string) => (to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(`${to}/`));
+  return (to: string) => pathname === to || pathname.startsWith(`${to}/`);
 }
 
 function SaveBanners() {
-  const { saveError, dataCorrupt, otherTabUpdated, retrySave } = useStore();
+  const { saveError, dataCorrupt, otherTabUpdated, retrySave } = useSyncStatus();
   const banners: { text: string; kind: "warning" | "error" }[] = [];
   if (otherTabUpdated) {
     banners.push({
@@ -98,7 +98,7 @@ function SaveBanners() {
 }
 
 function OnboardingBanner() {
-  const { state, update } = useStore();
+  const { state, update } = useStoreState();
   if (state.prefs?.onboardingDone) return null;
   return (
     <section
@@ -112,7 +112,7 @@ function OnboardingBanner() {
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2 shrink-0">
-        <Link to="/upload" className="btn btn-sm btn-primary">
+        <Link to="/upload" className="btn btn-sm">
           最初のセッションを記録
         </Link>
         <Link to="/settings" className="btn btn-sm">
@@ -135,7 +135,8 @@ function OnboardingBanner() {
 }
 
 function SyncStatus() {
-  const { authUser, cloudStatus } = useStore();
+  const { cloudStatus } = useSyncStatus();
+  const { authUser } = useStoreState();
   if (!authUser) return null;
   const text =
     cloudStatus === "saving"
@@ -157,57 +158,162 @@ function SyncStatus() {
 }
 
 function Sidebar() {
-  const { state, authUser } = useStore();
+  const { state, authUser } = useStoreState();
   const isActive = useActive();
   const me = state.users[state.me]!;
+
+  const { quickTables, quickChars } = useMemo(() => {
+    const latestByTable = new Map<string, number>();
+    const latestByChar = new Map<string, number>();
+    for (const l of Object.values(state.logs)) {
+      if (l.tableId) {
+        const prev = latestByTable.get(l.tableId) ?? 0;
+        if (l.t0 > prev) latestByTable.set(l.tableId, l.t0);
+      }
+      const myCharIds = l.players[state.me]?.characterIds;
+      if (myCharIds) {
+        for (const cid of myCharIds) {
+          const prev = latestByChar.get(cid) ?? 0;
+          if (l.t0 > prev) latestByChar.set(cid, l.t0);
+        }
+      }
+    }
+    const tables = Object.values(state.tables)
+      .filter((t) => t.memberIds.includes(state.me) || t.ownerId === state.me)
+      .sort((a, b) => (latestByTable.get(b.id) ?? 0) - (latestByTable.get(a.id) ?? 0))
+      .slice(0, 4);
+    const chars = Object.values(state.characters)
+      .filter((c) => c.ownerId === state.me)
+      .sort((a, b) => {
+        const diff = (latestByChar.get(b.id) ?? 0) - (latestByChar.get(a.id) ?? 0);
+        if (diff !== 0) return diff;
+        const da = a.sessions.reduce((m, s) => (s.date > m ? s.date : m), "");
+        const db = b.sessions.reduce((m, s) => (s.date > m ? s.date : m), "");
+        return db.localeCompare(da);
+      })
+      .slice(0, 4);
+    return { quickTables: tables, quickChars: chars };
+  }, [state.tables, state.characters, state.logs, state.me]);
+
   return (
     <aside className="hidden lg:flex sticky top-0 h-screen w-60 shrink-0 flex-col border-r border-base-300 bg-base-100 px-3 py-5">
-      <Link to="/" className="flex items-center gap-2 px-3 pb-5" aria-label="卓譜 ホーム">
-        <LogoMark size={24} className="text-primary" />
-        <span className="text-lg font-bold tracking-tight">卓譜</span>
+      <div className="flex items-center gap-2 px-3 pb-5 shrink-0">
+        <Link to="/home" className="flex items-center gap-2" aria-label="卓譜 ホーム">
+          <LogoMark size={24} className="text-primary" />
+          <span className="text-lg font-bold tracking-tight">卓譜</span>
+        </Link>
         {!authUser && (
           <span className="ml-auto rounded-md bg-base-200 px-2 py-0.5 text-xs text-ink2">デモ</span>
         )}
-      </Link>
+      </div>
 
-      <Link to="/upload" className="btn btn-primary w-full mb-5">
+      <Link to="/upload" className="btn btn-primary w-full mb-5 shrink-0">
         <IconPlus width={18} height={18} /> セッションを記録
       </Link>
 
-      <nav aria-label="メイン" className="flex flex-col gap-0.5">
-        {NAV.map(({ to, label, Icon }) => {
-          const active = isActive(to);
-          return (
-            <Link
-              key={to}
-              to={to}
-              aria-current={active ? "page" : undefined}
-              className={cx(
-                "flex items-center gap-3 rounded-lg px-3 h-10 text-sm transition-colors",
-                active
-                  ? "bg-primary/10 text-primary font-bold"
-                  : "text-base-content/75 font-medium hover:bg-base-200 hover:text-base-content",
-              )}
-            >
-              <Icon width={20} height={20} className="shrink-0" />
-              {label}
-            </Link>
-          );
-        })}
-      </nav>
+      <div className="min-h-0 flex-1 overflow-y-auto pr-0.5">
+        <nav aria-label="メイン" className="flex flex-col gap-0.5">
+          {NAV.map(({ to, label, Icon }, idx) => {
+            const active = isActive(to);
+            return (
+              <div key={to}>
+                {idx === 3 && <div className="my-2.5 border-t border-base-300/80" aria-hidden />}
+                <Link
+                  to={to}
+                  aria-current={active ? "page" : undefined}
+                  className={cx(
+                    "relative flex items-center gap-3 rounded-lg px-3 h-10 text-sm transition-colors",
+                    active
+                      ? "bg-primary/10 text-primary font-bold"
+                      : "text-base-content/75 font-medium hover:bg-base-200 hover:text-base-content",
+                  )}
+                >
+                  {active && (
+                    <span
+                      className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-primary"
+                      aria-hidden
+                    />
+                  )}
+                  <Icon width={20} height={20} className="shrink-0" />
+                  {label}
+                </Link>
+              </div>
+            );
+          })}
+        </nav>
 
-      <div className="mt-auto border-t border-base-300 pt-3">
+        {(quickTables.length > 0 || quickChars.length > 0) && (
+          <nav aria-label="よく使う" className="mt-4 border-t border-base-300/80 pt-3 flex flex-col gap-3">
+            {quickTables.length > 0 && (
+              <div>
+                <div className="px-3 pb-1 text-xs font-medium text-ink3">参加中の卓</div>
+                <div className="flex flex-col gap-0.5">
+                  {quickTables.map((t) => {
+                    const to = `/tables/${t.id}`;
+                    const active = isActive(to);
+                    return (
+                      <Link
+                        key={t.id}
+                        to={to}
+                        aria-current={active ? "page" : undefined}
+                        className={cx(
+                          "flex items-center gap-2 rounded-lg px-3 h-9 text-sm transition-colors",
+                          active
+                            ? "bg-primary/10 text-primary font-bold"
+                            : "text-base-content/75 font-medium hover:bg-base-200 hover:text-base-content",
+                        )}
+                      >
+                        <TableMark name={t.name} size={20} />
+                        <span className="truncate">{t.name}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {quickChars.length > 0 && (
+              <div>
+                <div className="px-3 pb-1 text-xs font-medium text-ink3">マイキャラ</div>
+                <div className="flex flex-col gap-0.5">
+                  {quickChars.map((c) => {
+                    const to = `/characters/${c.id}`;
+                    const active = isActive(to);
+                    return (
+                      <Link
+                        key={c.id}
+                        to={to}
+                        aria-current={active ? "page" : undefined}
+                        className={cx(
+                          "flex items-center gap-2 rounded-lg px-3 h-9 text-sm transition-colors",
+                          active
+                            ? "bg-primary/10 text-primary font-bold"
+                            : "text-base-content/75 font-medium hover:bg-base-200 hover:text-base-content",
+                        )}
+                      >
+                        <CharAvatar c={c} size={20} />
+                        <span className="truncate">{c.name}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </nav>
+        )}
+      </div>
+
+      <div className="mt-3 shrink-0 border-t border-base-300 pt-3">
         <SyncStatus />
         <div className="flex items-center gap-1">
           <Link
             to={`/users/${state.me}`}
-            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-2 transition-colors hover:bg-base-200"
+            className={cx(
+              "flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 transition-colors hover:bg-base-200",
+              isActive(`/users/${state.me}`) && "bg-primary/10 text-primary",
+            )}
           >
-            <Avatar u={me} size={32} />
-            <span className="min-w-0 leading-tight">
-              <span className="block truncate text-sm font-bold">{me.name}</span>
-              <span className="text-xs text-ink2">マイページ</span>
-            </span>
+            <Avatar u={me} size={28} />
+            <span className="min-w-0 flex-1 truncate text-sm font-bold">{me.name}</span>
           </Link>
           <Link
             to="/settings"
@@ -226,22 +332,26 @@ function Sidebar() {
 }
 
 function MobileTopBar() {
-  const { state, authUser } = useStore();
+  const { state, authUser } = useStoreState();
   const me = state.users[state.me]!;
   return (
-    <header className="lg:hidden sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-base-300 bg-base-100/95 px-4 backdrop-blur">
-      <Link to="/" className="flex items-center gap-2" aria-label="卓譜 ホーム">
-        <LogoMark size={22} className="text-primary" />
-        <span className="text-base font-bold tracking-tight">卓譜</span>
+    <header className="lg:hidden sticky top-0 z-30 flex min-h-14 items-center gap-1.5 sm:gap-2 border-b border-base-300 bg-base-100/95 px-3 sm:px-4 backdrop-blur">
+      <Link to="/home" className="flex min-w-0 items-center gap-2 shrink-0" aria-label="卓譜 ホーム">
+        <LogoMark size={22} className="text-primary shrink-0" />
+        <span className="text-base font-bold tracking-tight whitespace-nowrap">卓譜</span>
       </Link>
-      {!authUser && <span className="rounded-md bg-base-200 px-2 py-0.5 text-xs text-ink2">デモ</span>}
-      <Link to="/upload" className="btn btn-primary btn-sm ml-auto">
+      {!authUser && (
+        <span className="shrink-0 rounded-md bg-base-200 px-2 py-0.5 text-xs text-ink2 whitespace-nowrap">
+          デモ
+        </span>
+      )}
+      <Link to="/upload" className="btn btn-primary btn-sm ml-auto shrink-0 whitespace-nowrap">
         <IconPlus width={16} height={16} /> 記録
       </Link>
       <Link
         to="/settings"
         aria-label="設定とアカウント"
-        className="flex size-10 items-center justify-center rounded-full"
+        className="flex size-10 shrink-0 items-center justify-center rounded-full"
       >
         <Avatar u={me} size={30} />
       </Link>
@@ -261,17 +371,18 @@ function MobileTabBar() {
         {NAV.map(({ to, short, Icon }) => {
           const active = isActive(to);
           return (
-            <li key={to}>
+            <li key={to} className="min-w-0">
               <Link
                 to={to}
                 aria-current={active ? "page" : undefined}
                 className={cx(
-                  "flex h-14 flex-col items-center justify-center gap-0.5 text-xs transition-colors",
-                  active ? "text-primary font-bold" : "text-base-content/60 font-medium",
+                  "relative flex min-h-14 min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 py-1 text-xs transition-colors",
+                  active ? "text-primary font-bold" : "text-ink2 font-medium",
                 )}
               >
-                <Icon width={22} height={22} />
-                {short}
+                {active && <span className="absolute top-0 h-0.5 w-7 rounded-full bg-primary" aria-hidden />}
+                <Icon width={22} height={22} className="shrink-0" />
+                <span className="max-w-full truncate leading-tight">{short}</span>
               </Link>
             </li>
           );
@@ -286,9 +397,13 @@ function MobileTabBar() {
  * 生成時刻（DTSTAMP）だけの違いでは書き込まない。
  */
 function CalendarFeedSync() {
-  const { state, authUser } = useStore();
+  const { state, authUser } = useStoreState();
   const token = state.prefs.calendarFeedToken;
-  const ics = authUser && token ? buildFeedIcs(state, todayStr()) : null;
+  const ics = useMemo(
+    () => (authUser && token ? buildFeedIcs(state, todayStr()) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- events / tables が変わったときだけ再生成する
+    [authUser, token, state.events, state.tables],
+  );
   const last = useRef<string | null>(null);
   useEffect(() => {
     if (!authUser || !token || !ics) return;
@@ -311,10 +426,17 @@ function CalendarFeedSync() {
 export function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen">
+      <a href="#main-content" className="skip-link">
+        メインコンテンツへ移動
+      </a>
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileTopBar />
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 pb-28 pt-6 sm:px-8 sm:pt-8 lg:pb-16">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="mx-auto w-full max-w-6xl flex-1 px-4 pb-28 pt-6 sm:px-8 sm:pt-8 lg:pb-16"
+        >
           <SaveBanners />
           <OnboardingBanner />
           {children}

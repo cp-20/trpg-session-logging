@@ -7,10 +7,22 @@ const boothIconUrl = "/booth-icon.png";
 const taltoIconUrl = "/talto-icon.png";
 import type { Character, MsgKind, Provider, State, User } from "../types";
 import { IconBrandX, IconDiscord, IconGoogle, IconSearch, IconUpload, IconUserPlus, IconX } from "./icons";
-import { Select } from "./ui";
+import { Select, cx } from "./ui";
 import type { SelectOption } from "./ui";
 
 /* ---------- 暖色系フォールバックエンブレム・ポートレート生成 ---------- */
+const emblemUriCache = new Map<string, string>();
+const portraitUriCache = new Map<string, string>();
+
+function setBoundedUriCache(cache: Map<string, string>, key: string, value: string): string {
+  if (cache.size >= 500) {
+    const first = cache.keys().next().value;
+    if (first !== undefined) cache.delete(first);
+  }
+  cache.set(key, value);
+  return value;
+}
+
 function hashName(name: string): number {
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
@@ -20,6 +32,9 @@ function hashName(name: string): number {
 }
 
 function fallbackUserEmblemDataUri(name: string, color: string, seedId = ""): string {
+  const cacheKey = `${name}\0${color}\0${seedId}`;
+  const hit = emblemUriCache.get(cacheKey);
+  if (hit !== undefined) return hit;
   const idx = hashName(name) % 4;
   const bgs = ["#f3e3d3", "#e5ece2", "#ebe2d5", "#f0deda"];
   const bg = bgs[idx]!;
@@ -36,10 +51,17 @@ function fallbackUserEmblemDataUri(name: string, color: string, seedId = ""): st
     <circle cx="50" cy="50" r="44" fill="none" stroke="${color}" stroke-opacity="0.22" stroke-width="1.5"/>
     ${glyph}
   </svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg.trim().replace(/\s+/g, " "))}`;
+  return setBoundedUriCache(
+    emblemUriCache,
+    cacheKey,
+    `data:image/svg+xml;utf8,${encodeURIComponent(svg.trim().replace(/\s+/g, " "))}`,
+  );
 }
 
 function fallbackPortraitDataUri(name: string, color: string, seedId = ""): string {
+  const cacheKey = `${name}\0${color}\0${seedId}`;
+  const hit = portraitUriCache.get(cacheKey);
+  if (hit !== undefined) return hit;
   const idx = hashName(name) % 4;
   const hairColors = ["#3a2820", "#282320", "#593828", "#42322b"];
   const bgColors = ["#f3e3d3", "#e5ece2", "#ebe2d5", "#f0deda"];
@@ -56,7 +78,11 @@ function fallbackPortraitDataUri(name: string, color: string, seedId = ""): stri
     <path d="M46 55 Q50 57.5 54 55" stroke="#8c5843" stroke-width="1.8" fill="none" stroke-linecap="round"/>
     <path d="M25 39 C30 20 70 20 75 39 C66 29 56 28 50 34 C44 28 34 29 25 39 Z" fill="${hair}"/>
   </svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg.trim().replace(/\s+/g, " "))}`;
+  return setBoundedUriCache(
+    portraitUriCache,
+    cacheKey,
+    `data:image/svg+xml;utf8,${encodeURIComponent(svg.trim().replace(/\s+/g, " "))}`,
+  );
 }
 
 export const PRESET_NPC_ICONS: readonly { id: string; label: string; src: string }[] = [
@@ -95,12 +121,17 @@ export function resolveSpeakerAvatarSrc(
   kind: MsgKind,
   speakerIcons: Record<string, string> | undefined,
   state: Pick<State, "characters" | "users">,
+  indexes?: { charByName: Map<string, Character>; userByName: Map<string, User> },
 ): string {
   const explicit = speakerIcons?.[sp];
   if (explicit) return explicit;
-  const matchedChar = Object.values(state.characters).find((c) => c.name === sp);
+  const matchedChar = indexes
+    ? indexes.charByName.get(sp)
+    : Object.values(state.characters).find((c) => c.name === sp);
   if (matchedChar) return characterAvatarSrc(matchedChar);
-  const matchedUser = Object.values(state.users).find((u) => u.name === sp);
+  const matchedUser = indexes
+    ? indexes.userByName.get(sp)
+    : Object.values(state.users).find((u) => u.name === sp);
   if (matchedUser) return userAvatarSrc(matchedUser);
   if (kind === "KP" || kind === "GM") return fallbackUserEmblemDataUri(sp, "#6b5d50");
   return fallbackPortraitDataUri(sp, "#856e5c");
@@ -115,6 +146,8 @@ export function Avatar({ u, size = 32 }: { u: User; size?: number }) {
       alt={u.name}
       width={size}
       height={size}
+      loading="lazy"
+      decoding="async"
       referrerPolicy="no-referrer"
       className="rounded-full object-cover shrink-0 border border-base-300/80 bg-base-200"
       style={{ width: size, height: size }}
@@ -130,6 +163,8 @@ export function CharAvatar({ c, size = 44 }: { c: Character; size?: number }) {
       alt={c.name}
       width={size}
       height={size}
+      loading="lazy"
+      decoding="async"
       referrerPolicy="no-referrer"
       className="rounded-full object-cover shrink-0 border border-base-300/80 bg-base-200"
       style={{ width: size, height: size }}
@@ -197,6 +232,8 @@ export function PlayerPicker({
   onChange,
   quickIds,
   quickLabel = "よく一緒に遊ぶメンバー",
+  fixedIds,
+  fixedLabel = "自分",
   exclude,
   placeholder = "ユーザー名で検索…",
 }: {
@@ -205,17 +242,43 @@ export function PlayerPicker({
   onChange: (ids: string[]) => void;
   quickIds?: string[];
   quickLabel?: string;
+  /** 外せない固定メンバー（卓作成者本人など）をリスト先頭に表示する */
+  fixedIds?: string[];
+  fixedLabel?: string;
   exclude?: string[];
   placeholder?: string;
 }) {
   const [q, setQ] = useState("");
-  const all = Object.values(state.users).filter((u) => !exclude?.includes(u.id) && !selected.includes(u.id));
+  const blockedIds = useMemo(() => {
+    const s = new Set<string>(selected);
+    for (const id of fixedIds ?? []) s.add(id);
+    for (const id of exclude ?? []) s.add(id);
+    return s;
+  }, [selected, fixedIds, exclude]);
+
+  const all = useMemo(
+    () => Object.values(state.users).filter((u) => !blockedIds.has(u.id)),
+    [state.users, blockedIds],
+  );
   const results = useMemo(() => {
     const query = q.trim().toLowerCase();
     return query ? all.filter((u) => u.name.toLowerCase().includes(query)).slice(0, 8) : [];
   }, [q, all]);
-  const quick = (quickIds ?? []).filter(
-    (id) => state.users[id] && !selected.includes(id) && !exclude?.includes(id),
+  const quick = useMemo(
+    () => (quickIds ?? []).filter((id) => state.users[id] && !blockedIds.has(id)),
+    [quickIds, state.users, blockedIds],
+  );
+  const fixedUsers = useMemo(
+    () => (fixedIds ?? []).map((id) => state.users[id]).filter((u): u is User => Boolean(u)),
+    [fixedIds, state.users],
+  );
+  const selectedUsers = useMemo(
+    () =>
+      selected
+        .filter((id) => !(fixedIds ?? []).includes(id))
+        .map((id) => state.users[id])
+        .filter((u): u is User => Boolean(u)),
+    [selected, fixedIds, state.users],
   );
 
   return (
@@ -255,7 +318,7 @@ export function PlayerPicker({
       )}
 
       {q && (
-        <div className="mt-2 border border-base-300 rounded-xl bg-base-100 shadow-sm divide-y divide-base-200 max-h-60 overflow-y-auto">
+        <div className="mt-2 border border-base-300 rounded-xl bg-base-100 divide-y divide-base-200 max-h-60 overflow-y-auto">
           {results.length === 0 && (
             <div className="px-4 py-3 text-sm text-ink2">該当するユーザーが見つかりません</div>
           )}
@@ -277,27 +340,29 @@ export function PlayerPicker({
         </div>
       )}
 
-      {selected.length > 0 && (
+      {(fixedUsers.length > 0 || selectedUsers.length > 0) && (
         <ul className="list mt-3 rounded-box border border-base-300">
-          {selected
-            .filter((id) => state.users[id])
-            .map((id) => {
-              const u = state.users[id]!;
-              return (
-                <li key={id} className="flex items-center gap-3 py-1.5 pl-3 pr-1.5">
-                  <Avatar u={u} size={26} />
-                  <span className="grow text-sm font-semibold">{u.name}</span>
-                  <button
-                    type="button"
-                    aria-label={`${u.name}を参加者から外す`}
-                    className="icon-btn"
-                    onClick={() => onChange(selected.filter((x) => x !== id))}
-                  >
-                    <IconX width={16} height={16} />
-                  </button>
-                </li>
-              );
-            })}
+          {fixedUsers.map((u) => (
+            <li key={u.id} className="flex items-center gap-3 py-2 pl-3 pr-3">
+              <Avatar u={u} size={26} />
+              <span className="grow text-sm font-semibold">{u.name}</span>
+              <span className="text-xs text-ink2">{fixedLabel}</span>
+            </li>
+          ))}
+          {selectedUsers.map((u) => (
+            <li key={u.id} className="flex items-center gap-3 py-1.5 pl-3 pr-1.5">
+              <Avatar u={u} size={26} />
+              <span className="grow text-sm font-semibold">{u.name}</span>
+              <button
+                type="button"
+                aria-label={`${u.name}を参加者から外す`}
+                className="icon-btn"
+                onClick={() => onChange(selected.filter((x) => x !== u.id))}
+              >
+                <IconX width={16} height={16} />
+              </button>
+            </li>
+          ))}
         </ul>
       )}
     </div>
@@ -305,34 +370,71 @@ export function PlayerPicker({
 }
 
 /* ---------- 発言者の役割・アイコン設定（Upload / SessionDetail 共用） ---------- */
-export function readAvatarImageFile(file: File): Promise<string> {
+function renderCompressedSquare(
+  img: HTMLImageElement,
+  sizePx: number,
+  mime: string,
+  quality: number,
+): string {
+  const size = Math.min(img.width, img.height);
+  const sx = Math.max(0, (img.width - size) / 2);
+  const sy = Math.max(0, (img.height - size) / 2);
+  const canvas = document.createElement("canvas");
+  canvas.width = sizePx;
+  canvas.height = sizePx;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.drawImage(img, sx, sy, size, size, 0, 0, sizePx, sizePx);
+  return canvas.toDataURL(mime, quality);
+}
+
+export function readAvatarImageFile(
+  file: File,
+  opts?: { maxSize?: number; maxChars?: number },
+): Promise<string> {
+  const targetMax = opts?.maxSize ?? 160;
+  const maxChars = opts?.maxChars;
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(reader.error ?? new Error("画像を読み込めませんでした"));
     reader.onload = () => {
       const raw = String(reader.result ?? "");
       if (!raw || file.type === "image/svg+xml" || typeof Image === "undefined") {
+        if (maxChars && raw.length > maxChars) {
+          reject(new Error("画像データのサイズ上限を超えています"));
+          return;
+        }
         resolve(raw);
         return;
       }
       const img = new Image();
       img.onload = () => {
         try {
-          const max = 160;
-          const size = Math.min(img.width, img.height);
-          const sx = Math.max(0, (img.width - size) / 2);
-          const sy = Math.max(0, (img.height - size) / 2);
-          const canvas = document.createElement("canvas");
-          canvas.width = max;
-          canvas.height = max;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) {
-            resolve(raw);
+          const attempts: { size: number; mime: string; q: number }[] = [
+            { size: targetMax, mime: "image/webp", q: 0.82 },
+            { size: targetMax, mime: "image/jpeg", q: 0.78 },
+            { size: Math.min(targetMax, 112), mime: "image/webp", q: 0.7 },
+            { size: Math.min(targetMax, 96), mime: "image/jpeg", q: 0.65 },
+            { size: 72, mime: "image/jpeg", q: 0.52 },
+          ];
+          for (const a of attempts) {
+            const url = renderCompressedSquare(img, a.size, a.mime, a.q);
+            if (!url) continue;
+            if (!maxChars || url.length <= maxChars) {
+              resolve(url);
+              return;
+            }
+          }
+          if (maxChars) {
+            reject(new Error("画像の容量が大きすぎます"));
             return;
           }
-          ctx.drawImage(img, sx, sy, size, size, 0, 0, max, max);
-          resolve(canvas.toDataURL("image/png"));
+          resolve(renderCompressedSquare(img, targetMax, "image/webp", 0.82) || raw);
         } catch {
+          if (maxChars && raw.length > maxChars) {
+            reject(new Error("画像の変換に失敗しました"));
+            return;
+          }
           resolve(raw);
         }
       };
@@ -345,10 +447,9 @@ export function readAvatarImageFile(file: File): Promise<string> {
 
 const ROLE_OPTIONS: readonly SelectOption<MsgKind>[] = [
   { value: "PC", label: "PC" },
-  { value: "KP", label: "KP" },
+  { value: "GM", label: "GM" },
   { value: "NPC", label: "NPC" },
   { value: "PL", label: "PL" },
-  { value: "GM", label: "GM" },
   { value: "SYSTEM", label: "SYSTEM" },
 ];
 
@@ -365,6 +466,18 @@ export function SpeakerConfigGrid({
   onRoleChange: (sp: string, kind: MsgKind) => void;
   onIconChange: (sp: string, iconSrc: string) => void;
 }) {
+  const indexes = useMemo(() => {
+    const charByName = new Map<string, Character>();
+    for (const c of Object.values(state.characters)) {
+      if (!charByName.has(c.name)) charByName.set(c.name, c);
+    }
+    const userByName = new Map<string, User>();
+    for (const u of Object.values(state.users)) {
+      if (!userByName.has(u.name)) userByName.set(u.name, u);
+    }
+    return { charByName, userByName };
+  }, [state.characters, state.users]);
+
   const baseIconOptions = useMemo<SelectOption<string>[]>(() => {
     return [
       { value: "", label: "自動（キャラ・PLに連動）" },
@@ -389,7 +502,7 @@ export function SpeakerConfigGrid({
     <div className="grid sm:grid-cols-2 gap-3">
       {speakers.map(({ sp, kind }) => {
         const currentExplicit = speakerIcons[sp] ?? "";
-        const previewSrc = resolveSpeakerAvatarSrc(sp, kind, speakerIcons, state);
+        const previewSrc = resolveSpeakerAvatarSrc(sp, kind, speakerIcons, state, indexes);
         const options =
           currentExplicit && !knownValues.has(currentExplicit)
             ? [...baseIconOptions, { value: currentExplicit, label: "カスタム画像" }]
@@ -405,6 +518,8 @@ export function SpeakerConfigGrid({
               alt={sp}
               width={36}
               height={36}
+              loading="lazy"
+              decoding="async"
               referrerPolicy="no-referrer"
               className="rounded-full object-cover shrink-0 border border-base-300/80 bg-base-200"
               style={{ width: 36, height: 36 }}
@@ -416,7 +531,7 @@ export function SpeakerConfigGrid({
                   size="sm"
                   ariaLabel={`${sp}の役割`}
                   className="w-24 shrink-0"
-                  value={kind}
+                  value={kind === "KP" ? "GM" : kind}
                   onChange={(v) => onRoleChange(sp, v)}
                   options={ROLE_OPTIONS}
                 />
@@ -481,5 +596,42 @@ export function AvatarStack({
       </span>
       {people.length > max && <span className="ml-1.5 text-xs text-ink2">+{people.length - max}</span>}
     </span>
+  );
+}
+
+/**
+ * Google のログインボタン。Google のブランドガイドライン（developers.google.com/identity/branding-guidelines）の
+ * 独自ボタンの指定どおりに作る: 白（ダークでは黒）の地・灰の枠・Google Sans Medium 14/20・G は公式の画像を 20px、
+ * 左 12px / G と文字の間 10px / 右 12px。色や G を変えない。見た目は styles.css の .gsi-btn。
+ */
+export function GoogleSignInButton({
+  onClick,
+  busy,
+  disabled,
+  className,
+}: {
+  onClick: () => void;
+  busy?: boolean;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <>
+      {/* ボタンの「Google」の字だけ Google Sans で出す（日本語は本文の書体） */}
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@500&text=Google&display=swap"
+        precedence="default"
+      />
+      <button
+        type="button"
+        className={cx("gsi-btn", className)}
+        onClick={onClick}
+        disabled={disabled || busy}
+      >
+        <img src="/google-g.png" width={20} height={20} alt="" aria-hidden />
+        <span>{busy ? "ログイン中…" : "Google でログイン"}</span>
+      </button>
+    </>
   );
 }

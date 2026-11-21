@@ -7,17 +7,16 @@ import path from "node:path";
  * タイムラインに実内容が表示され、共有ビューでも全文（進行メモ・シークレット含む）が読める。
  */
 test("実ログファイルを解析して保存し、共有ビューでも全ログが読める", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: /サンプルデータをそのまま見る/ }).click({ force: true });
+  // サンプルを始める（LP のボタンの行き先。LP からの導線は public-pages で確かめる）
+  await page.goto("/demo");
+  await page.waitForURL(/\/home$/);
 
   await page.goto("/upload");
   await page
     .locator('input[type="file"]')
     .setInputFiles(path.join(process.cwd(), "e2e/fixtures/ccfolia-sample.json"));
+  // Step2 へ直行（読み取り完了サマリー・実データの発言・シークレット行 + メタ編集が見える）
   await expect(page.getByText(/読み取り完了/)).toBeVisible({ timeout: 15_000 });
-
-  // Step2: 内容と参加者の確認（実データの発言・シークレット行 + メタ編集が見える）
-  await page.getByRole("button", { name: "内容と参加者の確認へ進む" }).click({ force: true });
   await expect(page.getByText("教室の黒板、まだ新しい。")).toBeVisible();
   await expect(page.getByText("【シークレット】黒板に文字を書いたのは")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "参加者を検索" })).toBeVisible();

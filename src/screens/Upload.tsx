@@ -1,13 +1,15 @@
 import { useMemo, useState } from "react";
-import type { ReactNode } from "react";
-import { useNavigate, usePathname, useSearchString } from "../lib/router";
+import { useNavigate, useSearchString } from "../lib/router";
 import { useStore } from "../store";
 import {
   CopyBox,
   DateList,
   Empty,
+  Field,
   FieldError,
   FormRow,
+  InlineNotice,
+  Modal,
   NotFound,
   PageHead,
   PanelHead,
@@ -16,6 +18,7 @@ import {
   Seg,
   Select,
   type SelectOption,
+  SplitLayout,
   SysBadge,
   TimeRange,
   cx,
@@ -30,19 +33,11 @@ import {
   userAvatarSrc,
 } from "../components/identity";
 import { SessionTimeline, TimelineFilter } from "../components/timeline";
-import { SAMPLE_LOG } from "../data/seed";
 import { SYSTEMS, SYSTEM_LIST } from "../data/systems";
-import {
-  buildSessionRange,
-  deriveSessionFromMessages,
-  fmtDates,
-  fmtDur,
-  sessionClock,
-  sessionPlayMinutes,
-  todayStr,
-} from "../lib/time";
-import { importLogFromFile, importLogFromText, type ParsedLog } from "../lib/importers";
-import { commitLogImport, type CommitLogResult } from "../api/commands";
+import { buildSessionRange, fmtDates, fmtDur, sessionClock, sessionPlayMinutes, todayStr } from "../lib/time";
+import { importLogFromFile, importLogFromText } from "../lib/importers";
+import { parsePlayHistory, type PlayHistoryRow } from "../lib/history-import";
+import { commitLogImport, commitPlayHistoryImport, type CommitLogResult } from "../api/commands";
 import {
   buildDraft as buildDraftWith,
   remapChannelTimestamps,
@@ -52,6 +47,7 @@ import {
 import type { Channel, Log, MsgKind, Policy, Scope, State } from "../types";
 import {
   IconBooks,
+  IconBrandX,
   IconCalendar,
   IconCheck,
   IconChevronLeft,
@@ -61,22 +57,23 @@ import {
   IconUpload,
   IconX,
 } from "../components/icons";
+import { ReportCardModal } from "./SessionDetail";
 
 /** 発言者の顔アイコンは、紐付いたキャラクター・ユーザーの画像を使う */
 const buildDraft = (opts: Omit<Parameters<typeof buildDraftWith>[0], "avatars">) =>
   buildDraftWith({ ...opts, avatars: { character: characterAvatarSrc, user: userAvatarSrc } });
 
-/** 発言者の役割。進行役はシステムを問わず「進行」と呼ぶ */
+/** 発言者の役割。GM 役はシステムを問わず「GM」に統一する */
 const ROLE_OPTIONS: readonly SelectOption<MsgKind>[] = [
-  { value: "KP", label: "進行" },
+  { value: "GM", label: "GM" },
   { value: "PC", label: "PC" },
   { value: "PL", label: "PL" },
   { value: "NPC", label: "NPC" },
   { value: "SYSTEM", label: "システム" },
 ];
 const roleOptionsFor = (kind: MsgKind): readonly SelectOption<MsgKind>[] =>
-  kind === "GM"
-    ? ROLE_OPTIONS.map((o) => (o.value === "KP" ? { value: "GM", label: "進行" } : o))
+  kind === "KP"
+    ? ROLE_OPTIONS.map((o) => (o.value === "GM" ? { value: "KP" as MsgKind, label: "GM" } : o))
     : ROLE_OPTIONS;
 
 type FlowError = { field: "title" | "general"; text: string } | null;
@@ -167,8 +164,10 @@ export default function Upload() {
       ? { to: `/tables/${presetTable}`, label: state.tables[presetTable]?.name ?? "卓" }
       : { to: "/sessions", label: "セッション" };
 
+  const wideStudio = step === 2 && Boolean(draft && !manual && draft.channels.length > 0);
+
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className={cx(!wideStudio && "mx-auto max-w-3xl")}>
       <PageHead
         back={step === 3 ? undefined : backTo}
         title={attachLog ? "ログを添付" : "セッションを記録"}
@@ -278,67 +277,15 @@ function Step1({
   const { state } = useStore();
   const [running, setRunning] = useState(false);
   const [hot, setHot] = useState(false);
-  const [parsed, setParsed] = useState<ParsedLog | null>(() =>
-    draft?.channels.length
-      ? {
-          channels: draft.channels,
-          kinds: draft.kinds,
-          messageCount: draft.channels.reduce((n, c) => n + c.msgs.length, 0),
-        }
-      : null,
-  );
-  const [fileInfo, setFileInfo] = useState<string | null>(draft?.fileName ?? null);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function onFiles(files: FileList | File[] | null) {
-    const f = files?.[0] ?? (Array.isArray(files) ? files[0] : null);
-    if (!f) return;
-    setRunning(true);
-    setError(null);
-    setParsed(null);
-    setFileInfo(null);
-    try {
-      const res = await importLogFromFile(f);
-      if (!res || res.log.messageCount === 0) {
-        setError(
-          "読み取れる発言が見つかりませんでした。CCFOLIA（JSON・HTML・ZIP）、Udonarium（chat.xml・ZIP）、テキストログを選んでください。",
-        );
-        return;
-      }
-      setParsed(res.log);
-      setFileInfo(f.name);
-    } catch {
-      setError("ファイルを読み取れませんでした。対応形式を確認して、もう一度お試しください。");
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  function handlePasteImport() {
-    setError(null);
-    setParsed(null);
-    setFileInfo(null);
-    const res = importLogFromText(pasteText);
-    if (!res || res.log.messageCount === 0) {
-      setError(
-        "読み取れる発言が見つかりませんでした。CCFOLIA（JSON・HTML）、Udonarium（chat.xml）、またはテキストログを貼り付けてください。",
-      );
-      return;
-    }
-    setParsed(res.log);
-    setFileInfo(res.sourceLabel);
-    setPasteOpen(false);
-  }
-
-  function finishSample() {
-    const channels = JSON.parse(JSON.stringify(SAMPLE_LOG)) as Channel[];
-    setParsed(null);
-    setFileInfo(null);
+  function proceedWith(channels: Channel[], fileName: string | null) {
     onDone(
       buildDraft({
-        fileName: null,
+        fileName,
         channels,
         attachLog,
         presetTable,
@@ -349,21 +296,49 @@ function Step1({
     );
   }
 
-  function proceed() {
-    if (!parsed) return;
-    onDone(
-      draft?.channels === parsed.channels
-        ? draft
-        : buildDraft({
-            fileName: fileInfo,
-            channels: parsed.channels,
-            attachLog,
-            presetTable,
-            presetScenario,
-            manual: null,
-            state,
-          }),
-    );
+  async function onFiles(files: FileList | File[] | null) {
+    const f = files?.[0] ?? (Array.isArray(files) ? files[0] : null);
+    if (!f) return;
+    setRunning(true);
+    setError(null);
+    try {
+      const res = await importLogFromFile(f);
+      if (!res || res.log.messageCount === 0) {
+        setError(
+          "読み取れる発言が見つかりませんでした。CCFOLIA（JSON・HTML・ZIP）、Udonarium（chat.xml・ZIP）、Discord（JSON・テキスト）、どどんとふ・テキストログを選んでください。",
+        );
+        return;
+      }
+      proceedWith(res.log.channels, f.name);
+    } catch {
+      setError("ファイルを読み取れませんでした。対応形式を確認して、もう一度お試しください。");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  function handlePasteImport() {
+    setError(null);
+    const res = importLogFromText(pasteText);
+    if (!res || res.log.messageCount === 0) {
+      setError(
+        "読み取れる発言が見つかりませんでした。CCFOLIA（JSON・HTML）、Discord（JSON・テキスト）、Udonarium（chat.xml）、またはテキストログを貼り付けてください。",
+      );
+      return;
+    }
+    setPasteOpen(false);
+    proceedWith(res.log.channels, res.sourceLabel);
+  }
+
+  async function finishSample() {
+    setRunning(true);
+    try {
+      const { SAMPLE_LOG } = await import("../data/seed");
+      const channels = JSON.parse(JSON.stringify(SAMPLE_LOG)) as Channel[];
+      proceedWith(channels, null);
+    } finally {
+      setRunning(false);
+    }
   }
 
   /* ---- 手入力(ログなし)パス ---- */
@@ -382,119 +357,100 @@ function Step1({
   return (
     <>
       <section className="surface p-4 sm:p-6" aria-label="ログを選ぶ">
-        {parsed ? (
-          <ParsedSummary
-            parsed={parsed}
-            fileInfo={fileInfo}
-            onReset={() => {
-              setParsed(null);
-              setFileInfo(null);
-            }}
-            onNext={proceed}
-          />
-        ) : (
-          <>
-            <div
-              className={cx("drop py-12", hot && "hot", running && "pointer-events-none opacity-70")}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setHot(true);
+        <div
+          className={cx("drop py-12", hot && "hot", running && "pointer-events-none opacity-70")}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setHot(true);
+          }}
+          onDragLeave={() => setHot(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setHot(false);
+            onFiles(e.dataTransfer.files);
+          }}
+        >
+          <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <IconUpload width={24} height={24} aria-hidden />
+          </span>
+          <p className="mt-4 text-base font-bold">ログファイルをここにドロップ</p>
+          <p className="mx-auto mt-1 max-w-md text-sm leading-relaxed text-ink2">
+            CCFOLIA（JSON・HTML・ZIP）、Discord（JSON・テキスト）、Udonarium（chat.xml・ZIP）、どどんとふ、テキストログに対応しています。
+          </p>
+          <label className={cx("btn btn-primary mt-5 cursor-pointer", running && "btn-disabled")}>
+            <IconFileText width={18} height={18} aria-hidden />
+            ファイルを選ぶ
+            <input
+              type="file"
+              aria-label="ログファイルを選ぶ"
+              accept=".json,.html,.htm,.txt,.xml,.zip"
+              className="sr-only"
+              disabled={running}
+              onChange={(e) => {
+                onFiles(e.target.files);
+                e.target.value = "";
               }}
-              onDragLeave={() => setHot(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setHot(false);
-                onFiles(e.dataTransfer.files);
-              }}
-            >
-              <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <IconUpload width={24} height={24} aria-hidden />
-              </span>
-              <p className="mt-4 text-base font-bold">ログファイルをここにドロップ</p>
-              <p className="mx-auto mt-1 max-w-md text-sm leading-relaxed text-ink2">
-                CCFOLIA（JSON・HTML・ZIP）、Udonarium（chat.xml・ZIP）、テキストログに対応しています。
-              </p>
-              <label className={cx("btn btn-primary mt-5 cursor-pointer", running && "btn-disabled")}>
-                <IconFileText width={18} height={18} aria-hidden />
-                ファイルを選ぶ
-                <input
-                  type="file"
-                  aria-label="ログファイルを選ぶ"
-                  accept=".json,.html,.htm,.txt,.xml,.zip"
-                  className="sr-only"
-                  disabled={running}
-                  onChange={(e) => {
-                    onFiles(e.target.files);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-              {running && (
-                <p role="status" className="mt-4 flex items-center justify-center gap-2 text-sm text-ink2">
-                  <span className="loading loading-spinner loading-sm" aria-hidden />
-                  読み込み中…
-                </p>
-              )}
-            </div>
+            />
+          </label>
+          {running && (
+            <p role="status" className="mt-4 flex items-center justify-center gap-2 text-sm text-ink2">
+              <span className="loading loading-spinner loading-sm" aria-hidden />
+              読み込み中…
+            </p>
+          )}
+        </div>
 
-            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+          <button
+            type="button"
+            className="btn btn-quiet btn-sm"
+            aria-expanded={pasteOpen}
+            disabled={running}
+            onClick={() => setPasteOpen((v) => !v)}
+          >
+            テキストを貼り付ける
+          </button>
+          <button type="button" className="btn btn-quiet btn-sm" disabled={running} onClick={finishSample}>
+            サンプルログで試す
+          </button>
+        </div>
+
+        {pasteOpen && (
+          <div className="mt-4 border-t border-base-300 pt-4">
+            <textarea
+              className="textarea textarea-bordered w-full font-mono text-sm"
+              rows={6}
+              aria-label="ログテキストを貼り付け"
+              placeholder={
+                "[メイン] 探索者: セリフ\n21:05 探索者: セリフ\n2026/11/08 21:06 [情報] GM: 資料を公開"
+              }
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+            />
+            <p className="mt-1.5 text-xs text-ink2">
+              CCFOLIA の JSON・HTML、Udonarium の chat.xml、または上の例のような行形式のテキスト
+            </p>
+            <div className="mt-3 flex justify-end gap-2">
               <button
                 type="button"
                 className="btn btn-quiet btn-sm"
-                aria-expanded={pasteOpen}
-                disabled={running}
-                onClick={() => setPasteOpen((v) => !v)}
+                onClick={() => {
+                  setPasteOpen(false);
+                  setPasteText("");
+                }}
               >
-                テキストを貼り付ける
+                閉じる
               </button>
               <button
                 type="button"
-                className="btn btn-quiet btn-sm"
-                disabled={running}
-                onClick={finishSample}
+                className="btn btn-primary btn-sm"
+                disabled={!pasteText.trim()}
+                onClick={handlePasteImport}
               >
-                サンプルログで試す
+                テキストを読み込む
               </button>
             </div>
-
-            {pasteOpen && (
-              <div className="mt-4 border-t border-base-300 pt-4">
-                <textarea
-                  className="textarea textarea-bordered w-full font-mono text-sm"
-                  rows={6}
-                  aria-label="ログテキストを貼り付け"
-                  placeholder={
-                    "[メイン] 探索者: セリフ\n21:05 探索者: セリフ\n2026/11/08 21:06 [情報] KP: 資料を公開"
-                  }
-                  value={pasteText}
-                  onChange={(e) => setPasteText(e.target.value)}
-                />
-                <p className="mt-1.5 text-xs text-ink2">
-                  CCFOLIA の JSON・HTML、Udonarium の chat.xml、または上の例のような行形式のテキスト
-                </p>
-                <div className="mt-3 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    className="btn btn-quiet btn-sm"
-                    onClick={() => {
-                      setPasteOpen(false);
-                      setPasteText("");
-                    }}
-                  >
-                    閉じる
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    disabled={!pasteText.trim()}
-                    onClick={handlePasteImport}
-                  >
-                    テキストを読み込む
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
+          </div>
         )}
         {error && (
           <p role="alert" className="mt-4 rounded-lg bg-error/10 px-4 py-3 text-sm text-error">
@@ -503,108 +459,218 @@ function Step1({
         )}
       </section>
 
-      {!attachLog && !parsed && (
-        <section className="mt-4 flex flex-col gap-3 rounded-box border border-dashed border-base-300 px-5 py-4 sm:flex-row sm:items-center">
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-bold">ログがないセッション</h2>
-            <p className="mt-0.5 text-sm text-ink2">日時と参加者だけで記録し、ログはあとから添付します。</p>
-          </div>
-          <button type="button" className="btn shrink-0" onClick={() => setManual(true)}>
-            <IconCalendar width={16} height={16} aria-hidden />
-            ログなしで記録する
-          </button>
-        </section>
+      {!attachLog && (
+        <>
+          <section className="mt-4 flex flex-col gap-3 rounded-box border border-dashed border-base-300 px-5 py-4 sm:flex-row sm:items-center">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-sm font-bold">ログがないセッション</h2>
+              <p className="mt-0.5 text-sm text-ink2">日時と参加者だけで記録し、ログはあとから添付します。</p>
+            </div>
+            <button type="button" className="btn shrink-0" onClick={() => setManual(true)}>
+              <IconCalendar width={16} height={16} aria-hidden />
+              ログなしで記録する
+            </button>
+          </section>
+          <section className="mt-3 flex flex-col gap-3 rounded-box border border-dashed border-base-300 px-5 py-4 sm:flex-row sm:items-center">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-sm font-bold">通過履歴をまとめて取り込む</h2>
+              <p className="mt-0.5 text-sm text-ink2">
+                スプレッドシートやメモの表（CSV・TSV・Markdown表）から過去の通過記録を一括登録します。
+              </p>
+            </div>
+            <button type="button" className="btn shrink-0" onClick={() => setHistoryOpen(true)}>
+              <IconBooks width={16} height={16} aria-hidden />
+              通過履歴を取り込む
+            </button>
+          </section>
+          {historyOpen && <BulkHistoryModal onClose={() => setHistoryOpen(false)} />}
+        </>
       )}
     </>
   );
 }
 
-/** 読み取り結果: 何が記録されるかを先に見せる */
-function ParsedSummary({
-  parsed,
-  fileInfo,
-  onReset,
-  onNext,
-}: {
-  parsed: ParsedLog;
-  fileInfo: string | null;
-  onReset: () => void;
-  onNext: () => void;
-}) {
-  const all = parsed.channels.flatMap((c) => c.msgs);
-  const speakers = [...new Set(all.map((m) => m.sp))];
-  const rolls = all.filter((m) => m.roll).length;
-  const secretChannels = parsed.channels.filter((c) => c.secret);
-  const rawDerived = deriveSessionFromMessages(parsed.channels);
-  const derived = rawDerived && (rawDerived.t0 > 0 || rawDerived.t1 > 0) ? rawDerived : null;
-  const playMin = derived
-    ? sessionPlayMinutes({ hasLog: true, channels: parsed.channels, t0: derived.t0, t1: derived.t1 })
-    : 0;
+/* ---------- 一括通過履歴取り込みモーダル ---------- */
+function BulkHistoryModal({ onClose }: { onClose: () => void }) {
+  const { state, update } = useStore();
+  const nav = useNavigate();
+  const [raw, setRaw] = useState("");
+  const [rows, setRows] = useState<(PlayHistoryRow & { selected: boolean })[] | null>(null);
+  const [scope, setScope] = useState<Scope>("members");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  function handleParse(text: string) {
+    setError(null);
+    const parsed = parsePlayHistory(text);
+    if (!parsed || parsed.rows.length === 0) {
+      setError(
+        "読み取れる表データが見つかりませんでした。「日付」「シナリオ（またはタイトル）」の列を含む CSV・TSV・Markdown表を指定してください。",
+      );
+      return;
+    }
+    setRows(parsed.rows.map((r) => ({ ...r, selected: true })));
+  }
+
+  async function handleCommit() {
+    if (!rows || busy) return;
+    const selected = rows.filter((r) => r.selected);
+    if (selected.length === 0) {
+      setError("取り込む行を 1 件以上選んでください。");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await commitPlayHistoryImport(selected, state, update, { scope });
+      if (!res.ok) {
+        setError("履歴を取り込めませんでした。入力内容を確認してください。");
+        return;
+      }
+      onClose();
+      nav({ to: "/sessions" });
+    } catch {
+      setError("履歴を取り込めませんでした。もう一度お試しください。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const selectedCount = rows ? rows.filter((r) => r.selected).length : 0;
 
   return (
-    <div>
-      <div className="flex items-start gap-3">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-success/15 text-success">
-          <IconCheck width={20} height={20} aria-hidden />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="font-bold" role="status">
-            読み取り完了
-          </p>
-          {fileInfo && <p className="truncate text-sm text-ink2">{fileInfo}</p>}
+    <Modal
+      title="通過履歴をまとめて取り込む"
+      wide
+      onClose={onClose}
+      foot={
+        rows ? (
+          <>
+            <button
+              type="button"
+              className="btn btn-quiet"
+              disabled={busy}
+              onClick={() => {
+                setRows(null);
+                setError(null);
+              }}
+            >
+              戻る
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || selectedCount === 0}
+              onClick={handleCommit}
+            >
+              {selectedCount}件を取り込む
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="btn btn-quiet" onClick={onClose}>
+              キャンセル
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!raw.trim()}
+              onClick={() => handleParse(raw)}
+            >
+              内容を確認
+            </button>
+          </>
+        )
+      }
+    >
+      {!rows ? (
+        <div className="space-y-4">
+          <label className="btn btn-sm cursor-pointer">
+            <IconUpload width={16} height={16} aria-hidden />
+            CSV / TSV / Markdown ファイルを選ぶ
+            <input
+              type="file"
+              accept=".csv,.tsv,.md,.txt,.json"
+              aria-label="通過履歴ファイルを選ぶ"
+              className="sr-only"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                const text =
+                  typeof file.text === "function" ? await file.text() : await new Response(file).text();
+                setRaw(text);
+                handleParse(text);
+              }}
+            />
+          </label>
+          <Field
+            label="表データ（CSV / タブ区切り / Markdown 表）"
+            hint="先頭行に「日付」「シナリオ」「システム」「キャラ」「メモ」などの見出しを入れてください"
+            noMargin
+          >
+            <textarea
+              className="textarea textarea-bordered w-full font-mono text-sm"
+              rows={7}
+              placeholder={
+                "日付,シナリオ,システム,キャラ,メモ\n2026-10-12,沼男は誰だ？,クトゥルフ神話TRPG 7版,遠沢澄花,生還"
+              }
+              value={raw}
+              onChange={(e) => {
+                setRaw(e.target.value);
+                setError(null);
+              }}
+            />
+          </Field>
         </div>
-        <button type="button" className="btn btn-quiet btn-sm shrink-0" onClick={onReset}>
-          別のログにする
-        </button>
-      </div>
-
-      <dl className="list mt-5 border-y border-base-300 text-sm">
-        <SummaryItem label="日時">
-          {derived ? (
-            <>
-              {fmtDates(derived.dates)}
-              {playMin > 0 && <span className="text-ink2">（{fmtDur(playMin)}）</span>}
-            </>
-          ) : (
-            <span className="text-ink2">ログから読み取れませんでした。次の画面で入力します。</span>
-          )}
-        </SummaryItem>
-        <SummaryItem label={`発言者 ${speakers.length}人`}>
-          {speakers.slice(0, 8).join("、")}
-          {speakers.length > 8 && <span className="text-ink2"> ほか{speakers.length - 8}人</span>}
-        </SummaryItem>
-        <SummaryItem label="発言">
-          <span className="tabular-nums">
-            {all.length}件<span className="text-ink2">（うちダイスロール {rolls}件）</span>
-          </span>
-        </SummaryItem>
-        <SummaryItem label={`タブ ${parsed.channels.length}つ`}>
-          {parsed.channels.map((c) => c.name).join("、")}
-          {secretChannels.length > 0 && (
-            <span className="mt-1 block text-ink2">
-              シークレット {secretChannels.length}タブ（
-              {secretChannels.reduce((a, c) => a + c.msgs.length, 0)}
-              件）も記録し、共有範囲の人だけが読めます。
-            </span>
-          )}
-        </SummaryItem>
-      </dl>
-
-      <div className="mt-5 flex justify-end">
-        <button type="button" className="btn btn-primary w-full sm:w-auto" onClick={onNext}>
-          内容と参加者の確認へ進む
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function SummaryItem({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="grid gap-0.5 py-3 sm:grid-cols-[8rem_1fr] sm:gap-4">
-      <dt className="font-semibold text-ink2">{label}</dt>
-      <dd className="min-w-0 leading-relaxed">{children}</dd>
-    </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-ink2">{rows.length}件の通過記録を読み取りました。</p>
+            <Seg<Scope>
+              size="sm"
+              ariaLabel="共有範囲"
+              value={scope}
+              onChange={setScope}
+              options={[
+                { v: "members", label: SCOPE_META.members.label },
+                { v: "passed", label: SCOPE_META.passed.label },
+                { v: "public", label: SCOPE_META.public.label },
+              ]}
+            />
+          </div>
+          <ul className="divide-y divide-base-300 rounded-box border border-base-300">
+            {rows.map((r, i) => (
+              <li key={`${r.date}-${r.title}-${i}`} className="flex items-start gap-3 px-3.5 py-2.5 text-sm">
+                <input
+                  type="checkbox"
+                  className="checkbox checkbox-primary checkbox-sm mt-0.5"
+                  aria-label={`${r.title}を取り込む`}
+                  checked={r.selected}
+                  onChange={(e) =>
+                    setRows((prev) =>
+                      prev
+                        ? prev.map((x, idx) => (idx === i ? { ...x, selected: e.target.checked } : x))
+                        : null,
+                    )
+                  }
+                />
+                <div className="min-w-0 flex-1">
+                  <b className="block truncate">{r.title}</b>
+                  <span className="meta text-xs">
+                    <span className="tabular-nums">{r.date}</span>
+                    <SysBadge sys={SYSTEMS[r.systemId]} />
+                    {r.characterNames.length > 0 && <span>PC: {r.characterNames.join("・")}</span>}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {busy && <InlineNotice tone="pending" text="取り込み中…" />}
+        </div>
+      )}
+      <FieldError text={error} />
+    </Modal>
   );
 }
 
@@ -787,7 +853,7 @@ function UploadSpeakerConfigGrid({
 
   const kpIconOptions = useMemo<SelectOption<string>[]>(
     () => [
-      { value: "", label: "既定の進行役アイコン" },
+      { value: "", label: "既定のGMアイコン" },
       ...userList.map((u) => ({ value: userAvatarSrc(u), label: u.name })),
     ],
     [userList],
@@ -836,7 +902,7 @@ function UploadSpeakerConfigGrid({
             ? [...baseIcons, { value: currentExplicit, label: "アップロードした画像" }]
             : baseIcons;
 
-        /* 2 つ目の操作は役割ごとに 1 つだけ: PC/PL は「誰の発言か」（アイコンも連動）、進行と NPC はアイコン */
+        /* 2 つ目の操作は役割ごとに 1 つだけ: PC/PL は「誰の発言か」（アイコンも連動）、GM と NPC はアイコン */
         const second = isPlayerSide ? (
           <Select
             size="sm"
@@ -877,6 +943,7 @@ function UploadSpeakerConfigGrid({
               <input
                 type="file"
                 accept="image/*"
+                aria-label={`${sp}のアイコン画像を選ぶ`}
                 className="sr-only"
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
@@ -1140,218 +1207,248 @@ function Step2Review({
     (t) => t.ownerId === state.me || t.memberIds.includes(state.me),
   );
   const scopeMeta = SCOPE_META[draft.scope];
+  const hasLog = draft.channels.length > 0;
+  const rollsCount = useMemo(
+    () => draft.channels.reduce((n, c) => n + c.msgs.filter((m) => m.roll).length, 0),
+    [draft.channels],
+  );
+  const secretChannels = useMemo(() => draft.channels.filter((c) => c.secret), [draft.channels]);
 
-  return (
-    <div className="space-y-4">
-      {/* 1. 記録される内容 */}
-      <section className="surface p-5 sm:p-6" aria-labelledby="sum-head">
-        <h2 id="sum-head" className="mb-4 text-base font-bold">
-          記録する内容
-        </h2>
-        <div className="list">
-          <FormRow label="タイトル">
-            <input
-              id="upload-title"
-              aria-label="タイトル"
-              aria-invalid={error?.field === "title" || undefined}
-              className={cx("input input-bordered w-full", error?.field === "title" && "input-error")}
-              value={draft.meta.title}
-              onChange={(e) => setDraft({ ...draft, meta: { ...draft.meta, title: e.target.value } })}
-              placeholder={scenario ? scenario.title : "例: 廃校の十三時間目（2陣）"}
-            />
-            <FieldError text={error?.field === "title" ? error.text : null} />
-          </FormRow>
+  const basicInfoSection = (
+    <section className="surface p-5 sm:p-6" aria-labelledby="sum-head">
+      <h2 id="sum-head" className="mb-4 text-base font-bold">
+        基本情報
+      </h2>
+      <div className="list">
+        <FormRow label="タイトル">
+          <input
+            id="upload-title"
+            aria-label="タイトル"
+            aria-invalid={error?.field === "title" || undefined}
+            className={cx("input input-bordered w-full", error?.field === "title" && "input-error")}
+            value={draft.meta.title}
+            onChange={(e) => setDraft({ ...draft, meta: { ...draft.meta, title: e.target.value } })}
+            placeholder={scenario ? scenario.title : "例: 廃校の十三時間目（2陣）"}
+          />
+          <FieldError text={error?.field === "title" ? error.text : null} />
+        </FormRow>
 
-          <FormRow label="日時">
-            <div className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="font-semibold">
-                {currentDates ? fmtDates(currentDates) : "未入力"}
-                {clock && <span className="ml-2 font-normal tabular-nums">{clock}</span>}
-              </span>
-              {playMinutes > 0 && (
-                <span className="text-sm text-ink2 tabular-nums">{fmtDur(playMinutes)}</span>
+        <FormRow label="日時">
+          <div className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="font-semibold">
+              {currentDates ? fmtDates(currentDates) : "未入力"}
+              {clock && <span className="ml-2 font-normal tabular-nums">{clock}</span>}
+            </span>
+            {playMinutes > 0 && <span className="text-sm text-ink2 tabular-nums">{fmtDur(playMinutes)}</span>}
+            <button
+              type="button"
+              aria-expanded={editingSchedule}
+              className="btn btn-quiet btn-sm ml-auto"
+              onClick={toggleScheduleEditor}
+            >
+              {editingSchedule ? "閉じる" : "変更"}
+            </button>
+          </div>
+          {editingSchedule && (
+            <div className="mt-3 space-y-4 rounded-lg bg-base-200/60 p-4">
+              <DateList dates={editDates} setDates={setEditDates} size="sm" />
+              <TimeRange start={editStart} end={editEnd} setStart={setEditStart} setEnd={setEditEnd} />
+              {editError && (
+                <p role="alert" className="text-sm text-error">
+                  {editError}
+                </p>
               )}
-              <button
-                type="button"
-                aria-expanded={editingSchedule}
-                className="btn btn-quiet btn-sm ml-auto"
-                onClick={toggleScheduleEditor}
-              >
-                {editingSchedule ? "閉じる" : "変更"}
-              </button>
-            </div>
-            {editingSchedule && (
-              <div className="mt-3 space-y-4 rounded-lg bg-base-200/60 p-4">
-                <DateList dates={editDates} setDates={setEditDates} size="sm" />
-                <TimeRange start={editStart} end={editEnd} setStart={setEditStart} setEnd={setEditEnd} />
-                {editError && (
-                  <p role="alert" className="text-sm text-error">
-                    {editError}
-                  </p>
-                )}
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    className="btn btn-quiet btn-sm"
-                    onClick={() => {
-                      setEditingSchedule(false);
-                      setEditError(null);
-                    }}
-                  >
-                    キャンセル
-                  </button>
-                  <button type="button" className="btn btn-primary btn-sm" onClick={applySchedule}>
-                    日時を反映
-                  </button>
-                </div>
-              </div>
-            )}
-          </FormRow>
-
-          <FormRow label="システム">
-            <Select
-              ariaLabel="システム"
-              className="w-full sm:max-w-sm"
-              value={draft.meta.systemId}
-              onChange={(v) => setDraft({ ...draft, meta: { ...draft.meta, systemId: v }, guess: null })}
-              options={SYSTEM_LIST.map((s) => ({ value: s.id, label: s.name }))}
-            />
-          </FormRow>
-
-          <FormRow label="シナリオ">
-            {scenario && !showNew ? (
-              <div className="flex min-h-10 items-center gap-3">
-                <IconBooks width={18} height={18} className="shrink-0 text-ink2" aria-hidden />
-                <span className="min-w-0 flex-1">
-                  <b className="block truncate text-sm">{scenario.title}</b>
-                  <span className="text-xs text-ink2">{scenario.author}</span>
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-quiet btn-sm"
-                  onClick={() => setDraft({ ...draft, scenarioId: "" })}
-                >
-                  選び直す
-                </button>
-              </div>
-            ) : showNew ? (
-              <div className="space-y-2">
-                <input
-                  aria-label="シナリオタイトル"
-                  placeholder="シナリオタイトル"
-                  className="input input-bordered w-full"
-                  value={draft.newScenario?.title ?? ""}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      newScenario: {
-                        ...(draft.newScenario ?? { author: "", policy: "public" as Policy }),
-                        title: e.target.value,
-                        policy: "public",
-                      },
-                    })
-                  }
-                />
-                <input
-                  aria-label="作者・サークル"
-                  placeholder="作者・サークル"
-                  className="input input-bordered w-full"
-                  value={draft.newScenario?.author ?? ""}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      newScenario: {
-                        ...(draft.newScenario ?? { title: "", policy: "public" as Policy }),
-                        author: e.target.value,
-                        policy: "public",
-                      },
-                    })
-                  }
-                />
+              <div className="flex justify-end gap-2">
                 <button
                   type="button"
                   className="btn btn-quiet btn-sm"
                   onClick={() => {
-                    setShowNew(false);
-                    setDraft({ ...draft, newScenario: null });
+                    setEditingSchedule(false);
+                    setEditError(null);
                   }}
                 >
-                  登録済みから選ぶ
+                  キャンセル
+                </button>
+                <button type="button" className="btn btn-primary btn-sm" onClick={applySchedule}>
+                  日時を反映
                 </button>
               </div>
-            ) : (
-              <div>
-                <label className="input input-bordered flex items-center gap-2">
-                  <IconSearch width={16} height={16} className="shrink-0 opacity-50" aria-hidden />
-                  <input
-                    type="search"
-                    aria-label="シナリオを検索"
-                    className="min-w-0 grow"
-                    placeholder="タイトル・作者で検索"
-                    value={scq}
-                    onChange={(e) => setScq(e.target.value)}
-                  />
-                </label>
-                <ul className="mt-1.5">
-                  {scResults.map((s) => {
-                    const showSystem = !hasSelectedSystem || s.systemId !== draft.meta.systemId;
-                    return (
-                      <li key={s.id}>
-                        <button
-                          type="button"
-                          className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-base-200"
-                          onClick={() => pickScenario(s.id)}
-                        >
-                          <span className="min-w-0 flex-1">
-                            <b className="block truncate text-sm">{s.title}</b>
-                            <span className="block truncate text-xs text-ink2">
-                              {s.author}
-                              {showSystem ? `　${SYSTEMS[s.systemId]?.name ?? "汎用・その他"}` : ""}
-                            </span>
+            </div>
+          )}
+        </FormRow>
+
+        <FormRow label="システム">
+          <Select
+            ariaLabel="システム"
+            className="w-full sm:max-w-sm"
+            value={draft.meta.systemId}
+            onChange={(v) => setDraft({ ...draft, meta: { ...draft.meta, systemId: v }, guess: null })}
+            options={SYSTEM_LIST.map((s) => ({ value: s.id, label: s.name }))}
+          />
+        </FormRow>
+
+        <FormRow label="シナリオ">
+          {scenario && !showNew ? (
+            <div className="flex min-h-10 items-center gap-3">
+              <IconBooks width={18} height={18} className="shrink-0 text-ink2" aria-hidden />
+              <span className="min-w-0 flex-1">
+                <b className="block truncate text-sm">{scenario.title}</b>
+                <span className="text-xs text-ink2">{scenario.author}</span>
+              </span>
+              <button
+                type="button"
+                className="btn btn-quiet btn-sm"
+                onClick={() => setDraft({ ...draft, scenarioId: "" })}
+              >
+                選び直す
+              </button>
+            </div>
+          ) : showNew ? (
+            <div className="space-y-2">
+              <input
+                aria-label="シナリオタイトル"
+                placeholder="シナリオタイトル"
+                className="input input-bordered w-full"
+                value={draft.newScenario?.title ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    newScenario: {
+                      ...(draft.newScenario ?? { author: "", policy: "public" as Policy }),
+                      title: e.target.value,
+                      policy: "public",
+                    },
+                  })
+                }
+              />
+              <input
+                aria-label="作者・サークル"
+                placeholder="作者・サークル"
+                className="input input-bordered w-full"
+                value={draft.newScenario?.author ?? ""}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    newScenario: {
+                      ...(draft.newScenario ?? { title: "", policy: "public" as Policy }),
+                      author: e.target.value,
+                      policy: "public",
+                    },
+                  })
+                }
+              />
+              <button
+                type="button"
+                className="btn btn-quiet btn-sm"
+                onClick={() => {
+                  setShowNew(false);
+                  setDraft({ ...draft, newScenario: null });
+                }}
+              >
+                登録済みから選ぶ
+              </button>
+            </div>
+          ) : (
+            <div>
+              <label className="input input-bordered flex items-center gap-2">
+                <IconSearch width={16} height={16} className="shrink-0 opacity-50" aria-hidden />
+                <input
+                  type="search"
+                  aria-label="シナリオを検索"
+                  className="min-w-0 grow"
+                  placeholder="タイトル・作者で検索"
+                  value={scq}
+                  onChange={(e) => setScq(e.target.value)}
+                />
+              </label>
+              <ul className="mt-1.5">
+                {scResults.map((s) => {
+                  const showSystem = !hasSelectedSystem || s.systemId !== draft.meta.systemId;
+                  return (
+                    <li key={s.id}>
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-base-200"
+                        onClick={() => pickScenario(s.id)}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <b className="block truncate text-sm">{s.title}</b>
+                          <span className="block truncate text-xs text-ink2">
+                            {s.author}
+                            {showSystem ? `　${SYSTEMS[s.systemId]?.name ?? "汎用・その他"}` : ""}
                           </span>
-                          <span className="shrink-0 text-xs font-semibold text-primary">選ぶ</span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-                {scResults.length === 0 && (
-                  <p className="px-2 py-2 text-sm text-ink2">一致するシナリオがありません。</p>
-                )}
-                <div className="mt-1 flex flex-wrap items-center gap-2 px-2">
-                  <button type="button" className="btn btn-quiet btn-sm" onClick={() => setShowNew(true)}>
-                    <IconPlus width={14} height={14} aria-hidden /> 新しく登録
-                  </button>
-                  <span className="text-xs text-ink2">選ばなくても記録します</span>
-                </div>
+                        </span>
+                        <span className="shrink-0 text-xs font-semibold text-primary">選ぶ</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              {scResults.length === 0 && (
+                <p className="px-2 py-2 text-sm text-ink2">一致するシナリオがありません。</p>
+              )}
+              <div className="mt-1 flex flex-wrap items-center gap-2 px-2">
+                <button type="button" className="btn btn-quiet btn-sm" onClick={() => setShowNew(true)}>
+                  <IconPlus width={14} height={14} aria-hidden /> 新しく登録
+                </button>
+                <span className="text-xs text-ink2">選ばなくても記録します</span>
               </div>
-            )}
-          </FormRow>
+            </div>
+          )}
+        </FormRow>
 
-          <FormRow label="卓">
-            <Select
-              ariaLabel="卓を選ぶ"
-              className="w-full sm:max-w-sm"
-              value={draft.tableId}
-              onChange={selectTable}
-              options={[
-                { value: "", label: "選ばない" },
-                ...myTables.map((t) => ({ value: t.id, label: `${t.name}（${t.memberIds.length}人）` })),
-              ]}
-            />
-            <p className="mt-1.5 text-xs text-ink2">選ぶと卓のメンバーを参加者に入れます。</p>
-          </FormRow>
-        </div>
-      </section>
+        <FormRow label="卓">
+          <Select
+            ariaLabel="卓を選ぶ"
+            className="w-full sm:max-w-sm"
+            value={draft.tableId}
+            onChange={selectTable}
+            options={[
+              { value: "", label: "選ばない" },
+              ...myTables.map((t) => ({ value: t.id, label: `${t.name}（${t.memberIds.length}人）` })),
+            ]}
+          />
+          <p className="mt-1.5 text-xs text-ink2">選ぶと卓のメンバーを参加者に入れます。</p>
+        </FormRow>
+      </div>
+    </section>
+  );
 
-      {/* 2. 参加者 */}
-      <section className="surface p-5 sm:p-6" aria-labelledby="players-head">
-        <div className="mb-4">
-          <h2 id="players-head" className="text-base font-bold">
-            参加者
-          </h2>
-          <p className="mt-0.5 text-sm text-ink2">キャラクターはあとから付けても構いません。</p>
+  const castSection = (
+    <section className="surface p-5 sm:p-6" aria-labelledby="players-head">
+      <div className="mb-4">
+        <h2 id="players-head" className="text-base font-bold">
+          {speakers.length > 0 ? "参加者と発言者" : "参加者"}
+        </h2>
+        <p className="mt-0.5 text-sm text-ink2">
+          {speakers.length > 0
+            ? "ログの発言者と参加メンバーの対応です。キャラクターはあとから付けても構いません。"
+            : "キャラクターはあとから付けても構いません。"}
+        </p>
+      </div>
+
+      {speakers.length > 0 && (
+        <div className="mb-5 border-b border-base-300 pb-5">
+          <h3 className="eyebrow mb-3">ログの発言者</h3>
+          <UploadSpeakerConfigGrid
+            speakers={speakers}
+            speakerIcons={draft.speakerIcons}
+            speakerLinks={draft.speakerLinks}
+            state={state}
+            onRoleChange={(sp, kind) => setDraft({ ...draft, kinds: { ...draft.kinds, [sp]: kind } })}
+            onIconChange={(sp, src) => {
+              const nextIcons = { ...draft.speakerIcons };
+              if (src) nextIcons[sp] = src;
+              else delete nextIcons[sp];
+              setDraft({ ...draft, speakerIcons: nextIcons });
+            }}
+            onLinkChange={handleSpeakerLinkChange}
+          />
         </div>
+      )}
+
+      <div>
+        {speakers.length > 0 && <h3 className="eyebrow mb-3">参加メンバー</h3>}
         <PlayerPicker
           state={state}
           exclude={[state.me, ...draft.players.map((p) => p.userId)]}
@@ -1375,7 +1472,7 @@ function Step2Review({
               return (
                 <li
                   key={p.userId}
-                  className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-2 py-2.5 sm:grid-cols-[auto_1fr_15rem_auto]"
+                  className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-2 py-2.5 sm:grid-cols-[auto_1fr_14rem_auto]"
                 >
                   <Avatar u={u} size={32} />
                   <b className="min-w-0 truncate text-sm">{u.name}</b>
@@ -1409,89 +1506,173 @@ function Step2Review({
         ) : (
           <p className="mt-3 text-sm text-ink2">ほかの参加者を入れない場合は、あなただけの記録になります。</p>
         )}
-      </section>
+      </div>
+    </section>
+  );
 
-      {/* 3. 発言者（ログあり時） */}
-      {speakers.length > 0 && (
-        <section className="surface p-5 sm:p-6" aria-labelledby="speakers-head">
-          <div className="mb-4">
-            <h2 id="speakers-head" className="text-base font-bold">
-              ログの発言者
-            </h2>
-            <p className="mt-0.5 text-sm text-ink2">自動で結び付けた結果です。違っていれば直してください。</p>
-          </div>
-          <UploadSpeakerConfigGrid
-            speakers={speakers}
-            speakerIcons={draft.speakerIcons}
-            speakerLinks={draft.speakerLinks}
-            state={state}
-            onRoleChange={(sp, kind) => setDraft({ ...draft, kinds: { ...draft.kinds, [sp]: kind } })}
-            onIconChange={(sp, src) => {
-              const nextIcons = { ...draft.speakerIcons };
-              if (src) nextIcons[sp] = src;
-              else delete nextIcons[sp];
-              setDraft({ ...draft, speakerIcons: nextIcons });
-            }}
-            onLinkChange={handleSpeakerLinkChange}
-          />
-        </section>
-      )}
+  const scopeSection = (
+    <section className="surface p-5 sm:p-6" aria-labelledby="scope-head">
+      <h2 id="scope-head" className="mb-3 text-base font-bold">
+        共有範囲
+      </h2>
+      <Seg<Scope>
+        ariaLabel="共有範囲"
+        value={draft.scope}
+        onChange={(scope) => setDraft({ ...draft, scope })}
+        options={(["members", "passed", "public"] as const).map((v) => {
+          const M = SCOPE_META[v];
+          return {
+            v,
+            label: (
+              <>
+                <M.Icon width={15} height={15} aria-hidden />
+                {M.label}
+              </>
+            ),
+          };
+        })}
+      />
+      <p className="mt-2 text-sm text-ink2">
+        {scopeMeta.hint}。記録したあともセッションの「共有」から変えられます。
+      </p>
+    </section>
+  );
 
-      {/* 4. ログのプレビュー（ログあり時） */}
-      {draft.channels.length > 0 && (
-        <section className="surface overflow-hidden" aria-labelledby="preview-head">
-          <div className="flex items-baseline gap-2 border-b border-base-300 px-5 py-3.5 sm:px-6">
-            <h2 id="preview-head" className="text-base font-bold">
-              ログの表示
-            </h2>
-            <span className="text-sm text-ink2 tabular-nums">{msgCount}件</span>
-          </div>
-          <div className="max-h-80 overflow-y-auto px-2 py-2 sm:px-3">
-            <SessionTimeline log={previewLog} state={state} mode="own" filter={previewFilter} />
-          </div>
-        </section>
-      )}
-
-      {/* 5. 共有範囲 */}
-      <section className="surface p-5 sm:p-6" aria-labelledby="scope-head">
-        <h2 id="scope-head" className="mb-3 text-base font-bold">
-          共有範囲
-        </h2>
-        <Seg<Scope>
-          ariaLabel="共有範囲"
-          value={draft.scope}
-          onChange={(scope) => setDraft({ ...draft, scope })}
-          options={(["members", "passed", "public"] as const).map((v) => {
-            const M = SCOPE_META[v];
-            return {
-              v,
-              label: (
-                <>
-                  <M.Icon width={15} height={15} aria-hidden />
-                  {M.label}
-                </>
-              ),
-            };
-          })}
-        />
-        <p className="mt-2 text-sm text-ink2">
-          {scopeMeta.hint}。記録したあともセッションの「共有」から変えられます。
+  const actionErrors = (
+    <>
+      {error?.field === "general" && (
+        <p role="alert" className="mb-2 text-sm text-error">
+          {error.text}
         </p>
-      </section>
+      )}
+      {error?.field === "title" && (
+        <p className="mb-2 text-sm text-error lg:hidden">タイトルを入力してください。</p>
+      )}
+    </>
+  );
+
+  if (hasLog) {
+    return (
+      <div className="space-y-6">
+        <div className="surface flex flex-wrap items-center gap-3 px-4 py-3.5 sm:px-5">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-success/15 text-success">
+            <IconCheck width={18} height={18} aria-hidden />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-baseline gap-x-2">
+              <p className="text-sm font-bold" role="status">
+                読み取り完了
+              </p>
+              {draft.fileName && <span className="truncate text-xs text-ink2">{draft.fileName}</span>}
+            </div>
+            <div className="meta mt-0.5 text-xs tabular-nums">
+              {currentDates && (
+                <span>
+                  {fmtDates(currentDates)}
+                  {playMinutes > 0 && `（${fmtDur(playMinutes)}）`}
+                </span>
+              )}
+              <span>
+                発言 {msgCount}件（ダイス {rollsCount}件）
+              </span>
+              <span>
+                タブ {draft.channels.length}つ
+                {secretChannels.length > 0 && `・シークレット ${secretChannels.length}タブも記録`}
+              </span>
+            </div>
+          </div>
+          <button type="button" className="btn btn-quiet btn-sm shrink-0" onClick={onBack}>
+            別のログにする
+          </button>
+        </div>
+
+        <SplitLayout
+          asideWidth="lg"
+          stickyAside
+          main={
+            <div className="space-y-6">
+              {basicInfoSection}
+              {castSection}
+              {scopeSection}
+            </div>
+          }
+          aside={
+            <div className="space-y-4">
+              <section className="surface overflow-hidden" aria-labelledby="preview-head">
+                <div className="flex items-baseline gap-2 border-b border-base-300 px-5 py-3.5">
+                  <h2 id="preview-head" className="text-base font-bold">
+                    ログの表示
+                  </h2>
+                  <span className="text-sm text-ink2 tabular-nums">{msgCount}件</span>
+                </div>
+                <div className="max-h-[26rem] overflow-y-auto px-2 py-2 sm:px-3">
+                  <SessionTimeline log={previewLog} state={state} mode="own" filter={previewFilter} />
+                </div>
+              </section>
+
+              <div className="hidden lg:block">
+                {error?.field === "general" && (
+                  <p role="alert" className="mb-2 text-sm text-error">
+                    {error.text}
+                  </p>
+                )}
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <button type="button" className="btn btn-quiet" onClick={onBack}>
+                    <IconChevronLeft width={16} height={16} aria-hidden />
+                    {backLabel}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary min-w-36"
+                    disabled={committing}
+                    onClick={onCommit}
+                  >
+                    {committing && <span className="loading loading-spinner loading-xs" aria-hidden />}
+                    {committing ? "記録中…" : attachId ? "添付する" : "記録する"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          }
+        />
+
+        <div
+          className="sticky z-20 -mx-4 border-t border-base-300 bg-base-100/95 px-4 py-3 backdrop-blur sm:-mx-8 sm:px-8 lg:hidden"
+          style={{ bottom: "calc(3.5rem + env(safe-area-inset-bottom))" }}
+        >
+          {actionErrors}
+          <div className="flex items-center justify-between gap-2">
+            <button type="button" className="btn btn-quiet" onClick={onBack}>
+              <IconChevronLeft width={16} height={16} aria-hidden />
+              {backLabel}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary min-w-32"
+              disabled={committing}
+              onClick={onCommit}
+            >
+              {committing && <span className="loading loading-spinner loading-xs" aria-hidden />}
+              {committing ? "記録中…" : attachId ? "添付する" : "記録する"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {basicInfoSection}
+      {castSection}
+      {scopeSection}
 
       {/* 操作バー: モバイルでは下部タブの上に固定 */}
       <div
         className="sticky z-20 -mx-4 border-t border-base-300 bg-base-100/95 px-4 py-3 backdrop-blur sm:-mx-8 sm:px-8 lg:static lg:mx-0 lg:border-0 lg:bg-transparent lg:px-0 lg:py-2 lg:backdrop-blur-none"
         style={{ bottom: "calc(3.5rem + env(safe-area-inset-bottom))" }}
       >
-        {error?.field === "general" && (
-          <p role="alert" className="mb-2 text-sm text-error">
-            {error.text}
-          </p>
-        )}
-        {error?.field === "title" && (
-          <p className="mb-2 text-sm text-error lg:hidden">タイトルを入力してください。</p>
-        )}
+        {actionErrors}
         <div className="flex items-center justify-between gap-2">
           <button type="button" className="btn btn-quiet" onClick={onBack}>
             <IconChevronLeft width={16} height={16} aria-hidden />
@@ -1521,6 +1702,7 @@ function Step3Done({
 }) {
   const { state } = useStore();
   const nav = useNavigate();
+  const [reportCard, setReportCard] = useState(false);
   if (!result) return <Empty>結果を読み込み中…</Empty>;
   const log = state.logs[result.id];
   const sys = log ? SYSTEMS[log.systemId] : undefined;
@@ -1560,7 +1742,7 @@ function Step3Done({
         </p>
       </div>
 
-      <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+      <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
         <button
           type="button"
           className="btn btn-primary"
@@ -1568,10 +1750,17 @@ function Step3Done({
         >
           セッションを開く
         </button>
-        <button type="button" className="btn" onClick={onRestart}>
+        {log && (
+          <button type="button" className="btn" onClick={() => setReportCard(true)}>
+            <IconBrandX width={15} height={15} /> Xで卓報告
+          </button>
+        )}
+        <button type="button" className="btn btn-quiet" onClick={onRestart}>
           続けて記録する
         </button>
       </div>
+
+      {reportCard && log && <ReportCardModal log={log} onClose={() => setReportCard(false)} />}
     </section>
   );
 }

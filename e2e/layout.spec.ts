@@ -9,6 +9,8 @@ const MODES = [
 
 for (const mode of MODES) {
   test(`デザイン検査: ${mode.name}`, async ({ browser }) => {
+    // 1 つのテストで全画面を巡回するので、画面の数に応じて時間を取る（並列実行で負荷が高いときも落ちないように）
+    test.setTimeout(30_000 + AUDIT_ROUTES.length * 5_000);
     const ctx = await browser.newContext({
       viewport: mode.viewport,
       colorScheme: mode.dark ? "dark" : "light",
@@ -48,4 +50,74 @@ test("モバイルでは下部タブ、デスクトップではサイドバー�
     "シナリオ",
   ]);
   await expect(page.getByRole("link", { name: "セッションを記録" })).toBeVisible();
+});
+
+test("Select の選択肢はホバーで面の色だけが変わり、枠や影を出さない", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await enterDemo(page);
+  await page.goto("/characters/ch_towa");
+  await page.getByRole("button", { name: /成長ロールを記録/ }).click();
+  await page.getByRole("dialog").locator("button[aria-haspopup=listbox]").first().click();
+  const option = page.getByRole("option").nth(1).locator("button");
+  await option.hover();
+  const style = await option.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return {
+      shadow: cs.boxShadow,
+      bg: cs.backgroundColor,
+      outline: cs.outlineStyle,
+      duration: cs.transitionDuration,
+    };
+  });
+  expect(style.shadow).toBe("none");
+  expect(style.bg).not.toBe("rgba(0, 0, 0, 0)");
+  // 枠や太さが動いて見えないよう、選択肢には遷移アニメーションを付けない
+  expect(style.outline).toBe("none");
+  expect(style.duration).toBe("0s");
+});
+
+test("キャラクターのカードはホバーしても影を落とさない", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await enterDemo(page);
+  await page.goto("/characters");
+  const card = page.locator(".card-interactive").first();
+  await card.hover();
+  expect(await card.evaluate((el) => getComputedStyle(el).boxShadow)).toBe("none");
+});
+
+test("日付入力はマウスでは卓譜の暦で選べ、タッチ端末ではブラウザ標準の入力のまま", async ({ browser }) => {
+  const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await desktop.newPage();
+  await enterDemo(page);
+  await page.goto("/characters/ch_towa");
+  await page.getByRole("button", { name: /成長ロールを記録/ }).click();
+  const dialog = page.getByRole("dialog", { name: "成長ロールを記録" });
+  const input = dialog.locator('input[type="date"]');
+  await dialog.getByRole("button", { name: "カレンダーから選ぶ" }).click();
+  const picker = page.getByRole("dialog", { name: "日付を選ぶ" });
+  await expect(picker).toBeVisible();
+  // 暦の中はキーボードで動かせる。Escape では暦だけが閉じる
+  const before = await input.inputValue();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Enter");
+  await expect(picker).toBeHidden();
+  expect(await input.inputValue()).not.toBe(before);
+  await dialog.getByRole("button", { name: "カレンダーから選ぶ" }).click();
+  await page.keyboard.press("Escape");
+  await expect(picker).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await desktop.close();
+
+  const touch = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    isMobile: true,
+  });
+  const mobile = await touch.newPage();
+  await enterDemo(mobile);
+  await mobile.goto("/characters/ch_towa");
+  await mobile.getByRole("button", { name: /成長ロールを記録/ }).click();
+  await expect(mobile.getByRole("dialog").locator('input[type="date"]')).toBeVisible();
+  await expect(mobile.getByRole("button", { name: "カレンダーから選ぶ" })).toHaveCount(0);
+  await touch.close();
 });

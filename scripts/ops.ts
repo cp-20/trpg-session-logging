@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -54,10 +54,11 @@ async function apiJson<T>(
   return JSON.parse(text) as T;
 }
 
-function resolveLolipopCli(): string {
-  if (process.env.LOLIPOP_CLI) return process.env.LOLIPOP_CLI;
-  const cached = join(homedir(), ".npm/_npx/284f00369d2805e9/node_modules/lolipop/dist/index.mjs");
-  return existsSync(cached) ? cached : "lolipop";
+/** LOLIPOP! Deploy Now の CLI。npx のキャッシュ位置には依存せず、版を固定して npx で起動する */
+const LOLIPOP_CLI_VERSION = "2.0.8";
+function resolveLolipopCli(): [command: string, ...prefix: string[]] {
+  if (process.env.LOLIPOP_CLI) return [process.execPath, process.env.LOLIPOP_CLI];
+  return ["npx", "--yes", `lolipop@${LOLIPOP_CLI_VERSION}`];
 }
 
 function runCmd(command: string, args: string[], cwd = ROOT): void {
@@ -85,11 +86,13 @@ function prepareNpmSource(staging: string): void {
   const resolved = JSON.parse(
     execFileSync("pnpm", ["list", "--json", "--depth", "0"], { cwd: ROOT, encoding: "utf8" }),
   ) as {
+    name?: string;
     dependencies?: Record<string, { version: string }>;
     devDependencies?: Record<string, { version: string }>;
   }[];
+  const rootPkg = resolved.find((r) => r.name === "takufu") ?? resolved[0];
   const versions: Record<string, string> = {};
-  for (const group of [resolved[0]?.dependencies ?? {}, resolved[0]?.devDependencies ?? {}]) {
+  for (const group of [rootPkg?.dependencies ?? {}, rootPkg?.devDependencies ?? {}]) {
     for (const [name, info] of Object.entries(group)) versions[name] = info.version;
   }
   const pkgPath = join(staging, "package.json");
@@ -134,8 +137,8 @@ function readEnvLocal(): Record<string, string> {
  * クラウドでインストールとビルドをさせる。`--setup` でビルド設定と公開環境変数も揃える。
  */
 async function cmdDeploy(args: string[]): Promise<void> {
-  const cli = resolveLolipopCli();
-  const lolipop = (cmdArgs: string[], cwd = ROOT) => runCmd(process.execPath, [cli, ...cmdArgs], cwd);
+  const [cliCmd, ...cliPrefix] = resolveLolipopCli();
+  const lolipop = (cmdArgs: string[], cwd = ROOT) => runCmd(cliCmd, [...cliPrefix, ...cmdArgs], cwd);
   if (args.includes("--setup")) {
     lolipop([
       "build-config",
@@ -153,8 +156,8 @@ async function cmdDeploy(args: string[]): Promise<void> {
     ]);
     const env = readEnvLocal();
     const existing = execFileSync(
-      process.execPath,
-      [cli, "env", "list", "--project", LOLIPOP_PROJECT, "--json"],
+      cliCmd,
+      [...cliPrefix, "env", "list", "--project", LOLIPOP_PROJECT, "--json"],
       {
         encoding: "utf8",
       },
@@ -175,7 +178,7 @@ async function cmdDeploy(args: string[]): Promise<void> {
     encoding: "utf8",
   })
     .split("\n")
-    .filter((f) => f && !f.startsWith(".env") && existsSync(join(ROOT, f)));
+    .filter((f) => f && !f.startsWith(".env") && !f.startsWith("mobile/") && existsSync(join(ROOT, f)));
   const staging = mkdtempSync(join(tmpdir(), "takufu-deploy-"));
   try {
     for (const f of files) cpSync(join(ROOT, f), join(staging, f), { recursive: true });
@@ -196,7 +199,7 @@ async function cmdDeploy(args: string[]): Promise<void> {
     }
     lolipop(["deploy", "--project", LOLIPOP_PROJECT, "--json"], staging);
     console.log(
-      `Check status: node ${cli} project show --project ${LOLIPOP_PROJECT} --json\nSite: https://takufu.lolipop-now.app`,
+      `Check status: ${[cliCmd, ...cliPrefix].join(" ")} project show --project ${LOLIPOP_PROJECT} --json\nSite: https://takufu.lolipop-now.app`,
     );
   } finally {
     rmSync(staging, { recursive: true, force: true });

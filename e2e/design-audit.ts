@@ -10,10 +10,12 @@ import type { Page } from "@playwright/test";
 
 /** デモ環境で巡回する画面 */
 export const AUDIT_ROUTES = [
-  "/",
+  "/home",
   "/sessions",
   "/sessions/s02",
   "/sessions/s02?tab=log",
+  "/sessions/s08",
+  "/sessions/s08?tab=log",
   "/calendar",
   "/tables",
   "/tables/t_haikou",
@@ -41,8 +43,15 @@ export const BANNED_VISIBLE_TEXT: readonly (string | RegExp)[] = [
   "ログから推定",
   "進行メモ",
   "KP:",
+  "共有範囲の初期値",
+  "は自動で入ります",
+  "いつ遊ぶか・メモ",
   " — ",
   "——",
+  "取り込み元:",
+  "開いたときに自動で同期",
+  "サインイン",
+  "サインアウト",
 ];
 
 export interface AuditIssue {
@@ -51,9 +60,9 @@ export interface AuditIssue {
 }
 
 export async function enterDemo(page: Page): Promise<void> {
-  await page.goto("/");
-  await page.getByRole("button", { name: /サンプルデータをそのまま見る/ }).click();
-  // デモに入るとホーム（/）に移る
+  // サンプルを始める（LP のボタンの行き先。LP からの導線は public-pages で確かめる）
+  await page.goto("/demo");
+  await page.waitForURL(/\/home$/);
   await page.getByRole("navigation", { name: "メイン" }).first().waitFor();
 }
 
@@ -169,6 +178,66 @@ export async function auditPage(page: Page, opts: { dark?: boolean } = {}): Prom
         const h = el.getBoundingClientRect().height;
         if (el.matches(".btn, .icon-btn") && h < 28) {
           out.push({ rule: "min-target-size", detail: `${describe(el)} ${Math.round(h)}px` });
+          break;
+        }
+      }
+
+      // 10. サイドバー下部のプロフィール行と設定アイコンボタンの高さを揃える（デスクトップのみ）
+      if (innerWidth >= 1024) {
+        const profileLink = document.querySelector('aside a[href^="/users/"]');
+        const settingsLink = document.querySelector('aside a[href="/settings"]');
+        if (profileLink && settingsLink && visible(profileLink) && visible(settingsLink)) {
+          const diff = Math.abs(
+            profileLink.getBoundingClientRect().height - settingsLink.getBoundingClientRect().height,
+          );
+          if (diff > 2) {
+            out.push({
+              rule: "sidebar-footer-height-parity",
+              detail: `height diff ${diff.toFixed(1)}px`,
+            });
+          }
+        }
+      }
+      // 11. アクセシビリティ基本構造（スキップリンク・フォーカスリング・主要ランドマーク）
+      if (document.querySelector('nav[aria-label="メイン"]')) {
+        const skip = document.querySelector('a[href="#main-content"]');
+        const targetMain = document.querySelector("main#main-content");
+        if (!skip || !targetMain) {
+          out.push({
+            rule: "a11y-skip-link",
+            detail: "Missing skip-to-main link (#main-content) or main#main-content landmark",
+          });
+        }
+      }
+      // 12. 影を使わない（DESIGN.md §3）。浮かぶ層（.popover）と、枠として描く ring・内側の影は除く
+      const castsShadow = (value: string) =>
+        value !== "none" &&
+        value.split(/,(?![^(]*\))/).some((layer) => {
+          if (/\binset\b/.test(layer)) return false;
+          const lengths = (
+            layer.replace(/(?:rgba?|oklch|oklab|color-mix|var)\([^)]*\)/g, "").match(/-?[\d.]+px/g) ?? []
+          ).map(parseFloat);
+          const [x = 0, y = 0, blur = 0] = lengths;
+          return x !== 0 || y !== 0 || blur !== 0;
+        });
+      for (const el of main.querySelectorAll("*")) {
+        if (el.closest(".popover") || !visible(el)) continue;
+        if (castsShadow(getComputedStyle(el).boxShadow)) {
+          out.push({ rule: "no-shadow", detail: describe(el) });
+          break;
+        }
+      }
+
+      // 13. 行のホバー背景の角丸は .list の端の行だけ（途中の行が丸いとホバーの面だけ角が欠けて見える）
+      for (const row of main.querySelectorAll(".list .row-interactive")) {
+        const list = row.closest(".list")!;
+        const items = [...list.children];
+        const idx = items.findIndex((c) => c === row || c.contains(row));
+        const cs = getComputedStyle(row);
+        const topRounded = parseFloat(cs.borderTopLeftRadius) > 0;
+        const bottomRounded = parseFloat(cs.borderBottomLeftRadius) > 0;
+        if ((topRounded && idx > 0) || (bottomRounded && idx < items.length - 1)) {
+          out.push({ rule: "row-hover-radius", detail: describe(row) });
           break;
         }
       }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParam } from "../lib/router";
 import { useStore } from "../store";
 import {
@@ -13,16 +13,19 @@ import {
   NotFound,
   PageHead,
   SCOPE_META,
+  StatChange,
   SectionTitle,
   Seg,
   Select,
+  SplitLayout,
   SysBadge,
   TimeRange,
   Toggle,
   cx,
 } from "../components/ui";
 import { Avatar, CharAvatar, SpeakerConfigGrid } from "../components/identity";
-import { SessionTimeline, TimelineFilter } from "../components/timeline";
+import { LogReaderBar, SessionTimeline, TimelineFilter, RecordingLinkContext } from "../components/timeline";
+import { SessionMediaSection, recordingLinksAt } from "../components/media";
 import { SYSTEMS } from "../data/systems";
 import {
   buildSessionRange,
@@ -33,7 +36,7 @@ import {
   sessionPlayMinutes,
   uid,
 } from "../lib/time";
-import type { Log, MsgKind, Scope } from "../types";
+import type { Character, Log, MsgKind, Scope } from "../types";
 import {
   IconBooks,
   IconBrandX,
@@ -56,7 +59,12 @@ import {
   IconX,
 } from "../components/icons";
 import { buildReportCardSVG, svgDataUrl, downloadReportPNG, xIntentUrl } from "../external";
-import { createSharedInvite, fetchSharedLog, revokeSharedMember } from "../lib/cloud-state";
+import {
+  createSharedInvite,
+  fetchSharedLog,
+  revokeSharedMember,
+  type SharedLogData,
+} from "../lib/cloud-state";
 
 export default function SessionDetail() {
   const { id } = useParams<{ id?: string }>();
@@ -78,22 +86,30 @@ export default function SessionDetail() {
   const [iconConfigOpen, setIconConfigOpen] = useState(false);
   const [timelineRevealed, setTimelineRevealed] = useState(false);
 
+  /* 共有先で増えた参加者を取り込む。取得し直すのは記録・共有先・ログインが変わったときだけで、
+     手元の参加者一覧は取得が返ってきた時点の最新を読む */
+  const syncLogId = state.logs[id ?? ""]?.id;
+  const syncSlug = state.logs[id ?? ""]?.slug;
+  const authUid = authUser?.uid;
+  const mergeSharedPlayers = useEffectEvent((logId: string, shared: SharedLogData) => {
+    const log = state.logs[logId];
+    if (!log) return;
+    const newcomers = Object.keys(shared.log.players).filter((uid) => !log.players[uid]);
+    if (!newcomers.length) return;
+    update((s) => {
+      if (!s.logs[logId]) return;
+      for (const uid of newcomers) {
+        if (!s.users[uid] && shared.users[uid]) s.users[uid] = shared.users[uid];
+        s.logs[logId].players[uid] ??= shared.log.players[uid];
+      }
+    });
+  });
   useEffect(() => {
-    const log = state.logs[id ?? ""];
-    if (!authUser || !log) return;
+    if (!authUid || !syncLogId || !syncSlug) return;
     let alive = true;
-    fetchSharedLog(log.slug)
+    fetchSharedLog(syncSlug)
       .then((shared) => {
-        if (!alive || !shared) return;
-        const newcomers = Object.keys(shared.log.players).filter((uid) => !log.players[uid]);
-        if (!newcomers.length) return;
-        update((s) => {
-          if (!s.logs[log.id]) return;
-          for (const uid of newcomers) {
-            if (!s.users[uid] && shared.users[uid]) s.users[uid] = shared.users[uid];
-            s.logs[log.id].players[uid] ??= shared.log.players[uid];
-          }
-        });
+        if (alive && shared) mergeSharedPlayers(syncLogId, shared);
       })
       .catch(() => {
         /* A new record may not have been published yet. */
@@ -101,7 +117,7 @@ export default function SessionDetail() {
     return () => {
       alive = false;
     };
-  }, [id, authUser?.uid]);
+  }, [authUid, syncLogId, syncSlug]);
 
   const log = state.logs[id ?? ""];
   const speakers = useMemo(() => {
@@ -122,20 +138,26 @@ export default function SessionDetail() {
   const sys = SYSTEMS[log.systemId];
   const isOwner = log.ownerId === state.me;
   const isParticipant = isOwner || Boolean(log.players[state.me]);
-  const playMin = sessionPlayMinutes(log);
-  const totalMsgs = log.channels.reduce((n, c) => n + c.msgs.length, 0);
-  const secretChannels = log.channels.filter((c) => c.secret);
+  const playMin = useMemo(() => sessionPlayMinutes(log), [log]);
+  const totalMsgs = useMemo(() => log.channels.reduce((n, c) => n + c.msgs.length, 0), [log.channels]);
+  const secretChannels = useMemo(() => log.channels.filter((c) => c.secret), [log.channels]);
   const canRead = isParticipant || timelineRevealed;
 
-  const mainChannel =
-    log.channels.find((c) => !c.secret && (c.id === "main" || c.name === "メイン")) ??
-    log.channels.find((c) => !c.secret) ??
-    log.channels[0];
-  const previewMsgs = mainChannel ? mainChannel.msgs.filter((m) => m.type !== "note").slice(0, 3) : [];
-  const previewLog: Log | null =
-    log.hasLog && mainChannel && previewMsgs.length > 0
-      ? { ...log, channels: [{ ...mainChannel, msgs: previewMsgs }] }
-      : null;
+  const { previewLog, hasRolls } = useMemo(() => {
+    const mainChannel =
+      log.channels.find((c) => !c.secret && (c.id === "main" || c.name === "メイン")) ??
+      log.channels.find((c) => !c.secret) ??
+      log.channels[0];
+    const previewMsgs = mainChannel ? mainChannel.msgs.filter((m) => m.type !== "note").slice(0, 4) : [];
+    const nextPreviewLog: Log | null =
+      log.hasLog && mainChannel && previewMsgs.length > 0
+        ? { ...log, channels: [{ ...mainChannel, msgs: previewMsgs }] }
+        : null;
+    const rolls = log.hasLog && log.channels.some((c) => c.msgs.some((m) => m.type === "roll"));
+    return { previewLog: nextPreviewLog, hasRolls: rolls };
+  }, [log]);
+  // 共有の状態と操作は見出しの「共有」ボタン（範囲つき）と共有モーダルにまとめる。横の欄に共有だけの区画を作らない
+  const showOverviewAside = hasRolls;
 
   const openTimeline = () => {
     setTab("timeline");
@@ -195,6 +217,11 @@ export default function SessionDetail() {
               <Menu
                 label="その他の操作"
                 items={[
+                  {
+                    label: "Xで卓報告",
+                    icon: <IconBrandX width={15} height={15} aria-hidden />,
+                    onSelect: () => setReportCard(true),
+                  },
                   ...(!log.hasLog
                     ? [
                         {
@@ -242,168 +269,197 @@ export default function SessionDetail() {
       </div>
 
       <div role="tabpanel" id="panel-overview" aria-labelledby="tab-overview" hidden={tab !== "overview"}>
-        {tab === "overview" && (
-          <>
-            <MembersTab log={log} />
+        {tab === "overview" &&
+          (() => {
+            const overviewMain = (
+              <div className="space-y-8">
+                <MembersTab log={log} />
 
-            {previewLog && canRead && (
-              <>
-                <SectionTitle
-                  sub={
-                    secretChannels.length > 0
-                      ? `シークレット ${secretChannels.length} タブを含む全 ${totalMsgs} 行`
-                      : `全 ${totalMsgs} 行`
+                {previewLog && canRead && (
+                  <section aria-label="ログの冒頭">
+                    <SectionTitle
+                      sub={
+                        secretChannels.length > 0
+                          ? `シークレット ${secretChannels.length} タブを含む全 ${totalMsgs} 行`
+                          : `全 ${totalMsgs} 行`
+                      }
+                    >
+                      ログの冒頭
+                    </SectionTitle>
+                    <div className="surface overflow-hidden">
+                      <div className="relative px-1 pt-2 pb-10 sm:px-2">
+                        <SessionTimeline
+                          log={previewLog}
+                          state={state}
+                          mode="own"
+                          filter={{ query: "", channel: "all" }}
+                        />
+                        <div
+                          className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-base-100 via-base-100/85 to-transparent"
+                          aria-hidden
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={openTimeline}
+                        className="row-interactive flex w-full items-center justify-center border-t border-base-300 px-4 py-3 text-sm font-semibold text-primary"
+                      >
+                        ログをすべて読む（全{totalMsgs}行）
+                      </button>
+                    </div>
+                  </section>
+                )}
+
+                <SessionMediaSection
+                  log={log}
+                  state={state}
+                  editable={isParticipant}
+                  viewer={{ viewerId: state.me, isMember: isParticipant, hasPassed: isParticipant }}
+                  onChange={(media) =>
+                    update((s) => {
+                      const target = s.logs[log.id];
+                      if (target) target.media = media;
+                    })
                   }
-                  right={
-                    <button className="btn btn-sm" onClick={openTimeline}>
-                      ログを読む
-                    </button>
-                  }
-                >
-                  ログの冒頭
-                </SectionTitle>
-                <div className="surface px-1 py-2 sm:px-2">
-                  <SessionTimeline
-                    log={previewLog}
-                    state={state}
-                    mode="own"
-                    filter={{ query: "", channel: "all" }}
-                  />
-                </div>
-              </>
-            )}
+                />
 
-            <ImpressionsSection log={log} isParticipant={isParticipant} />
+                <ImpressionsSection log={log} isParticipant={isParticipant} />
+              </div>
+            );
 
-            {log.hasLog && <RollSummarySection log={log} />}
-          </>
-        )}
+            const overviewAside = showOverviewAside ? (
+              <div className="space-y-8">{hasRolls && <RollSummarySection log={log} />}</div>
+            ) : null;
+
+            return overviewAside ? (
+              <SplitLayout asideWidth="md" main={overviewMain} aside={overviewAside} />
+            ) : (
+              <div className="max-w-4xl">{overviewMain}</div>
+            );
+          })()}
       </div>
 
       <div role="tabpanel" id="panel-timeline" aria-labelledby="tab-timeline" hidden={tab !== "timeline"}>
-        {tab === "timeline" &&
-          (log.hasLog ? (
-            !canRead ? (
-              <div className="surface">
-                <EmptyState
-                  icon={<IconEyeOff width={28} height={28} />}
-                  title="ネタバレに配慮して閉じています"
-                  action={
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={() => setTimelineRevealed(true)}
-                    >
-                      ログを表示する
-                    </button>
-                  }
-                >
-                  参加していないセッションです。ログにはシナリオの内容が含まれます。
-                </EmptyState>
-              </div>
-            ) : (
-              <>
-                <div className="sticky top-14 lg:top-0 z-20 -mx-4 mb-3 flex flex-wrap items-center gap-2 bg-base-200/95 px-4 py-2 backdrop-blur sm:-mx-8 sm:px-8">
-                  <label className="input flex min-w-0 basis-full items-center gap-2 sm:max-w-sm sm:flex-1 sm:basis-auto">
-                    <IconSearch width={16} height={16} className="shrink-0 opacity-50" aria-hidden />
-                    <input
-                      type="search"
-                      aria-label="ログを絞り込み"
-                      className="min-w-0 grow"
-                      placeholder="本文・発言者で絞り込み…"
-                      value={filter.query}
-                      onChange={(e) => setFilter({ ...filter, query: e.target.value })}
-                    />
-                  </label>
-                  {log.channels.length > 1 && (
-                    <Select
-                      className="max-w-full"
-                      value={filter.channel}
-                      onChange={(v) => setFilter({ ...filter, channel: v })}
-                      ariaLabel="タブで絞り込み"
-                      options={[
-                        { value: "all", label: "すべてのタブ" },
-                        ...log.channels.map((c) => ({
-                          value: c.id,
-                          label: `${c.name}${c.secret ? "（シークレット）" : ""}`,
-                        })),
-                      ]}
-                    />
-                  )}
-                  {isOwner && speakers.length > 0 && (
-                    <button
-                      type="button"
-                      className="btn btn-quiet ml-auto"
-                      aria-expanded={iconConfigOpen}
-                      onClick={() => setIconConfigOpen((v) => !v)}
-                    >
-                      発言者の表示
-                    </button>
-                  )}
-                </div>
-                {isOwner && iconConfigOpen && speakers.length > 0 && (
-                  <section className="surface mb-4 p-4 sm:p-5" aria-label="発言者のアイコンと役割">
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                      <h2 className="text-sm font-bold">発言者のアイコンと役割</h2>
+        {tab === "timeline" && (
+          <div className="max-w-4xl">
+            {log.hasLog ? (
+              !canRead ? (
+                <div className="surface">
+                  <EmptyState
+                    icon={<IconEyeOff width={28} height={28} />}
+                    title="ネタバレに配慮して閉じています"
+                    action={
                       <button
                         type="button"
-                        className="btn btn-sm btn-quiet"
-                        onClick={() => setIconConfigOpen(false)}
+                        className="btn btn-primary"
+                        onClick={() => setTimelineRevealed(true)}
                       >
-                        閉じる
+                        ログを表示する
                       </button>
-                    </div>
-                    <SpeakerConfigGrid
-                      speakers={speakers}
-                      speakerIcons={log.speakerIcons ?? {}}
-                      state={state}
-                      onRoleChange={(sp, nextKind) => {
-                        update((s) => {
-                          s.logs[log.id].channels.forEach((c) =>
-                            c.msgs.forEach((m) => {
-                              if (m.sp === sp) m.kind = nextKind;
-                            }),
-                          );
-                        });
-                      }}
-                      onIconChange={(sp, iconSrc) => {
-                        update((s) => {
-                          const target = s.logs[log.id];
-                          const nextIcons = { ...target.speakerIcons };
-                          if (iconSrc) nextIcons[sp] = iconSrc;
-                          else delete nextIcons[sp];
-                          target.speakerIcons = Object.keys(nextIcons).length ? nextIcons : undefined;
-                        });
-                      }}
-                    />
-                  </section>
-                )}
-                <div className="surface px-1 py-2 sm:px-3 sm:py-3">
-                  <SessionTimeline log={log} state={state} mode="own" filter={filter} />
+                    }
+                  >
+                    参加していないセッションです。ログにはシナリオの内容が含まれます。
+                  </EmptyState>
                 </div>
-                {log.importedFrom && (
-                  <p className="mt-3 text-xs text-ink3">取り込んだファイル: {log.importedFrom}</p>
-                )}
-              </>
-            )
-          ) : (
-            <div className="surface">
-              <EmptyState
-                kind="first"
-                icon={<IconFileText width={28} height={28} />}
-                title="ログはまだありません"
-                action={
-                  isOwner ? (
-                    <button className="btn btn-primary" onClick={() => nav({ to: `/upload?log=${log.id}` })}>
-                      <IconUpload width={16} height={16} /> ログを添付
-                    </button>
-                  ) : undefined
-                }
-              >
-                日時と参加者だけが記録されています。
-              </EmptyState>
-            </div>
-          ))}
+              ) : (
+                <>
+                  <LogReaderBar
+                    log={log}
+                    state={state}
+                    filter={filter}
+                    onChange={setFilter}
+                    stickyClassName="sticky top-14 lg:top-0 z-20"
+                    rightSlot={
+                      isOwner && speakers.length > 0 ? (
+                        <button
+                          type="button"
+                          className="btn btn-quiet btn-sm ml-auto"
+                          aria-expanded={iconConfigOpen}
+                          onClick={() => setIconConfigOpen((v) => !v)}
+                        >
+                          発言者の表示
+                        </button>
+                      ) : undefined
+                    }
+                  />
+                  {isOwner && iconConfigOpen && speakers.length > 0 && (
+                    <section className="surface mb-4 p-4 sm:p-5" aria-label="発言者のアイコンと役割">
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <h2 className="text-sm font-bold">発言者のアイコンと役割</h2>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-quiet"
+                          onClick={() => setIconConfigOpen(false)}
+                        >
+                          閉じる
+                        </button>
+                      </div>
+                      <SpeakerConfigGrid
+                        speakers={speakers}
+                        speakerIcons={log.speakerIcons ?? {}}
+                        state={state}
+                        onRoleChange={(sp, nextKind) => {
+                          update((s) => {
+                            s.logs[log.id].channels.forEach((c) =>
+                              c.msgs.forEach((m) => {
+                                if (m.sp === sp) m.kind = nextKind;
+                              }),
+                            );
+                          });
+                        }}
+                        onIconChange={(sp, iconSrc) => {
+                          update((s) => {
+                            const target = s.logs[log.id];
+                            const nextIcons = { ...target.speakerIcons };
+                            if (iconSrc) nextIcons[sp] = iconSrc;
+                            else delete nextIcons[sp];
+                            target.speakerIcons = Object.keys(nextIcons).length ? nextIcons : undefined;
+                          });
+                        }}
+                      />
+                    </section>
+                  )}
+                  <div className="surface px-1 py-2 sm:px-3 sm:py-3">
+                    <RecordingLinkContext.Provider
+                      value={(ts) =>
+                        recordingLinksAt(log, ts, {
+                          viewerId: state.me,
+                          isMember: isParticipant,
+                          hasPassed: isParticipant,
+                        })[0]?.href
+                      }
+                    >
+                      <SessionTimeline log={log} state={state} mode="own" filter={filter} />
+                    </RecordingLinkContext.Provider>
+                  </div>
+                  {log.importedFrom && (
+                    <p className="mt-3 text-xs text-ink3">取り込んだファイル: {log.importedFrom}</p>
+                  )}
+                </>
+              )
+            ) : (
+              <div className="surface">
+                <EmptyState
+                  kind="first"
+                  icon={<IconFileText width={28} height={28} />}
+                  title="ログはまだありません"
+                  action={
+                    isOwner ? (
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => nav({ to: `/upload?log=${log.id}` })}
+                      >
+                        <IconUpload width={16} height={16} /> ログを添付
+                      </button>
+                    ) : undefined
+                  }
+                >
+                  日時と参加者だけが記録されています。
+                </EmptyState>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {editing && <EditLogModal log={log} onClose={() => setEditing(false)} />}
@@ -526,7 +582,7 @@ function ImpressionsSection({ log, isParticipant }: { log: Log; isParticipant: b
         <Link to={`/users/${author.id}`} className="truncate text-sm font-bold hover:text-primary">
           {author.name}
         </Link>
-        {authorId === log.ownerId && <span className="text-xs text-ink3">進行</span>}
+        {authorId === log.ownerId && <span className="text-xs text-ink3">GM</span>}
       </div>
     );
   };
@@ -585,7 +641,7 @@ function ImpressionsSection({ log, isParticipant }: { log: Log; isParticipant: b
   };
 
   return (
-    <section aria-label="感想" className="mt-10">
+    <section aria-label="感想">
       <SectionTitle>感想</SectionTitle>
       <div className="surface list">
         {canWrite &&
@@ -669,9 +725,17 @@ function MembersTab({ log }: { log: Log }) {
   const kpLink = log.players[log.ownerId];
   const kpChar = kpLink?.linked ? state.characters[kpLink.characterIds[0] ?? ""] : undefined;
   const kpSessRec = kpChar?.sessions.find((s) => s.logId === log.id);
-  const kpChars = Object.values(state.characters).filter(
-    (c) => c.ownerId === log.ownerId && c.systemId === log.systemId,
-  );
+  const kpChars = useMemo(() => {
+    const map = new Map<string, Character[]>();
+    for (const c of Object.values(state.characters)) {
+      if (c.systemId !== log.systemId) continue;
+      const arr = map.get(c.ownerId);
+      if (arr) arr.push(c);
+      else map.set(c.ownerId, [c]);
+    }
+    return map;
+  }, [state.characters, log.systemId]);
+  const ownerChars = kpChars.get(log.ownerId) ?? [];
 
   const candidates = Object.values(state.users)
     .filter((u) => !ids.includes(u.id))
@@ -707,17 +771,7 @@ function MembersTab({ log }: { log: Log }) {
   const deltaText = (delta: Record<string, { before: number; after: number }>) =>
     Object.entries(delta).map(([k, d]) => {
       const label = sys?.stats.find((x) => x.key === k)?.label ?? k.toUpperCase();
-      const diff = d.after - d.before;
-      return (
-        <span key={k} className="tabular-nums">
-          <span className="text-ink2">{label}</span> {d.before}→{d.after}
-          {diff !== 0 && (
-            <span className={cx("ml-1", diff < 0 ? "text-error" : "text-success")}>
-              {diff > 0 ? `+${diff}` : diff}
-            </span>
-          )}
-        </span>
-      );
+      return <StatChange key={k} label={label} before={d.before} after={d.after} />;
     });
 
   return (
@@ -760,7 +814,7 @@ function MembersTab({ log }: { log: Log }) {
 
       <div
         className={cx(
-          "surface list transition-shadow",
+          "surface list",
           editingMembers && "ring-2 ring-primary/30 ring-offset-2 ring-offset-base-200",
         )}
       >
@@ -784,7 +838,7 @@ function MembersTab({ log }: { log: Log }) {
                       {kpUser.name}
                     </Link>
                   )}
-                  <span className="text-xs font-semibold text-primary">進行</span>
+                  <span className="text-xs font-semibold text-primary">GM</span>
                   {kpLink?.hidden && <span className="text-xs text-ink3">共有ページでは非表示</span>}
                 </div>
                 {kpSessRec && (
@@ -815,8 +869,8 @@ function MembersTab({ log }: { log: Log }) {
                       });
                     }}
                     options={[
-                      { value: "", label: "キャラクターなし（進行のみ）" },
-                      ...kpChars.map((c) => ({ value: c.id, label: c.name })),
+                      { value: "", label: "キャラクターなし（GMのみ）" },
+                      ...ownerChars.map((c) => ({ value: c.id, label: c.name })),
                     ]}
                   />
                   <Toggle
@@ -841,9 +895,7 @@ function MembersTab({ log }: { log: Log }) {
           if (!user || !p) return null;
           const char = p.linked ? state.characters[p.characterIds[0] ?? ""] : undefined;
           const sessRec = char?.sessions.find((s) => s.logId === log.id);
-          const myChars = Object.values(state.characters).filter(
-            (c) => c.ownerId === u && c.systemId === log.systemId,
-          );
+          const myChars = kpChars.get(u) ?? [];
           const isRemoving = removingUid === u;
           const canEditThis = isKpView || u === state.me;
 
@@ -1060,41 +1112,46 @@ function MembersTab({ log }: { log: Log }) {
 
 /* ---------- ダイスロール集計 ---------- */
 function RollSummarySection({ log }: { log: Log }) {
-  const rolls = log.channels.flatMap((c) =>
-    c.msgs.filter((m) => m.type === "roll" && m.roll).map((m) => m.roll!),
-  );
-  if (rolls.length === 0) return null;
+  const { totalRolls, dist, bySp, maxDist } = useMemo(() => {
+    const nextBySp: Record<string, { crit: number; fumble: number; fail: number; ok: number; spec: number }> =
+      {};
+    const nextDist: Record<string, number> = {};
+    let count = 0;
+    for (const c of log.channels) {
+      for (const m of c.msgs) {
+        if (m.type !== "roll" || !m.roll) continue;
+        count++;
+        const sp = m.sp;
+        nextBySp[sp] ??= { crit: 0, fumble: 0, fail: 0, ok: 0, spec: 0 };
+        const r = m.roll.result;
+        if (/クリティカル/.test(r)) nextBySp[sp].crit++;
+        else if (/ファンブル/.test(r)) nextBySp[sp].fumble++;
+        else if (/スペシャル/.test(r)) nextBySp[sp].spec++;
+        else if (/失敗/.test(r)) nextBySp[sp].fail++;
+        else if (/SAN/.test(r)) {
+          /* SANは分布に含めない */
+        } else nextBySp[sp].ok++;
+        const key = /SAN/.test(r) ? "SANチェック" : r;
+        nextDist[key] = (nextDist[key] ?? 0) + 1;
+      }
+    }
+    return {
+      totalRolls: count,
+      dist: nextDist,
+      bySp: nextBySp,
+      maxDist: Math.max(1, ...Object.values(nextDist)),
+    };
+  }, [log.channels]);
 
-  const bySp: Record<string, { crit: number; fumble: number; fail: number; ok: number; spec: number }> = {};
-  log.channels.forEach((c) =>
-    c.msgs.forEach((m) => {
-      if (m.type !== "roll" || !m.roll) return;
-      const sp = m.sp;
-      bySp[sp] ??= { crit: 0, fumble: 0, fail: 0, ok: 0, spec: 0 };
-      const r = m.roll.result;
-      if (/クリティカル/.test(r)) bySp[sp].crit++;
-      else if (/ファンブル/.test(r)) bySp[sp].fumble++;
-      else if (/スペシャル/.test(r)) bySp[sp].spec++;
-      else if (/失敗/.test(r)) bySp[sp].fail++;
-      else if (/SAN/.test(r)) {
-        /* SANは分布に含めない */
-      } else bySp[sp].ok++;
-    }),
-  );
-  const dist: Record<string, number> = {};
-  rolls.forEach((r) => {
-    const key = /SAN/.test(r.result) ? "SANチェック" : r.result;
-    dist[key] = (dist[key] ?? 0) + 1;
-  });
-  const maxDist = Math.max(1, ...Object.values(dist));
+  if (totalRolls === 0) return null;
 
   return (
-    <section aria-label="ダイスロール" className="mt-10">
+    <section aria-label="ダイスロール">
       <SectionTitle>
         ダイスロール
-        <span className="ml-1.5 text-sm font-medium text-ink3 tabular-nums">{rolls.length}回</span>
+        <span className="ml-1.5 text-sm font-medium text-ink3 tabular-nums">{totalRolls}回</span>
       </SectionTitle>
-      <div className="surface grid sm:grid-cols-2 sm:divide-x divide-base-300">
+      <div className="surface">
         <div className="px-4 py-4 sm:px-5">
           <h3 className="eyebrow mb-3">結果</h3>
           <ul className="space-y-2">
@@ -1121,31 +1178,37 @@ function RollSummarySection({ log }: { log: Log }) {
               ))}
           </ul>
         </div>
-        <div className="border-t border-base-300 px-4 py-4 sm:border-t-0 sm:px-5">
+        <div className="overflow-x-auto border-t border-base-300 px-4 py-4 sm:px-5">
           <h3 className="eyebrow mb-2">発言者ごと</h3>
           <table className="w-full text-sm tabular-nums">
             <thead>
-              <tr className="text-xs text-ink2">
-                <th className="py-1 text-left font-medium">発言者</th>
-                <th className="py-1 text-right font-medium">成功</th>
-                <th className="py-1 text-right font-medium">失敗</th>
-                <th className="py-1 text-right font-medium">クリティカル</th>
-                <th className="py-1 text-right font-medium">ファンブル</th>
+              <tr className="whitespace-nowrap text-xs text-ink2">
+                <th className="py-1 pr-2 text-left font-medium">発言者</th>
+                <th className="px-1.5 py-1 text-right font-medium">成功</th>
+                <th className="px-1.5 py-1 text-right font-medium">失敗</th>
+                <th className="px-1.5 py-1 text-right font-medium">クリティカル</th>
+                <th className="py-1 pl-1.5 text-right font-medium">ファンブル</th>
               </tr>
             </thead>
             <tbody>
               {Object.entries(bySp).map(([sp, v]) => (
                 <tr key={sp} className="border-t border-base-200">
-                  <td className="max-w-28 truncate py-1.5 font-semibold">{sp}</td>
-                  <td className="py-1.5 text-right">{v.ok + v.spec}</td>
-                  <td className="py-1.5 text-right text-ink2">{v.fail}</td>
+                  <td className="max-w-24 truncate py-1.5 pr-2 font-semibold">{sp}</td>
+                  <td className="px-1.5 py-1.5 text-right">{v.ok + v.spec}</td>
+                  <td className="px-1.5 py-1.5 text-right text-ink2">{v.fail}</td>
                   <td
-                    className={cx("py-1.5 text-right", v.crit > 0 ? "font-bold text-success" : "text-ink3")}
+                    className={cx(
+                      "px-1.5 py-1.5 text-right",
+                      v.crit > 0 ? "font-bold text-success" : "text-ink3",
+                    )}
                   >
                     {v.crit}
                   </td>
                   <td
-                    className={cx("py-1.5 text-right", v.fumble > 0 ? "font-bold text-error" : "text-ink3")}
+                    className={cx(
+                      "py-1.5 pl-1.5 text-right",
+                      v.fumble > 0 ? "font-bold text-error" : "text-ink3",
+                    )}
                   >
                     {v.fumble}
                   </td>
@@ -1261,16 +1324,20 @@ export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => voi
   const [imageError, setImageError] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
   const sc = log.scenarioId ? state.scenarios[log.scenarioId] : null;
-  const cardData = {
-    scenarioTitle: sc?.title,
-    scenarioEmoji: sc?.emoji,
-    title: log.title,
-    dateLabel: fmtDates(log.dates),
-    systemName: SYSTEMS[log.systemId]?.name ?? "汎用・その他",
-    playerCount: Object.keys(log.players).length,
-    shareUrl: `${location.origin}/share/l/${log.slug}`,
-  };
-  const cardSvg = buildReportCardSVG(cardData);
+  const shareUrl = `${location.origin}/share/l/${log.slug}`;
+  const cardData = useMemo(
+    () => ({
+      scenarioTitle: sc?.title,
+      scenarioEmoji: sc?.emoji,
+      title: log.title,
+      dateLabel: fmtDates(log.dates),
+      systemName: SYSTEMS[log.systemId]?.name ?? "汎用・その他",
+      playerCount: Object.keys(log.players).length,
+      shareUrl,
+    }),
+    [sc?.title, sc?.emoji, log.title, log.dates, log.systemId, log.players, shareUrl],
+  );
+  const cardSvg = useMemo(() => buildReportCardSVG(cardData), [cardData]);
 
   return (
     <Modal

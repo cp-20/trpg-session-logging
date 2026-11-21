@@ -1,16 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "../lib/router";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import {
-  IconCalendarPlus,
   IconCalendarTime,
   IconCheck,
   IconChevronLeft,
   IconChevronRight,
-  IconDownload,
-  IconExternal,
+  IconPencil,
   IconPlus,
-  IconUpload,
   IconX,
 } from "../components/icons";
 import {
@@ -21,31 +18,39 @@ import {
   HoverCard,
   Modal,
   PageHead,
-  PanelHead,
   SectionTitle,
   Seg,
   Select,
+  SplitLayout,
   cx,
   weekdayTone,
+  DateInput,
+  NumberInput,
 } from "../components/ui";
-import { Avatar, AvatarStack } from "../components/identity";
+import { Avatar, AvatarStack, ProviderIcon } from "../components/identity";
 import { getJapaneseHolidayName } from "../lib/holidays";
-import { buildIcsCalendar, downloadIcs } from "../lib/ics";
 import { buildFeedIcs, feedUrl, newFeedToken, publishFeed, revokeFeed } from "../lib/calendar-feed";
 import {
   VALID_DATE,
   VALID_TIME,
   addDays,
+  applyConfirmCandidate,
+  applyPollAnswers,
+  applyPollEdit,
+  busyChecker,
   calendarSubscribeLinks,
   canConfirmPoll,
   computeEndTime,
   eventDurationMinutes,
   groupBy,
+  hasBusySource,
   monthCells,
-  parseBusyDates,
   pollCandidates,
+  pollDurationMinutes,
   pollMemberIds,
   quickWeekendDates,
+  type BusyCheck,
+  relativeDayLabel,
   shiftYearMonth,
   unansweredCount,
 } from "../lib/schedule";
@@ -82,14 +87,14 @@ const MINUTE_OPTIONS = [
 const UNRECORDED_LOOKBACK_DAYS = 30;
 
 /** 月表示の予定名にポインタを留めてから補足を出すまでの時間（うっかり通過では出さない） */
-const HOVER_DELAY_MS = 700;
+const HOVER_DELAY_MS = 850;
 
 type ExtendedTableEvent = TableEvent & {
   scenarioId?: string;
   durationMin?: number;
 };
 
-type ComposerState = { mode: "confirmed" | "poll"; date: string; anchor: "top" | "day" };
+type ComposerState = { mode: "confirmed" | "poll"; date: string };
 
 /* ============================================================
  * 一覧の部品（卓詳細からも使う）
@@ -101,28 +106,31 @@ export function EventRow({
   state,
   onOpen,
   showTable = true,
+  metaRight,
   trailing,
   muted,
+  highlight,
+  avatars,
 }: {
   ev: ExtendedTableEvent;
   state: State;
   onOpen: () => void;
   showTable?: boolean;
+  /** クリック領域（ボタン内）の右端に置く補足表示（日付ラベルや出欠集計など） */
+  metaRight?: ReactNode;
+  /** 別の操作ボタン（「記録する」等）を行の右端に置く場合だけ使う */
   trailing?: ReactNode;
   muted?: boolean;
+  highlight?: boolean;
+  avatars?: ReactNode;
 }) {
   const tb = ev.tableId ? state.tables[ev.tableId] : undefined;
   const sc = ev.scenarioId ? state.scenarios[ev.scenarioId] : undefined;
   const durMin = eventDurationMinutes(ev.startTime, ev.endTime, ev.durationMin);
   return (
     <div className="row-interactive flex items-center gap-4 px-4 py-3.5 sm:px-5">
-      <button
-        type="button"
-        onClick={onOpen}
-        className="flex min-w-0 flex-1 items-center gap-4 text-left"
-        aria-label={`${fmtDate(ev.date)} ${ev.title} の詳細`}
-      >
-        <DateBlock date={ev.date} muted={muted} />
+      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-4 text-left">
+        <DateBlock date={ev.date} muted={muted} highlight={highlight} />
         <span className="min-w-0 flex-1">
           <span className="block truncate font-bold leading-snug">{ev.title}</span>
           <span className="meta mt-0.5 text-xs sm:text-sm">
@@ -133,7 +141,9 @@ export function EventRow({
             {showTable && tb && <span className="max-w-40 truncate">{tb.name}</span>}
             {sc && <span className="max-w-48 truncate">{sc.title}</span>}
           </span>
+          {avatars && <span className="mt-1.5 flex items-center">{avatars}</span>}
         </span>
+        {metaRight}
       </button>
       {trailing}
     </div>
@@ -142,18 +152,19 @@ export function EventRow({
 
 /* ============================================================
  * カレンダー画面
- *   返事待ちの日程調整 → これからの予定 → 調整中 → 記録がまだ → 月表示
+ *   返事待ちの日程調整 → メイン2カラム（左: 月カレンダー / 右: 予定・調整中・未記録）
  * ============================================================ */
 
 export default function Calendar() {
-  const { state, update } = useStore();
+  const { state } = useStore();
   const nav = useNavigate();
   const today = todayStr();
   const [ym, setYm] = useState(() => today.slice(0, 7));
   const [selectedDay, setSelectedDay] = useState(today);
   const [tableFilter, setTableFilter] = useState("all");
   const [composer, setComposer] = useState<ComposerState | null>(null);
-  const [selectedEvent, setSelectedEvent] = useState<ExtendedTableEvent | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [pollTarget, setOpenPoll] = useState<{ id: string; mode: "view" | "answer" } | null>(null);
   const [syncOpen, setSyncOpen] = useState(false);
 
   const myTables = useMemo(
@@ -176,9 +187,27 @@ export default function Calendar() {
 
   const activePolls = useMemo(() => myEvents.filter((ev) => ev.status === "poll"), [myEvents]);
   const confirmedEvents = useMemo(() => myEvents.filter((ev) => ev.status !== "poll"), [myEvents]);
-  const upcomingEvents = confirmedEvents.filter((ev) => ev.date >= today);
-  const pollsNeedingReply = activePolls.filter((ev) => unansweredCount(ev, state.me) > 0);
-  const pollsAnswered = activePolls.filter((ev) => unansweredCount(ev, state.me) === 0);
+  const upcomingEvents = useMemo(
+    () => confirmedEvents.filter((ev) => ev.date >= today),
+    [confirmedEvents, today],
+  );
+  const pollsNeedingReply = useMemo(
+    () => activePolls.filter((ev) => unansweredCount(ev, state.me) > 0),
+    [activePolls, state.me],
+  );
+  const pollsAnswered = useMemo(
+    () => activePolls.filter((ev) => unansweredCount(ev, state.me) === 0),
+    [activePolls, state.me],
+  );
+
+  const selectedEvent = useMemo(
+    () => (selectedEventId ? (myEvents.find((ev) => ev.id === selectedEventId) ?? null) : null),
+    [selectedEventId, myEvents],
+  );
+  const openPoll = useMemo(
+    () => (pollTarget ? (activePolls.find((ev) => ev.id === pollTarget.id) ?? null) : null),
+    [pollTarget, activePolls],
+  );
 
   const myLogs = useMemo(
     () => Object.values(state.logs).filter((l) => l.ownerId === state.me || Boolean(l.players[state.me])),
@@ -198,8 +227,6 @@ export default function Calendar() {
       )
       .reverse();
   }, [confirmedEvents, myLogs, today]);
-
-  const busyDateSet = useMemo(() => new Set(state.prefs.busyDates ?? []), [state.prefs.busyDates]);
 
   const tableOptions = useMemo<SelectOption[]>(
     () => [{ value: "all", label: "すべての卓" }, ...myTables.map((t) => ({ value: t.id, label: t.name }))],
@@ -223,31 +250,7 @@ export default function Calendar() {
   );
   const defaultTableId = tableFilter !== "all" ? tableFilter : (myTables[0]?.id ?? "");
 
-  function setCandidateRsvp(eventId: string, candidateId: string, value: Availability) {
-    update((s) => {
-      const target = s.events?.[eventId];
-      if (!target) return;
-      if (target.candidates && target.candidates.length > 0) {
-        const cand = target.candidates.find((c) => c.id === candidateId);
-        if (cand) cand.responses[s.me] = value;
-      } else {
-        target.responses[s.me] = value;
-      }
-    });
-  }
-
-  function confirmCandidate(eventId: string, cand: TableEventCandidate) {
-    update((s) => {
-      const target = s.events?.[eventId] as ExtendedTableEvent | undefined;
-      if (!target) return;
-      target.status = "confirmed";
-      target.date = cand.date;
-      target.startTime = cand.startTime;
-      target.endTime = cand.endTime;
-      target.durationMin = eventDurationMinutes(cand.startTime, cand.endTime, target.durationMin);
-      target.responses = { ...cand.responses };
-      delete target.candidates;
-    });
+  function showConfirmed(cand: TableEventCandidate) {
     setYm(cand.date.slice(0, 7));
     setSelectedDay(cand.date);
   }
@@ -256,153 +259,240 @@ export default function Calendar() {
     nav({ to: `/upload?table=${ev.tableId ?? ""}&scenario=${ev.scenarioId ?? ""}` });
   }
 
-  function openComposer(mode: ComposerState["mode"], anchor: ComposerState["anchor"], date?: string) {
+  function openComposer(mode: ComposerState["mode"], date?: string) {
     const base = date ?? (selectedDay >= today ? selectedDay : today);
-    setComposer({ mode, anchor, date: base });
+    setComposer({ mode, date: base });
   }
 
-  const composerNode = (bare: boolean) =>
-    composer && (
-      <Composer
-        key={`${composer.mode}-${composer.anchor}-${composer.date}`}
-        bare={bare}
-        mode={composer.mode}
-        date={composer.date}
-        today={today}
-        tableOptions={formTableOptions}
-        scenarioOptions={scenarioOptions}
-        defaultTableId={defaultTableId}
-        onClose={() => setComposer(null)}
-        onCreated={(date) => {
-          setYm(date.slice(0, 7));
-          setSelectedDay(date);
-          setComposer(null);
-        }}
-      />
-    );
-
-  const renderPolls = (polls: ExtendedTableEvent[]) => (
-    <div className="space-y-4">
-      {polls.map((ev) => (
-        <PollCard
-          key={ev.id}
-          ev={ev}
-          state={state}
-          canConfirm={canConfirmPoll(ev, state)}
-          busyDates={busyDateSet}
-          onRsvp={(candId, v) => setCandidateRsvp(ev.id, candId, v)}
-          onConfirm={(cand) => confirmCandidate(ev.id, cand)}
-        />
-      ))}
-    </div>
-  );
-
-  const composerAtTop = composer?.anchor === "top";
+  const composerFormId = composer?.mode === "confirmed" ? "add-event-form" : "add-poll-form";
 
   return (
     <>
       <PageHead
         title="カレンダー"
         actions={
-          composerAtTop ? undefined : (
-            <>
-              <button type="button" className="btn" onClick={() => openComposer("poll", "top")}>
-                <IconCalendarTime width={16} height={16} /> 日程調整をはじめる
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => openComposer("confirmed", "top")}
-              >
-                <IconPlus width={16} height={16} /> 予定を追加
-              </button>
-            </>
-          )
+          <>
+            <button type="button" className="btn" onClick={() => openComposer("poll")}>
+              <IconCalendarTime width={16} height={16} /> 日程調整をはじめる
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => openComposer("confirmed")}>
+              <IconPlus width={16} height={16} /> 予定を追加
+            </button>
+          </>
         }
       />
 
-      {composerAtTop && <div className="mb-10">{composerNode(false)}</div>}
-
-      <div className="space-y-10">
-        {pollsNeedingReply.length > 0 && (
-          <section aria-labelledby="sec-reply">
-            <SectionTitle>
-              <span id="sec-reply">返事を待っている日程調整</span>
-            </SectionTitle>
-            {renderPolls(pollsNeedingReply)}
-          </section>
-        )}
-
-        <section aria-labelledby="sec-upcoming">
+      {pollsNeedingReply.length > 0 && (
+        <section aria-labelledby="sec-reply" className="mb-8">
           <SectionTitle>
-            <span id="sec-upcoming">これからの予定</span>
+            <span id="sec-reply">返事を待っている日程調整</span>
           </SectionTitle>
-          {upcomingEvents.length === 0 ? (
-            <div className="surface px-5 py-4 text-sm text-ink2">決まっている予定はありません。</div>
-          ) : (
-            <div className="surface list">
-              {upcomingEvents.map((ev) => (
-                <EventRow key={ev.id} ev={ev} state={state} onOpen={() => setSelectedEvent(ev)} />
-              ))}
-            </div>
-          )}
+          <div className="space-y-4">
+            {pollsNeedingReply.map((ev) => (
+              <PollCard
+                key={ev.id}
+                ev={ev}
+                state={state}
+                onOpen={(mode) => setOpenPoll({ id: ev.id, mode })}
+              />
+            ))}
+          </div>
         </section>
+      )}
 
-        {pollsAnswered.length > 0 && (
-          <section aria-labelledby="sec-polls">
-            <SectionTitle>
-              <span id="sec-polls">調整中の日程</span>
-            </SectionTitle>
-            {renderPolls(pollsAnswered)}
-          </section>
-        )}
+      <SplitLayout
+        asideWidth="lg"
+        main={
+          <MonthCalendar
+            ym={ym}
+            today={today}
+            selectedDay={selectedDay}
+            onSelectDay={setSelectedDay}
+            onChangeMonth={setYm}
+            tableFilter={tableFilter}
+            tableOptions={myTables.length > 1 ? tableOptions : null}
+            onChangeTableFilter={setTableFilter}
+            events={confirmedEvents}
+            polls={activePolls}
+            logs={myLogs}
+            state={state}
+            onOpenEvent={(ev) => setSelectedEventId(ev.id)}
+            onOpenPoll={(ev) => setOpenPoll({ id: ev.id, mode: "view" })}
+            onOpenSync={() => setSyncOpen(true)}
+            onAddOnDay={(mode, date) => openComposer(mode, date)}
+          />
+        }
+        aside={
+          <div className="space-y-8">
+            <section aria-labelledby="sec-upcoming">
+              <SectionTitle>
+                <span id="sec-upcoming">これからの予定</span>
+              </SectionTitle>
+              {upcomingEvents.length === 0 ? (
+                <div className="surface px-5 py-4 text-sm text-ink2">決まっている予定はありません。</div>
+              ) : (
+                <div className="surface list">
+                  {upcomingEvents.map((ev) => {
+                    const rel = relativeDayLabel(today, ev.date);
+                    const urgent = rel === "今日" || rel === "あす";
+                    return (
+                      <EventRow
+                        key={ev.id}
+                        ev={ev}
+                        state={state}
+                        highlight={urgent}
+                        onOpen={() => setSelectedEventId(ev.id)}
+                        metaRight={
+                          rel && (
+                            <span
+                              className={cx(
+                                "shrink-0 text-xs sm:text-sm",
+                                urgent ? "font-bold text-primary" : "text-ink2",
+                              )}
+                            >
+                              {rel}
+                            </span>
+                          )
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </section>
 
-        {unrecordedEvents.length > 0 && (
-          <section aria-labelledby="sec-unrecorded">
-            <SectionTitle>
-              <span id="sec-unrecorded">記録がまだの予定</span>
-            </SectionTitle>
-            <div className="surface list">
-              {unrecordedEvents.map((ev) => (
-                <EventRow
-                  key={ev.id}
-                  ev={ev}
-                  state={state}
-                  muted
-                  onOpen={() => setSelectedEvent(ev)}
-                  trailing={
-                    <button type="button" className="btn btn-sm shrink-0" onClick={() => recordFromEvent(ev)}>
-                      記録する
-                    </button>
-                  }
-                />
-              ))}
-            </div>
-          </section>
-        )}
+            {pollsAnswered.length > 0 && (
+              <section aria-labelledby="sec-polls">
+                <SectionTitle>
+                  <span id="sec-polls">調整中の日程</span>
+                </SectionTitle>
+                <div className="surface list">
+                  {pollsAnswered.map((ev) => {
+                    const tb = ev.tableId ? state.tables[ev.tableId] : undefined;
+                    const cands = pollCandidates(ev);
+                    const memberIds = pollMemberIds(ev, state);
+                    const topCand = [...cands].sort(
+                      (a, b) =>
+                        memberIds.filter((id) => b.responses[id] === "ok").length -
+                        memberIds.filter((id) => a.responses[id] === "ok").length,
+                    )[0];
+                    const topOk = topCand
+                      ? memberIds.filter((id) => topCand.responses[id] === "ok").length
+                      : 0;
+                    return (
+                      <button
+                        key={ev.id}
+                        type="button"
+                        onClick={() => setOpenPoll({ id: ev.id, mode: "view" })}
+                        className="row-interactive flex w-full items-center gap-3 px-4 py-3.5 text-left sm:px-5"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-bold leading-snug">{ev.title}</div>
+                          <div className="meta mt-0.5 text-xs">
+                            {tb && <span className="max-w-32 truncate">{tb.name}</span>}
+                            {topCand && (
+                              <span className="tabular-nums">
+                                最多 {fmtDate(topCand.date)}（◯ {topOk}/{memberIds.length}）
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <IconChevronRight width={16} height={16} className="shrink-0 text-ink3" aria-hidden />
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
 
-        <MonthCalendar
-          ym={ym}
-          today={today}
-          selectedDay={selectedDay}
-          onSelectDay={(d) => {
-            setSelectedDay(d);
-            if (composer?.anchor === "day") setComposer(null);
-          }}
-          onChangeMonth={setYm}
-          tableFilter={tableFilter}
-          tableOptions={myTables.length > 1 ? tableOptions : null}
-          onChangeTableFilter={setTableFilter}
-          events={confirmedEvents}
-          polls={activePolls}
-          logs={myLogs}
+            {unrecordedEvents.length > 0 && (
+              <section aria-labelledby="sec-unrecorded">
+                <SectionTitle>
+                  <span id="sec-unrecorded">記録がまだの予定</span>
+                </SectionTitle>
+                <div className="surface list">
+                  {unrecordedEvents.map((ev) => (
+                    <EventRow
+                      key={ev.id}
+                      ev={ev}
+                      state={state}
+                      muted
+                      onOpen={() => setSelectedEventId(ev.id)}
+                      trailing={
+                        <button
+                          type="button"
+                          className="btn btn-sm shrink-0"
+                          onClick={() => recordFromEvent(ev)}
+                        >
+                          記録する
+                        </button>
+                      }
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
+        }
+      />
+
+      {composer && (
+        <Modal
+          title={composer.mode === "confirmed" ? "予定を追加" : "日程調整をはじめる"}
+          wide={composer.mode === "poll"}
+          onClose={() => setComposer(null)}
+          foot={
+            <>
+              <button type="button" className="btn btn-quiet" onClick={() => setComposer(null)}>
+                キャンセル
+              </button>
+              <button type="submit" form={composerFormId} className="btn btn-primary">
+                {composer.mode === "confirmed" ? "予定を登録" : "日程調整を作成"}
+              </button>
+            </>
+          }
+        >
+          {composer.mode === "confirmed" ? (
+            <ConfirmedEventForm
+              formId={composerFormId}
+              tableOptions={formTableOptions}
+              scenarioOptions={scenarioOptions}
+              defaultTableId={defaultTableId}
+              selectedDate={composer.date}
+              onCreated={(date) => {
+                setYm(date.slice(0, 7));
+                setSelectedDay(date);
+                setComposer(null);
+              }}
+            />
+          ) : (
+            <PollForm
+              formId={composerFormId}
+              tableOptions={formTableOptions}
+              scenarioOptions={scenarioOptions}
+              defaultTableId={defaultTableId}
+              today={today}
+              firstDate={composer.date > today ? composer.date : undefined}
+              onCreated={(date) => {
+                setYm(date.slice(0, 7));
+                setSelectedDay(date);
+                setComposer(null);
+              }}
+            />
+          )}
+        </Modal>
+      )}
+
+      {openPoll && (
+        <PollDetailModal
+          key={openPoll.id}
+          event={openPoll}
           state={state}
-          onOpenEvent={setSelectedEvent}
-          onOpenSync={() => setSyncOpen(true)}
-          composer={composer?.anchor === "day" ? composerNode(true) : null}
-          onAddOnDay={(mode, date) => openComposer(mode, "day", date)}
+          initialMode={pollTarget?.mode}
+          onConfirmed={showConfirmed}
+          onClose={() => setOpenPoll(null)}
         />
-      </div>
+      )}
 
       {selectedEvent && (
         <EventDetailModal
@@ -410,182 +500,499 @@ export default function Calendar() {
           table={selectedEvent.tableId ? state.tables[selectedEvent.tableId] : undefined}
           scenario={selectedEvent.scenarioId ? state.scenarios[selectedEvent.scenarioId] : undefined}
           today={today}
-          onClose={() => setSelectedEvent(null)}
+          onClose={() => setSelectedEventId(null)}
           onRecordSession={() => {
             const target = selectedEvent;
-            setSelectedEvent(null);
+            setSelectedEventId(null);
             recordFromEvent(target);
           }}
         />
       )}
 
-      {syncOpen && (
-        <CalendarSyncDialog events={confirmedEvents} polls={activePolls} onClose={() => setSyncOpen(false)} />
-      )}
+      {syncOpen && <CalendarSyncDialog onClose={() => setSyncOpen(false)} />}
     </>
   );
 }
 
 /* ============================================================
- * 日程調整カード: 候補日1件 = 1行。自分の返事を行内で選ぶ
+ * 日程調整: 閲覧（既定）/ 自分の回答 / 編集 を分ける。
+ *   候補は開始だけが違い、長さは日程調整に 1 つだけ持つ。
  * ============================================================ */
 
-function PollCard({
+/** 自分の予定と照らし合わせる関数（設定での許可・カレンダーの選択・終日の扱いを反映） */
+export function useBusyCheck(): { check: BusyCheck; hasSource: boolean } {
+  const { state } = useStore();
+  const { busyDates, googleBusy } = state.prefs;
+  return useMemo(
+    () => ({
+      check: busyChecker({ busyDates, googleBusy }),
+      hasSource: hasBusySource({ busyDates, googleBusy }),
+    }),
+    [busyDates, googleBusy],
+  );
+}
+
+type PollMode = "view" | "answer" | "edit";
+
+function candidateTally(cand: TableEventCandidate, memberIds: string[]) {
+  const ok = memberIds.filter((id) => cand.responses[id] === "ok").length;
+  const maybe = memberIds.filter((id) => cand.responses[id] === "maybe").length;
+  const ng = memberIds.filter((id) => cand.responses[id] === "ng").length;
+  return { ok, maybe, ng, pending: memberIds.length - ok - maybe - ng };
+}
+
+/** 候補の日時。長さは日程調整全体で 1 つなので、候補には開始だけを出す */
+function candidateLabel(cand: Pick<TableEventCandidate, "date" | "startTime">): string {
+  return `${fmtDate(cand.date)} ${cand.startTime}`;
+}
+
+/** 候補日の一覧（閲覧用）。押して返事はしない。返事は「回答する」から */
+function PollCandidateView({
   ev,
   state,
-  canConfirm,
-  busyDates,
-  onRsvp,
+  isBusy,
+  compact = false,
+  canConfirm = false,
   onConfirm,
 }: {
   ev: ExtendedTableEvent;
   state: State;
-  canConfirm: boolean;
-  busyDates: Set<string>;
-  onRsvp: (candidateId: string, value: Availability) => void;
-  onConfirm: (cand: TableEventCandidate) => void;
+  isBusy: (cand: TableEventCandidate) => boolean;
+  /** カレンダーの返事待ちカード用。回答の内訳と確定を省く */
+  compact?: boolean;
+  canConfirm?: boolean;
+  onConfirm?: (cand: TableEventCandidate) => void;
 }) {
-  const [showAnswers, setShowAnswers] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
-  const tb = ev.tableId ? state.tables[ev.tableId] : undefined;
-  const sc = ev.scenarioId ? state.scenarios[ev.scenarioId] : undefined;
-  const organiser = state.users[ev.createdBy];
   const candidates = pollCandidates(ev);
   const memberIds = pollMemberIds(ev, state);
-  const okCounts = candidates.map((c) => memberIds.filter((id) => c.responses[id] === "ok").length);
-  const bestOk = Math.max(0, ...okCounts);
+  const tallies = candidates.map((c) => candidateTally(c, memberIds));
+  const bestOk = Math.max(0, ...tallies.map((t) => t.ok));
 
   return (
-    <article className="surface" aria-label={ev.title}>
-      <header className="px-4 pb-3 pt-4 sm:px-5">
-        <h3 className="font-bold leading-snug">{ev.title}</h3>
-        <div className="meta mt-0.5 text-xs sm:text-sm">
-          {tb ? (
-            <Link to={`/tables/${tb.id}`} className="hover:text-base-content hover:underline">
-              {tb.name}
-            </Link>
-          ) : (
-            <span>個人の予定</span>
-          )}
-          {sc && (
-            <Link to={`/scenarios/${sc.id}`} className="hover:text-base-content hover:underline">
-              {sc.title}
-            </Link>
-          )}
-          {organiser && <span>主催 {organiser.name}</span>}
-        </div>
-        {ev.note && <p className="mt-1.5 text-sm leading-relaxed text-ink2">{ev.note}</p>}
-      </header>
-
-      <ul className="list border-t border-base-300">
-        {candidates.map((cand, i) => {
-          const my = cand.responses[state.me];
-          const ok = okCounts[i]!;
-          const maybe = memberIds.filter((id) => cand.responses[id] === "maybe").length;
-          const ng = memberIds.filter((id) => cand.responses[id] === "ng").length;
-          const pending = memberIds.length - ok - maybe - ng;
-          const durMin = eventDurationMinutes(cand.startTime, cand.endTime, ev.durationMin);
-          const label = `${fmtDate(cand.date)} ${cand.startTime}`;
-          return (
-            <li key={cand.id} className="flex flex-wrap items-center gap-x-4 gap-y-2.5 px-4 py-3 sm:px-5">
-              <div className="min-w-0 flex-1 basis-52">
-                <div className="flex flex-wrap items-center gap-x-2 font-semibold tabular-nums">
-                  <span>
-                    {fmtDate(cand.date)} {cand.startTime}–{cand.endTime}
-                  </span>
-                  {durMin > 0 && <span className="text-xs font-normal text-ink2">{fmtDur(durMin)}</span>}
-                </div>
-                <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-ink2 tabular-nums">
-                  <span className={cx(ok === bestOk && ok > 0 && "font-bold text-success")}>
-                    ◯ {ok}/{memberIds.length}人
-                  </span>
-                  {maybe > 0 && <span>△ {maybe}</span>}
-                  {ng > 0 && <span>× {ng}</span>}
-                  {pending > 0 && <span>未回答 {pending}</span>}
-                  {busyDates.has(cand.date) && <span className="text-warning">自分の予定あり</span>}
-                </div>
+    <ul className="list border-t border-base-300" aria-label="候補日">
+      {candidates.map((cand, i) => {
+        const t = tallies[i]!;
+        const my = cand.responses[state.me];
+        const label = candidateLabel(cand);
+        const isBest = t.ok === bestOk && t.ok > 0;
+        return (
+          <li
+            key={cand.id}
+            className={cx(
+              "flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-5",
+              isBest && "bg-base-200/55",
+            )}
+          >
+            <div className="min-w-0 flex-1 basis-44">
+              <div className="font-semibold tabular-nums">{label}</div>
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-ink2 tabular-nums">
+                <span className={cx(isBest && "font-bold text-base-content")}>
+                  ◯ {t.ok}/{memberIds.length}人
+                </span>
+                {t.maybe > 0 && <span>△ {t.maybe}</span>}
+                {t.ng > 0 && <span>× {t.ng}</span>}
+                {t.pending > 0 && <span>未回答 {t.pending}</span>}
+                {isBusy(cand) && <span className="font-medium">自分の予定あり</span>}
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Seg<Availability>
-                  size="sm"
-                  ariaLabel={`${label} の自分の返事`}
-                  value={(my ?? "") as Availability}
-                  options={RSVP_OPTIONS}
-                  onChange={(v) => onRsvp(cand.id, v)}
-                />
-                {canConfirm &&
-                  (confirming === cand.id ? (
-                    <span className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={() => {
-                          setConfirming(null);
-                          onConfirm(cand);
-                        }}
-                      >
-                        確定する
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-quiet btn-sm"
-                        onClick={() => setConfirming(null)}
-                      >
-                        やめる
-                      </button>
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="btn btn-quiet btn-sm"
-                      aria-label={`${label} で確定`}
-                      onClick={() => setConfirming(cand.id)}
-                    >
-                      この日で確定
-                    </button>
-                  ))}
-              </div>
-              {showAnswers && (
-                <ul
-                  className="flex basis-full flex-wrap gap-x-4 gap-y-1.5 text-xs"
-                  aria-label={`${label} の回答`}
+            </div>
+            <span className="shrink-0 text-sm text-ink2">
+              自分{" "}
+              <span className={cx("font-semibold", my ? "text-base-content" : "text-ink2")}>
+                {my ? RSVP_SYMBOL[my] : "未回答"}
+              </span>
+            </span>
+            {!compact &&
+              canConfirm &&
+              onConfirm &&
+              (confirming === cand.id ? (
+                <span className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => {
+                      setConfirming(null);
+                      onConfirm(cand);
+                    }}
+                  >
+                    確定する
+                  </button>
+                  <button type="button" className="btn btn-quiet btn-sm" onClick={() => setConfirming(null)}>
+                    やめる
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-quiet btn-sm"
+                  aria-label={`${label} で確定`}
+                  onClick={() => setConfirming(cand.id)}
                 >
-                  {memberIds.map((id) => {
-                    const u = state.users[id]!;
-                    const r = cand.responses[id];
-                    return (
-                      <li key={id} className="inline-flex items-center gap-1.5">
-                        <Avatar u={u} size={18} />
-                        <span className={cx(id === state.me && "font-bold")}>{u.name}</span>
-                        <span
-                          className={cx(
-                            "font-semibold",
-                            r === "ok" ? "text-success" : r === "ng" ? "text-error" : "text-ink2",
-                          )}
-                        >
-                          {r ? RSVP_SYMBOL[r] : "–"}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+                  この日で確定
+                </button>
+              ))}
+            {!compact && (
+              <ul
+                className="flex basis-full flex-wrap gap-x-4 gap-y-1.5 text-xs"
+                aria-label={`${label} の回答`}
+              >
+                {memberIds.map((id) => {
+                  const u = state.users[id]!;
+                  const r = cand.responses[id];
+                  return (
+                    <li key={id} className="inline-flex items-center gap-1.5">
+                      <Avatar u={u} size={18} />
+                      <span className={cx(id === state.me && "font-bold")}>{u.name}</span>
+                      <span
+                        className={cx(
+                          "font-semibold",
+                          r === "ok" ? "text-base-content" : r === "ng" ? "text-error" : "text-ink2",
+                        )}
+                      >
+                        {r ? RSVP_SYMBOL[r] : "–"}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** 自分の回答（回答画面）。保存するまで書き込まない */
+function PollAnswerList({
+  ev,
+  answers,
+  isBusy,
+  hasBusySource: hasSource,
+  onChange,
+}: {
+  ev: ExtendedTableEvent;
+  answers: Record<string, Availability>;
+  isBusy: (cand: TableEventCandidate) => boolean;
+  hasBusySource: boolean;
+  onChange: (next: Record<string, Availability>) => void;
+}) {
+  const candidates = pollCandidates(ev);
+  const fillable = candidates.filter((c) => !answers[c.id] && !isBusy(c)).map((c) => c.id);
+  return (
+    <>
+      <ul className="list border-t border-base-300" aria-label="自分の回答">
+        {candidates.map((cand) => {
+          const label = candidateLabel(cand);
+          return (
+            <li key={cand.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-5">
+              <div className="min-w-0 flex-1 basis-40">
+                <div className="font-semibold tabular-nums">{label}</div>
+                {isBusy(cand) && <div className="mt-0.5 text-xs font-medium text-ink2">自分の予定あり</div>}
+              </div>
+              <Seg<Availability>
+                size="sm"
+                ariaLabel={`${label} の自分の返事`}
+                value={(answers[cand.id] ?? "") as Availability}
+                options={RSVP_OPTIONS}
+                onChange={(v) => onChange({ ...answers, [cand.id]: v })}
+              />
             </li>
           );
         })}
       </ul>
+      {fillable.length > 0 && (
+        <div className="flex border-t border-base-300 px-3 py-2 sm:px-4">
+          <button
+            type="button"
+            className="btn btn-quiet btn-sm ml-auto"
+            onClick={() => onChange({ ...answers, ...Object.fromEntries(fillable.map((id) => [id, "ok"])) })}
+          >
+            <IconCheck width={14} height={14} aria-hidden />
+            {hasSource ? "予定と重ならない候補をすべて◯" : "未回答をすべて◯"}
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
 
-      <footer className="border-t border-base-300 px-3 py-2 sm:px-4">
-        <button
-          type="button"
-          className="btn btn-quiet btn-sm"
-          aria-expanded={showAnswers}
-          onClick={() => setShowAnswers((v) => !v)}
+function PollMeta({
+  event,
+  state,
+  durMin,
+  onNavigate,
+}: {
+  event: ExtendedTableEvent;
+  state: State;
+  durMin: number;
+  onNavigate?: () => void;
+}) {
+  const tb = event.tableId ? state.tables[event.tableId] : undefined;
+  const sc = event.scenarioId ? state.scenarios[event.scenarioId] : undefined;
+  const organiser = state.users[event.createdBy];
+  return (
+    <div className="meta text-xs sm:text-sm">
+      {tb ? (
+        <Link
+          to={`/tables/${tb.id}`}
+          onClick={onNavigate}
+          className="hover:text-base-content hover:underline"
         >
-          {showAnswers ? "回答の内訳を閉じる" : "みんなの回答を見る"}
-        </button>
-      </footer>
+          {tb.name}
+        </Link>
+      ) : (
+        <span>個人の予定</span>
+      )}
+      {sc && (
+        <Link
+          to={`/scenarios/${sc.id}`}
+          onClick={onNavigate}
+          className="hover:text-base-content hover:underline"
+        >
+          {sc.title}
+        </Link>
+      )}
+      {organiser && <span>主催 {organiser.name}</span>}
+      {durMin > 0 && <span className="tabular-nums">長さ {fmtDur(durMin)}</span>}
+    </div>
+  );
+}
+
+/** カレンダー上部の「返事を待っている日程調整」。閲覧だけを出し、返事はモーダルで */
+function PollCard({
+  ev,
+  state,
+  onOpen,
+}: {
+  ev: ExtendedTableEvent;
+  state: State;
+  onOpen: (mode: Exclude<PollMode, "edit">) => void;
+}) {
+  const { check } = useBusyCheck();
+  const durMin = pollDurationMinutes(ev);
+  return (
+    <article className="surface" aria-label={ev.title}>
+      <header className="flex flex-wrap items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-bold leading-snug">{ev.title}</h3>
+          <div className="mt-0.5">
+            <PollMeta event={ev} state={state} durMin={durMin} />
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button type="button" className="btn btn-quiet btn-sm" onClick={() => onOpen("view")}>
+            詳しく見る
+          </button>
+          <button type="button" className="btn btn-sm" onClick={() => onOpen("answer")}>
+            回答する
+          </button>
+        </div>
+      </header>
+      <PollCandidateView ev={ev} state={state} compact isBusy={(c) => check(c.date, c.startTime, durMin)} />
     </article>
+  );
+}
+
+/** 調整中の日程詳細モーダル（カレンダー・卓詳細・ホームの共通ビュー） */
+export function PollDetailModal({
+  event,
+  state,
+  initialMode = "view",
+  onClose,
+  onConfirmed,
+}: {
+  event: ExtendedTableEvent;
+  state: State;
+  /** 「返事する」から開いたときは回答画面から始める */
+  initialMode?: Exclude<PollMode, "edit">;
+  onClose: () => void;
+  onConfirmed?: (cand: TableEventCandidate) => void;
+}) {
+  const { update } = useStore();
+  const { check, hasSource } = useBusyCheck();
+  const [mode, setMode] = useState<PollMode>(initialMode);
+  const durMin = pollDurationMinutes(event);
+  const isBusy = (c: TableEventCandidate) => check(c.date, c.startTime, durMin);
+  const canManage = canConfirmPoll(event, state);
+  const myAnswers = () =>
+    Object.fromEntries(
+      pollCandidates(event)
+        .filter((c) => c.responses[state.me])
+        .map((c) => [c.id, c.responses[state.me]!]),
+    ) as Record<string, Availability>;
+  const [answers, setAnswers] = useState<Record<string, Availability>>(myAnswers);
+  const answeredAll = pollCandidates(event).every((c) => c.responses[state.me]);
+  const editFormId = `poll-edit-${event.id}`;
+
+  function startAnswer() {
+    setAnswers(myAnswers());
+    setMode("answer");
+  }
+
+  function saveAnswers() {
+    update((s) => applyPollAnswers(s, event.id, answers));
+    setMode("view");
+  }
+
+  function confirm(cand: TableEventCandidate) {
+    update((s) => applyConfirmCandidate(s, event.id, cand));
+    onConfirmed?.(cand);
+    onClose();
+  }
+
+  // 段ごとにボタンへ key を付ける。付けないと、押した「編集」の DOM が同じ位置の送信ボタンに
+  // 使い回され、押した直後に編集フォームが送信されてしまう
+  const foot =
+    mode === "view" ? (
+      <>
+        <button key="close" type="button" className="btn btn-quiet" onClick={onClose}>
+          閉じる
+        </button>
+        {canManage && (
+          <button key="edit" type="button" className="btn" onClick={() => setMode("edit")}>
+            <IconPencil width={16} height={16} /> 編集
+          </button>
+        )}
+        <button key="answer" type="button" className="btn btn-primary" onClick={startAnswer}>
+          {answeredAll ? "回答を直す" : "回答する"}
+        </button>
+      </>
+    ) : mode === "answer" ? (
+      <>
+        <button key="answer-cancel" type="button" className="btn btn-quiet" onClick={() => setMode("view")}>
+          キャンセル
+        </button>
+        <button key="answer-save" type="button" className="btn btn-primary" onClick={saveAnswers}>
+          回答を保存
+        </button>
+      </>
+    ) : (
+      <>
+        <button key="edit-cancel" type="button" className="btn btn-quiet" onClick={() => setMode("view")}>
+          キャンセル
+        </button>
+        <button key="edit-save" type="submit" form={editFormId} className="btn btn-primary">
+          保存
+        </button>
+      </>
+    );
+
+  return (
+    <Modal
+      title={mode === "edit" ? "日程調整を編集" : mode === "answer" ? `${event.title}に回答` : event.title}
+      wide
+      onClose={onClose}
+      foot={foot}
+    >
+      {mode === "edit" ? (
+        <PollEditForm formId={editFormId} event={event} onSaved={() => setMode("view")} />
+      ) : (
+        <>
+          <PollMeta event={event} state={state} durMin={durMin} onNavigate={onClose} />
+          {mode === "view" && event.note && (
+            <p data-user-content className="mt-2 text-sm leading-relaxed text-ink2">
+              {event.note}
+            </p>
+          )}
+          <div className="-mx-5 mt-4 sm:-mx-6">
+            {mode === "view" ? (
+              <PollCandidateView
+                ev={event}
+                state={state}
+                isBusy={isBusy}
+                canConfirm={canManage}
+                onConfirm={confirm}
+              />
+            ) : (
+              <PollAnswerList
+                ev={event}
+                answers={answers}
+                isBusy={isBusy}
+                hasBusySource={hasSource}
+                onChange={setAnswers}
+              />
+            )}
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+/** 日程調整の編集（作った人・卓の作成者だけ）。作成と同じ部品で、長さは 1 つ・候補は開始だけ */
+function PollEditForm({
+  formId,
+  event,
+  onSaved,
+}: {
+  formId: string;
+  event: ExtendedTableEvent;
+  onSaved: () => void;
+}) {
+  const { update } = useStore();
+  const today = todayStr();
+  const [title, setTitle] = useState(event.title);
+  const [note, setNote] = useState(event.note ?? "");
+  const [durationMin, setDurationMin] = useState(pollDurationMinutes(event) || 180);
+  const [candidates, setCandidates] = useState<DraftCandidate[]>(() =>
+    pollCandidates(event).map((c) => ({ id: c.id, date: c.date, startTime: c.startTime })),
+  );
+  const [titleError, setTitleError] = useState<string | null>(null);
+  const [candidateError, setCandidateError] = useState<string | null>(null);
+  const changedAnswered = pollCandidates(event).some(
+    (c) =>
+      Object.keys(c.responses).length > 0 &&
+      !candidates.some((d) => d.id === c.id && d.date === c.date && d.startTime.trim() === c.startTime),
+  );
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!title.trim()) {
+      setTitleError("タイトルを入力してください。");
+      return;
+    }
+    const err = validateCandidates(candidates);
+    if (err) {
+      setCandidateError(err);
+      return;
+    }
+    update((s) => applyPollEdit(s, event.id, { title, note, durationMin, candidates }));
+    onSaved();
+  }
+
+  return (
+    <form id={formId} onSubmit={onSubmit} noValidate className="space-y-4">
+      <Field label="タイトル" noMargin>
+        <input
+          className={cx("input w-full", titleError && "input-error")}
+          value={title}
+          onChange={(e) => {
+            setTitle(e.target.value);
+            setTitleError(null);
+          }}
+        />
+        <FieldError text={titleError} />
+      </Field>
+      <Field label="長さ" noMargin>
+        <DurationPicker durationMin={durationMin} onChange={setDurationMin} />
+      </Field>
+      <CandidateEditor
+        candidates={candidates}
+        onChange={(next) => {
+          setCandidates(next);
+          setCandidateError(null);
+        }}
+        today={today}
+        error={candidateError}
+      />
+      {changedAnswered && (
+        <p className="text-sm text-ink2">日時を変えた候補と消した候補の回答はなくなります。</p>
+      )}
+      <Field label="メモ（任意）" noMargin>
+        <input className="input w-full" value={note} onChange={(e) => setNote(e.target.value)} />
+      </Field>
+    </form>
   );
 }
 
@@ -637,15 +1044,13 @@ function EntryCard({ entry, state }: { entry: GridEntry; state: State }) {
   const ev = entry.ev;
   const tb = ev.tableId ? state.tables[ev.tableId] : undefined;
   const sc = ev.scenarioId ? state.scenarios[ev.scenarioId] : undefined;
-  const start = entry.kind === "poll" ? entry.cand.startTime : ev.startTime;
-  const end = entry.kind === "poll" ? entry.cand.endTime : ev.endTime;
   return (
     <span className="block">
       <span className="block font-bold leading-snug">{ev.title}</span>
       <span className="meta mt-0.5 text-xs">
         {entry.kind === "poll" && <span>日程調整の候補</span>}
         <span className="tabular-nums">
-          {start}–{end}
+          {entry.kind === "poll" ? `${entry.cand.startTime} 開始` : `${ev.startTime}–${ev.endTime}`}
         </span>
         <span>{tb ? tb.name : "個人の予定"}</span>
         {sc && <span>{sc.title}</span>}
@@ -654,7 +1059,7 @@ function EntryCard({ entry, state }: { entry: GridEntry; state: State }) {
   );
 }
 
-function MonthCalendar({
+const MonthCalendar = memo(function MonthCalendar({
   ym,
   today,
   selectedDay,
@@ -668,8 +1073,8 @@ function MonthCalendar({
   logs,
   state,
   onOpenEvent,
+  onOpenPoll,
   onOpenSync,
-  composer,
   onAddOnDay,
 }: {
   ym: string;
@@ -685,17 +1090,24 @@ function MonthCalendar({
   logs: Log[];
   state: State;
   onOpenEvent: (ev: ExtendedTableEvent) => void;
+  onOpenPoll: (ev: ExtendedTableEvent) => void;
   onOpenSync: () => void;
-  composer: ReactNode;
   onAddOnDay: (mode: ComposerState["mode"], date: string) => void;
 }) {
   const nav = useNavigate();
+  const gridRef = useRef<HTMLDivElement>(null);
+  const pendingFocusDay = useRef<string | null>(null);
   const [year, month] = ym.split("-").map(Number);
   const cells = useMemo(() => monthCells(ym), [ym]);
+  const selectedInMonth = selectedDay.startsWith(`${ym}-`);
   const entriesByDate = useMemo(() => {
     const inFilter = (tableId?: string) => tableFilter === "all" || tableId === tableFilter;
     const map = new Map<string, GridEntry[]>();
-    const push = (d: string, e: GridEntry) => map.set(d, [...(map.get(d) ?? []), e]);
+    const push = (d: string, e: GridEntry) => {
+      const arr = map.get(d);
+      if (arr) arr.push(e);
+      else map.set(d, [e]);
+    };
     for (const ev of events) if (inFilter(ev.tableId)) push(ev.date, { kind: "event", key: ev.id, ev });
     for (const ev of polls) {
       if (!inFilter(ev.tableId)) continue;
@@ -716,12 +1128,48 @@ function MonthCalendar({
 
   const openEntry = (e: GridEntry) => {
     if (e.kind === "event") onOpenEvent(e.ev);
+    else if (e.kind === "poll") onOpenPoll(e.ev);
     else if (e.kind === "log") nav({ to: `/sessions/${e.log.id}` });
   };
 
   const dayEntries = entriesByDate.get(selectedDay) ?? [];
   const holiday = getJapaneseHolidayName(selectedDay);
   const isCurrentMonth = ym === today.slice(0, 7);
+
+  useEffect(() => {
+    const targetDay = pendingFocusDay.current;
+    if (!targetDay) return;
+    pendingFocusDay.current = null;
+    requestAnimationFrame(() => {
+      gridRef.current?.querySelector<HTMLButtonElement>(`[data-calendar-day="${targetDay}"]`)?.focus();
+    });
+  }, [ym, selectedDay]);
+
+  const moveCalendarFocus = (targetDay: string) => {
+    pendingFocusDay.current = targetDay;
+    const targetYm = targetDay.slice(0, 7);
+    if (targetYm !== ym) onChangeMonth(targetYm);
+    onSelectDay(targetDay);
+  };
+
+  const handleDayKeyDown = (e: React.KeyboardEvent, dayStr: string, col: number, day: number) => {
+    let nextDay: string | null = null;
+    if (e.key === "ArrowLeft") nextDay = addDays(dayStr, -1);
+    else if (e.key === "ArrowRight") nextDay = addDays(dayStr, 1);
+    else if (e.key === "ArrowUp") nextDay = addDays(dayStr, -7);
+    else if (e.key === "ArrowDown") nextDay = addDays(dayStr, 7);
+    else if (e.key === "Home") nextDay = addDays(dayStr, -col);
+    else if (e.key === "End") nextDay = addDays(dayStr, 6 - col);
+    else if (e.key === "PageUp" || e.key === "PageDown") {
+      const targetYm = shiftYearMonth(ym, e.key === "PageUp" ? -1 : 1);
+      const [ny, nm] = targetYm.split("-").map(Number);
+      const maxD = new Date(Date.UTC(ny!, nm!, 0)).getUTCDate();
+      nextDay = `${targetYm}-${String(Math.min(day, maxD)).padStart(2, "0")}`;
+    }
+    if (!nextDay) return;
+    e.preventDefault();
+    moveCalendarFocus(nextDay);
+  };
 
   return (
     <section aria-labelledby="sec-month">
@@ -732,7 +1180,7 @@ function MonthCalendar({
         <div className="flex items-center">
           <button
             type="button"
-            className="icon-btn"
+            className="icon-btn size-9"
             aria-label="前の月"
             onClick={() => onChangeMonth(shiftYearMonth(ym, -1))}
           >
@@ -740,7 +1188,7 @@ function MonthCalendar({
           </button>
           <button
             type="button"
-            className="icon-btn"
+            className="icon-btn size-9"
             aria-label="次の月"
             onClick={() => onChangeMonth(shiftYearMonth(ym, 1))}
           >
@@ -784,7 +1232,7 @@ function MonthCalendar({
             </div>
           ))}
         </div>
-        <div className="grid grid-cols-7">
+        <div ref={gridRef} className="grid grid-cols-7">
           {cells.map((day, idx) => {
             const col = idx % 7;
             const edge = cx(col !== 6 && "border-r", idx < cells.length - 7 && "border-b", "border-base-300");
@@ -796,6 +1244,7 @@ function MonthCalendar({
             const holidayName = getJapaneseHolidayName(dayStr);
             const isToday = dayStr === today;
             const isSelected = dayStr === selectedDay;
+            const isTabTarget = selectedInMonth ? isSelected : day === 1;
             const has = (k: GridEntry["kind"]) => entries.some((e) => e.kind === k);
             const alignRight = col >= 4;
             return (
@@ -810,11 +1259,14 @@ function MonthCalendar({
                 {/* マス全体が「この日を選ぶ」ボタン。予定名のボタンはその上に重ねる */}
                 <button
                   type="button"
+                  data-calendar-day={dayStr}
+                  tabIndex={isTabTarget ? 0 : -1}
                   aria-pressed={isSelected}
                   aria-label={`${fmtDate(dayStr)}${holidayName ? ` ${holidayName}` : ""}${
                     entries.length ? `、${entries.map(entryLabel).join("、")}` : ""
                   }`}
                   onClick={() => onSelectDay(dayStr)}
+                  onKeyDown={(e) => handleDayKeyDown(e, dayStr, col, day)}
                   className="absolute inset-0 rounded-none"
                 />
                 <div className="pointer-events-none relative flex min-w-0 flex-col items-center gap-1 sm:items-stretch">
@@ -852,7 +1304,7 @@ function MonthCalendar({
                         <button
                           type="button"
                           tabIndex={-1}
-                          onClick={() => (e.kind === "poll" ? onSelectDay(dayStr) : openEntry(e))}
+                          onClick={() => openEntry(e)}
                           className={cx(
                             "block w-full truncate rounded px-1.5 py-0.5 text-left text-xs leading-tight",
                             e.kind === "event" &&
@@ -895,7 +1347,7 @@ function MonthCalendar({
             {fmtDate(selectedDay)}
             {holiday && <span className="ml-2 text-sm font-normal text-error">{holiday}</span>}
           </h3>
-          {!composer && selectedDay >= today && (
+          {selectedDay >= today && (
             <>
               <button
                 type="button"
@@ -914,9 +1366,7 @@ function MonthCalendar({
             </>
           )}
         </div>
-        {composer ? (
-          <div className="border-t border-base-300 px-4 py-4 sm:px-5">{composer}</div>
-        ) : dayEntries.length === 0 ? (
+        {dayEntries.length === 0 ? (
           <p className="border-t border-base-300 px-4 py-3 text-sm text-ink2 sm:px-5">
             予定も記録もありません。
           </p>
@@ -929,38 +1379,31 @@ function MonthCalendar({
                 e.kind === "event"
                   ? `${e.ev.startTime}–${e.ev.endTime}`
                   : e.kind === "poll"
-                    ? `${e.cand.startTime}–${e.cand.endTime}`
+                    ? `${e.cand.startTime} 開始`
                     : fmtDur(sessionPlayMinutes(e.log));
               const title = e.kind === "log" ? e.log.title : e.ev.title;
               const tableId = e.kind === "log" ? e.log.tableId : e.ev.tableId;
-              const body = (
-                <>
-                  <span className={cx("size-2 shrink-0 rounded-full", dot)} aria-hidden />
-                  <span className="w-24 shrink-0 tabular-nums text-ink2">{when}</span>
-                  <span className="min-w-0 flex-1 truncate font-semibold">
-                    {title}
-                    {e.kind === "poll" && <span className="ml-2 text-xs font-normal text-ink2">候補日</span>}
-                  </span>
-                  {tableId && state.tables[tableId] && (
-                    <span className="hidden shrink-0 text-xs text-ink2 sm:inline">
-                      {state.tables[tableId]!.name}
-                    </span>
-                  )}
-                </>
-              );
               return (
                 <li key={e.key}>
-                  {e.kind === "poll" ? (
-                    <div className="flex items-center gap-3 px-4 py-2.5 sm:px-5">{body}</div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => openEntry(e)}
-                      className="row-interactive flex w-full items-center gap-3 px-4 py-2.5 text-left sm:px-5"
-                    >
-                      {body}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => openEntry(e)}
+                    className="row-interactive flex w-full items-center gap-3 px-4 py-2.5 text-left sm:px-5"
+                  >
+                    <span className={cx("size-2 shrink-0 rounded-full", dot)} aria-hidden />
+                    <span className="w-24 shrink-0 tabular-nums text-ink2">{when}</span>
+                    <span className="min-w-0 flex-1 truncate font-semibold">
+                      {title}
+                      {e.kind === "poll" && (
+                        <span className="ml-2 text-xs font-normal text-ink2">候補日</span>
+                      )}
+                    </span>
+                    {tableId && state.tables[tableId] && (
+                      <span className="hidden shrink-0 text-xs text-ink2 sm:inline">
+                        {state.tables[tableId]!.name}
+                      </span>
+                    )}
+                  </button>
                 </li>
               );
             })}
@@ -969,7 +1412,7 @@ function MonthCalendar({
       </div>
     </section>
   );
-}
+});
 
 /* ============================================================
  * 予定の詳細（確定した予定）
@@ -1076,81 +1519,6 @@ export function EventDetailModal({
 }
 
 /* ============================================================
- * 予定の追加と日程調整の作成（その場で開くパネル。モーダルにしない）
- * ============================================================ */
-
-function Composer({
-  bare,
-  mode,
-  date,
-  today,
-  tableOptions,
-  scenarioOptions,
-  defaultTableId,
-  onClose,
-  onCreated,
-}: {
-  /** 面の中に置くとき（その日の欄）は面を作らない */
-  bare: boolean;
-  mode: ComposerState["mode"];
-  date: string;
-  today: string;
-  tableOptions: SelectOption[];
-  scenarioOptions: SelectOption[];
-  defaultTableId: string;
-  onClose: () => void;
-  onCreated: (date: string) => void;
-}) {
-  const formId = mode === "confirmed" ? "add-event-form" : "add-poll-form";
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    ref.current?.querySelector<HTMLInputElement>("input")?.focus({ preventScroll: true });
-  }, []);
-  return (
-    <div
-      ref={ref}
-      role="region"
-      aria-label={mode === "confirmed" ? "予定を追加" : "日程調整をはじめる"}
-      className={cx(!bare && "surface p-4 sm:p-5")}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-      }}
-    >
-      {!bare && <PanelHead title={mode === "confirmed" ? "予定を追加" : "日程調整をはじめる"} />}
-      {mode === "confirmed" ? (
-        <ConfirmedEventForm
-          formId={formId}
-          tableOptions={tableOptions}
-          scenarioOptions={scenarioOptions}
-          defaultTableId={defaultTableId}
-          selectedDate={date}
-          onCreated={onCreated}
-        />
-      ) : (
-        <PollForm
-          formId={formId}
-          tableOptions={tableOptions}
-          scenarioOptions={scenarioOptions}
-          defaultTableId={defaultTableId}
-          today={today}
-          firstDate={date > today ? date : undefined}
-          onCreated={onCreated}
-        />
-      )}
-      <div className="mt-5 flex flex-wrap justify-end gap-2">
-        <button type="button" className="btn btn-quiet" onClick={onClose}>
-          キャンセル [Esc]
-        </button>
-        <button type="submit" form={formId} className="btn btn-primary">
-          {mode === "confirmed" ? "予定を登録" : "日程調整を作成"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================
  * 入力フォーム
  * ============================================================ */
 
@@ -1192,13 +1560,12 @@ function DurationPicker({
       </div>
       {custom && (
         <div className="mt-2 flex items-center gap-2">
-          <input
-            type="number"
+          <NumberInput
             aria-label="予定時間（時間）"
             min={0}
             max={24}
-            inputMode="numeric"
-            className="input input-sm w-20 tabular-nums"
+            size="sm"
+            className="w-32"
             value={hours}
             onChange={(e) => {
               const raw = Number(e.target.value);
@@ -1252,7 +1619,6 @@ function ConfirmedEventForm({
     register,
     control,
     handleSubmit,
-    watch,
     formState: { errors },
   } = useForm<ConfirmedFormValues>({
     mode: "onTouched",
@@ -1267,8 +1633,8 @@ function ConfirmedEventForm({
     },
   });
 
-  const startTimeVal = watch("startTime");
-  const durationVal = watch("durationMin");
+  const startTimeVal = useWatch({ control, name: "startTime" });
+  const durationVal = useWatch({ control, name: "durationMin" });
   const computedEnd = computeEndTime(startTimeVal, durationVal);
 
   function onSubmit(values: ConfirmedFormValues) {
@@ -1313,12 +1679,12 @@ function ConfirmedEventForm({
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_8rem]">
         <Field label="日付" noMargin>
-          <input
-            type="date"
+          <DateInput
             {...register("date", {
               validate: (v) => (VALID_DATE.test(v) ? true : "日付を選んでください。"),
             })}
-            className={cx("input w-full", errors.date && "input-error")}
+            className="w-full"
+            invalid={Boolean(errors.date)}
           />
           <FieldError text={errors.date?.message} />
         </Field>
@@ -1404,11 +1770,108 @@ interface DraftCandidate {
   startTime: string;
 }
 
+function validateCandidates(candidates: readonly DraftCandidate[]): string | null {
+  if (candidates.length === 0) return "候補日を1件以上追加してください。";
+  for (const cand of candidates) {
+    if (!VALID_DATE.test(cand.date)) return "すべての候補日の日付を選んでください。";
+    if (!VALID_TIME.test(cand.startTime.trim())) return "候補の開始時刻を「21:00」の形で入力してください。";
+  }
+  return null;
+}
+
+/** 候補日の入力（作成・編集で共用）。長さは別の欄で 1 つだけ決め、候補ごとには開始だけを入れる */
+function CandidateEditor({
+  candidates,
+  onChange,
+  today,
+  error,
+}: {
+  candidates: DraftCandidate[];
+  onChange: (next: DraftCandidate[]) => void;
+  today: string;
+  error: string | null;
+}) {
+  const quickDates = useMemo(() => quickWeekendDates(today), [today]);
+  const lastStart = (() => {
+    const t = candidates[candidates.length - 1]?.startTime.trim() ?? "";
+    return VALID_TIME.test(t) ? t : "21:00";
+  })();
+
+  function addDate(dateStr: string) {
+    if (candidates.some((c) => c.date === dateStr)) return;
+    onChange(
+      [...candidates, { id: `cand_${uid()}`, date: dateStr, startTime: lastStart }].sort((a, b) =>
+        a.date.localeCompare(b.date),
+      ),
+    );
+  }
+
+  function addNextDay() {
+    const last = candidates[candidates.length - 1];
+    const baseDate = last && VALID_DATE.test(last.date) ? last.date : today;
+    onChange([...candidates, { id: `cand_${uid()}`, date: addDays(baseDate, 1), startTime: lastStart }]);
+  }
+
+  return (
+    <fieldset>
+      <legend className="mb-2 text-sm font-semibold text-base-content/90">候補（日付と開始時刻）</legend>
+      <ul className="space-y-2">
+        {candidates.map((cand, index) => (
+          <li key={cand.id} className="flex items-center gap-2">
+            <DateInput
+              aria-label={`候補日 ${index + 1}`}
+              className="min-w-0 flex-1"
+              value={cand.date}
+              onChange={(e) =>
+                onChange(candidates.map((c) => (c.id === cand.id ? { ...c, date: e.target.value } : c)))
+              }
+            />
+            <input
+              aria-label={`候補開始時刻 ${index + 1}`}
+              inputMode="numeric"
+              className="input w-24 shrink-0 tabular-nums"
+              value={cand.startTime}
+              onChange={(e) =>
+                onChange(candidates.map((c) => (c.id === cand.id ? { ...c, startTime: e.target.value } : c)))
+              }
+              placeholder="21:00"
+            />
+            <button
+              type="button"
+              disabled={candidates.length <= 1}
+              aria-label={`候補日 ${index + 1} を削除`}
+              className="icon-btn disabled:opacity-30"
+              onClick={() => onChange(candidates.filter((c) => c.id !== cand.id))}
+            >
+              <IconX width={16} height={16} />
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-xs text-ink2">追加:</span>
+        <button type="button" className="btn btn-quiet btn-xs" onClick={() => addDate(quickDates.thisSat)}>
+          今週土曜
+        </button>
+        <button type="button" className="btn btn-quiet btn-xs" onClick={() => addDate(quickDates.thisSun)}>
+          今週日曜
+        </button>
+        <button type="button" className="btn btn-quiet btn-xs" onClick={() => addDate(quickDates.nextSat)}>
+          来週土曜
+        </button>
+        <button type="button" className="btn btn-quiet btn-xs" onClick={addNextDay}>
+          <IconPlus width={12} height={12} /> 翌日
+        </button>
+      </div>
+      <FieldError text={error} />
+    </fieldset>
+  );
+}
+
 interface PollFormValues {
   tableId: string;
   scenarioId: string;
   title: string;
-  startTime: string;
   durationMin: number;
   note: string;
 }
@@ -1431,9 +1894,8 @@ function PollForm({
   onCreated: (date: string) => void;
 }) {
   const { update } = useStore();
-  const quickDates = useMemo(() => quickWeekendDates(today), [today]);
   const [candidates, setCandidates] = useState<DraftCandidate[]>(() => [
-    { id: `cand_${uid()}`, date: firstDate ?? quickDates.thisSat, startTime: "21:00" },
+    { id: `cand_${uid()}`, date: firstDate ?? quickWeekendDates(today).thisSat, startTime: "21:00" },
   ]);
   const [candidateError, setCandidateError] = useState<string | null>(null);
 
@@ -1441,7 +1903,6 @@ function PollForm({
     register,
     control,
     handleSubmit,
-    watch,
     formState: { errors },
   } = useForm<PollFormValues>({
     mode: "onTouched",
@@ -1449,82 +1910,26 @@ function PollForm({
       tableId: defaultTableId,
       scenarioId: "",
       title: "",
-      startTime: "21:00",
       durationMin: 180,
       note: "",
     },
   });
 
-  const startTimeVal = watch("startTime");
-  const durationVal = watch("durationMin");
-  const prevStartRef = useRef("21:00");
-
-  useEffect(() => {
-    const trimmed = startTimeVal.trim();
-    if (!VALID_TIME.test(trimmed) || trimmed === prevStartRef.current) return;
-    const prevStart = prevStartRef.current;
-    prevStartRef.current = trimmed;
-    setCandidates((prev) => prev.map((c) => (c.startTime === prevStart ? { ...c, startTime: trimmed } : c)));
-  }, [startTimeVal]);
-
-  const defaultStart = VALID_TIME.test(startTimeVal.trim()) ? startTimeVal.trim() : "21:00";
-
-  function addPresetDate(dateStr: string) {
-    setCandidates((prev) =>
-      prev.some((c) => c.date === dateStr)
-        ? prev
-        : [...prev, { id: `cand_${uid()}`, date: dateStr, startTime: defaultStart }].sort((a, b) =>
-            a.date.localeCompare(b.date),
-          ),
-    );
-    setCandidateError(null);
-  }
-
-  function addNextDayCandidate() {
-    setCandidates((prev) => {
-      const last = prev[prev.length - 1];
-      const baseDate = last && VALID_DATE.test(last.date) ? last.date : today;
-      return [
-        ...prev,
-        { id: `cand_${uid()}`, date: addDays(baseDate, 1), startTime: last?.startTime ?? defaultStart },
-      ];
-    });
-    setCandidateError(null);
-  }
-
-  function updateCandidate(id: string, patch: Partial<DraftCandidate>) {
-    setCandidates((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
-    setCandidateError(null);
-  }
-
-  function removeCandidate(id: string) {
-    setCandidates((prev) => (prev.length > 1 ? prev.filter((c) => c.id !== id) : prev));
-    setCandidateError(null);
-  }
-
   function onSubmit(values: PollFormValues) {
-    if (candidates.length === 0) {
-      setCandidateError("候補日を1件以上追加してください。");
+    const err = validateCandidates(candidates);
+    if (err) {
+      setCandidateError(err);
       return;
     }
-    for (const cand of candidates) {
-      if (!VALID_DATE.test(cand.date)) {
-        setCandidateError("すべての候補日の日付を選んでください。");
-        return;
-      }
-      if (!VALID_TIME.test(cand.startTime.trim())) {
-        setCandidateError("候補日の開始時刻を「21:00」の形で入力してください。");
-        return;
-      }
-    }
-
-    const builtCandidates: TableEventCandidate[] = candidates.map((c) => ({
-      id: c.id,
-      date: c.date,
-      startTime: c.startTime.trim(),
-      endTime: computeEndTime(c.startTime.trim(), values.durationMin),
-      responses: {},
-    }));
+    const builtCandidates: TableEventCandidate[] = candidates
+      .map((c) => ({
+        id: c.id,
+        date: c.date,
+        startTime: c.startTime.trim(),
+        endTime: computeEndTime(c.startTime.trim(), values.durationMin),
+        responses: {},
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
     const first = builtCandidates[0]!;
     const id = `ev_${uid()}`;
     const nextPoll: ExtendedTableEvent = {
@@ -1598,104 +2003,33 @@ function PollForm({
         </Field>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[8rem_1fr]">
-        <Field label="開始" noMargin>
-          <input
-            {...register("startTime", {
-              validate: (v) => (VALID_TIME.test(v.trim()) ? true : "「21:00」の形で入力してください。"),
-            })}
-            inputMode="numeric"
-            className={cx("input w-full tabular-nums", errors.startTime && "input-error")}
-            placeholder="21:00"
-          />
-          <FieldError text={errors.startTime?.message} />
-        </Field>
-        <Field label="長さ" noMargin>
-          <Controller
-            control={control}
-            name="durationMin"
-            rules={{
-              validate: (v) =>
-                Number.isFinite(v) && v >= 15 && v <= 1440 ? true : "15分〜24時間で指定してください。",
-            }}
-            render={({ field }) => (
-              <DurationPicker
-                durationMin={field.value}
-                onChange={(next) => field.onChange(next)}
-                error={errors.durationMin?.message}
-              />
-            )}
-          />
-        </Field>
-      </div>
+      <Field label="長さ" noMargin>
+        <Controller
+          control={control}
+          name="durationMin"
+          rules={{
+            validate: (v) =>
+              Number.isFinite(v) && v >= 15 && v <= 1440 ? true : "15分〜24時間で指定してください。",
+          }}
+          render={({ field }) => (
+            <DurationPicker
+              durationMin={field.value}
+              onChange={(next) => field.onChange(next)}
+              error={errors.durationMin?.message}
+            />
+          )}
+        />
+      </Field>
 
-      <fieldset>
-        <legend className="mb-2 text-sm font-semibold text-base-content/90">候補日</legend>
-        <ul className="space-y-2">
-          {candidates.map((cand, index) => {
-            const candEnd = computeEndTime(cand.startTime, durationVal);
-            return (
-              <li key={cand.id} className="flex items-center gap-2">
-                <input
-                  type="date"
-                  aria-label={`候補日 ${index + 1}`}
-                  className="input min-w-0 flex-1"
-                  value={cand.date}
-                  onChange={(e) => updateCandidate(cand.id, { date: e.target.value })}
-                />
-                <input
-                  aria-label={`候補開始時刻 ${index + 1}`}
-                  inputMode="numeric"
-                  className="input w-20 shrink-0 tabular-nums"
-                  value={cand.startTime}
-                  onChange={(e) => updateCandidate(cand.id, { startTime: e.target.value })}
-                  placeholder="21:00"
-                />
-                <span className="hidden w-16 shrink-0 text-xs text-ink2 tabular-nums sm:inline">
-                  {candEnd ? `〜${candEnd}` : ""}
-                </span>
-                <button
-                  type="button"
-                  disabled={candidates.length <= 1}
-                  aria-label={`候補日 ${index + 1} を削除`}
-                  className="icon-btn disabled:opacity-30"
-                  onClick={() => removeCandidate(cand.id)}
-                >
-                  <IconX width={16} height={16} />
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          <span className="mr-1 text-xs text-ink2">追加:</span>
-          <button
-            type="button"
-            className="btn btn-quiet btn-xs"
-            onClick={() => addPresetDate(quickDates.thisSat)}
-          >
-            今週土曜
-          </button>
-          <button
-            type="button"
-            className="btn btn-quiet btn-xs"
-            onClick={() => addPresetDate(quickDates.thisSun)}
-          >
-            今週日曜
-          </button>
-          <button
-            type="button"
-            className="btn btn-quiet btn-xs"
-            onClick={() => addPresetDate(quickDates.nextSat)}
-          >
-            来週土曜
-          </button>
-          <button type="button" className="btn btn-quiet btn-xs" onClick={addNextDayCandidate}>
-            <IconPlus width={12} height={12} /> 翌日
-          </button>
-        </div>
-        <FieldError text={candidateError} />
-      </fieldset>
+      <CandidateEditor
+        candidates={candidates}
+        onChange={(next) => {
+          setCandidates(next);
+          setCandidateError(null);
+        }}
+        today={today}
+        error={candidateError}
+      />
 
       <Field label="メモ（任意）" noMargin>
         <input {...register("note")} className="input w-full" placeholder="例: 探索者の調整や持ち物の連絡" />
@@ -1709,31 +2043,26 @@ function PollForm({
  *   普段使わないのでダイアログにしまう。リンクを先に出し、使い方はその下に。
  * ============================================================ */
 
-const GOOGLE_IMPORT_URL = "https://calendar.google.com/calendar/u/0/r/settings/export";
+/* ============================================================
+ * カレンダー連携モーダル（購読リンク配信 + Google カレンダー予定同期）
+ * ============================================================ */
 
-function CalendarSyncDialog({
-  events,
-  polls,
-  onClose,
-}: {
-  events: ExtendedTableEvent[];
-  polls: ExtendedTableEvent[];
-  onClose: () => void;
-}) {
+function CalendarSyncDialog({ onClose }: { onClose: () => void }) {
   const { state, update, authUser } = useStore();
   const today = todayStr();
   const [manualDate, setManualDate] = useState(today);
   const [feedBusy, setFeedBusy] = useState(false);
   const [feedError, setFeedError] = useState<string | null>(null);
   const feedToken = state.prefs.calendarFeedToken;
-  const [busyError, setBusyError] = useState<string | null>(null);
-  const [marked, setMarked] = useState(false);
+  const googleBusy = state.prefs.googleBusy;
   const busyDates = useMemo(
     () => [...new Set(state.prefs.busyDates ?? [])].filter((d) => d >= today).sort(),
     [state.prefs.busyDates, today],
   );
   const busySet = new Set(state.prefs.busyDates ?? []);
-  const links = authUser && feedToken ? calendarSubscribeLinks(feedUrl(location.origin, feedToken)) : null;
+  const origin = typeof location !== "undefined" ? location.origin : "";
+  const activeToken = authUser ? feedToken : "demo";
+  const links = activeToken ? calendarSubscribeLinks(feedUrl(origin, activeToken)) : null;
 
   /** 購読リンクを作る（作り直すときは古いリンクを無効にする） */
   async function createFeed() {
@@ -1754,72 +2083,14 @@ function CalendarSyncDialog({
     }
   }
 
-  function saveFile() {
-    const text = buildIcsCalendar(
-      events.map((ev) => {
-        const tb = ev.tableId ? state.tables[ev.tableId] : undefined;
-        return {
-          uid: `${ev.id}@takufu`,
-          title: tb ? `[${tb.name}] ${ev.title}` : ev.title,
-          date: ev.date,
-          startTime: ev.startTime,
-          endTime: ev.endTime,
-          description: ev.note,
-        };
-      }),
-      "卓譜",
-    );
-    downloadIcs("takufu.ics", text);
-  }
-
   function toggleBusy(date: string) {
     if (!VALID_DATE.test(date)) return;
-    setBusyError(null);
     update((s) => {
       const next = new Set(s.prefs.busyDates ?? []);
       if (next.has(date)) next.delete(date);
       else next.add(date);
       s.prefs.busyDates = [...next].sort();
     });
-  }
-
-  async function importFile(e: ChangeEvent<HTMLInputElement>) {
-    const input = e.currentTarget;
-    const file = input.files?.[0];
-    if (!file) return;
-    try {
-      const parsed = parseBusyDates(await file.text());
-      if (parsed.length === 0) {
-        setBusyError(
-          "このファイルから予定の日付を読み取れませんでした。カレンダーアプリから書き出したファイルを選んでください。",
-        );
-        return;
-      }
-      setBusyError(null);
-      update((s) => {
-        s.prefs.busyDates = [...new Set([...(s.prefs.busyDates ?? []), ...parsed])].sort();
-      });
-    } catch {
-      setBusyError("ファイルを読み込めませんでした。");
-    } finally {
-      input.value = "";
-    }
-  }
-
-  function markFreeCandidatesOk() {
-    const ids = new Set(polls.map((ev) => ev.id));
-    update((s) => {
-      for (const ev of Object.values(s.events ?? {})) {
-        if (!ids.has(ev.id)) continue;
-        if (ev.candidates && ev.candidates.length > 0) {
-          for (const c of ev.candidates)
-            if (!busySet.has(c.date) && !c.responses[s.me]) c.responses[s.me] = "ok";
-        } else if (!busySet.has(ev.date) && !ev.responses[s.me]) {
-          ev.responses[s.me] = "ok";
-        }
-      }
-    });
-    setMarked(true);
   }
 
   const linkCls = "font-semibold text-base-content underline underline-offset-2";
@@ -1842,7 +2113,9 @@ function CalendarSyncDialog({
         {links ? (
           <>
             <p className="mt-1 text-sm text-ink2">
-              このリンクをカレンダーアプリに登録すると、確定した予定が自動で反映されます。
+              {authUser
+                ? "このリンクをカレンダーアプリに登録すると、確定した予定が自動で反映されます。"
+                : "お試し中はサンプルの予定を配信するリンクです。ログインすると自分専用のリンクを作れます。"}
             </p>
             <div className="mt-3">
               <CopyBox text={links.feed} />
@@ -1864,20 +2137,18 @@ function CalendarSyncDialog({
                 で開いてから押してください。
               </li>
             </ol>
-            <p className="mt-4 text-sm text-ink2">
-              リンクを知っている人は誰でも予定を見られます。他の人に知られたときは
-              <button type="button" className={linkCls} onClick={createFeed} disabled={feedBusy}>
-                リンクを作り直す
-              </button>
-              と、古いリンクは使えなくなります。リンクを登録できないアプリには、
-              <button type="button" className={linkCls} onClick={saveFile}>
-                予定をファイルに保存
-              </button>
-              して取り込みます。
-            </p>
+            {authUser && (
+              <p className="mt-4 text-sm text-ink2">
+                リンクを知っている人は誰でも予定を見られます。他の人に知られたときは
+                <button type="button" className={linkCls} onClick={createFeed} disabled={feedBusy}>
+                  リンクを作り直す
+                </button>
+                と、古いリンクは使えなくなります。
+              </p>
+            )}
             <FieldError text={feedError} />
           </>
-        ) : authUser ? (
+        ) : (
           <>
             <p className="mt-1 text-sm text-ink2">
               リンクをカレンダーアプリに登録すると、卓譜で確定した予定が自動で反映されます。
@@ -1887,44 +2158,6 @@ function CalendarSyncDialog({
             </button>
             <FieldError text={feedError} />
           </>
-        ) : (
-          <>
-            <p className="mt-1 text-sm text-ink2">
-              サインインすると、予定が自動で反映されるリンクを作れます。お試し中は、確定した予定をファイルに保存してカレンダーアプリに取り込みます。
-            </p>
-            <button
-              type="button"
-              className="btn btn-sm mt-3"
-              onClick={saveFile}
-              disabled={events.length === 0}
-            >
-              <IconDownload width={15} height={15} /> 予定をファイルに保存
-            </button>
-            <ol className="mt-4 space-y-3 text-sm leading-relaxed">
-              <li>
-                <b className="block">Google カレンダー</b>
-                パソコンで
-                <a
-                  href={GOOGLE_IMPORT_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={cx(linkCls, "mx-0.5")}
-                >
-                  Google カレンダーの取り込み画面
-                  <IconExternal width={12} height={12} className="ml-0.5 inline" aria-hidden />
-                </a>
-                を開き、保存したファイルを選んで「インポート」を押します。
-              </li>
-              <li>
-                <b className="block">Apple カレンダー（Mac）</b>
-                保存したファイルを開き、追加先のカレンダーを選んで「OK」を押します。
-              </li>
-              <li>
-                <b className="block">Apple カレンダー（iPhone）</b>
-                保存したファイルを「ファイル」アプリでタップし、「すべてを追加」を押します。
-              </li>
-            </ol>
-          </>
         )}
       </section>
 
@@ -1932,29 +2165,26 @@ function CalendarSyncDialog({
         <h3 id="sync-in" className="font-bold">
           自分の予定と照らし合わせる
         </h3>
-        <p className="mt-1 text-sm text-ink2">
-          予定のある日は、日程調整の候補日に「自分の予定あり」と出ます。読み取るのは日付だけで、予定の内容は保存しません。
-        </p>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <label className="btn btn-sm cursor-pointer">
-            <IconUpload width={15} height={15} /> 自分のカレンダーのファイルを読み込む
-            <input type="file" accept=".ics,text/calendar" className="sr-only" onChange={importFile} />
-          </label>
+        <p className="mt-1 text-sm text-ink2">自分の予定と重なる候補には「自分の予定あり」と出ます。</p>
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          <ProviderIcon provider="google" size={18} />
+          <span>
+            Google カレンダー:{" "}
+            {googleBusy
+              ? `${googleBusy.calendars.filter((c) => c.on).length}件のカレンダーの空き時間を使用中`
+              : "使っていません"}
+          </span>
+          <Link to="/settings#google-calendar" onClick={onClose} className={linkCls}>
+            設定で変える
+          </Link>
         </div>
-        <p className="mt-2 text-xs leading-relaxed text-ink2">
-          Google カレンダーのファイルは
-          <a href={GOOGLE_IMPORT_URL} target="_blank" rel="noreferrer" className={cx(linkCls, "mx-0.5")}>
-            書き出し画面
-          </a>
-          の「エクスポート」から保存します。
-        </p>
-        <FieldError text={busyError} />
 
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <input
-            type="date"
+        <h4 className="mt-5 text-sm font-semibold">予定のある日を手で入れる</h4>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <DateInput
             aria-label="予定のある日"
-            className="input input-sm"
+            size="sm"
+            className="w-44"
             value={manualDate}
             onChange={(e) => setManualDate(e.target.value)}
           />
@@ -1999,23 +2229,6 @@ function CalendarSyncDialog({
                 </li>
               ))}
             </ul>
-          </div>
-        )}
-
-        {polls.length > 0 && (
-          <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-base-300 pt-4">
-            <span className="min-w-0 flex-1 text-sm">
-              まだ返事していない候補日のうち、予定のない日に「◯ 参加可」と返事する
-            </span>
-            <button
-              type="button"
-              className={cx("btn btn-sm w-36", marked && "text-success")}
-              onClick={markFreeCandidatesOk}
-              disabled={marked}
-            >
-              {marked ? <IconCheck width={15} height={15} /> : <IconCalendarPlus width={15} height={15} />}
-              {marked ? "返事した" : "まとめて返事"}
-            </button>
           </div>
         )}
       </section>

@@ -1,7 +1,16 @@
-import { useMemo, useState } from "react";
+import { memo, useDeferredValue, useMemo, useState } from "react";
 import { Link, useNavigate } from "../lib/router";
 import { IconPlus, IconSearch, IconUpload } from "../components/icons";
-import { DateBlock, EmptyState, PageHead, Select, SysBadge } from "../components/ui";
+import {
+  DateBlock,
+  EmptyState,
+  LoadMore,
+  PageHead,
+  Seg,
+  Select,
+  SysBadge,
+  useVisibleCount,
+} from "../components/ui";
 import { AvatarStack } from "../components/identity";
 import { SYSTEMS, SYSTEM_LIST } from "../data/systems";
 import { fmtDur, sessionPlayMinutes, todayStr } from "../lib/time";
@@ -26,7 +35,7 @@ function Cast({ log, showKp }: { log: Log; showKp: boolean }) {
         {names.join("、")}
         {showKp && kp && (
           <span className="text-ink3">
-            {names.length ? "　" : ""}進行 {kp.name}
+            {names.length ? "　" : ""}GM {kp.name}
           </span>
         )}
       </span>
@@ -34,7 +43,7 @@ function Cast({ log, showKp }: { log: Log; showKp: boolean }) {
   );
 }
 
-export function SessionRow({
+export const SessionRow = memo(function SessionRow({
   log,
   href,
   showKp = true,
@@ -57,50 +66,85 @@ export function SessionRow({
   const showScenario = sc && context !== "scenario" && !log.title.includes(sc.title);
 
   return (
-    <Link to={href} className="row-interactive flex items-start gap-4 px-4 py-4 sm:px-5">
+    <Link to={href} className="group row-interactive flex items-start gap-4 px-4 py-4 sm:px-5">
       <DateBlock date={log.dates[0] ?? "2026-01-01"} days={log.dates.length} showMonth={showMonth} />
       <div className="min-w-0 flex-1">
-        <h3 className="truncate text-base font-bold leading-snug">{log.title}</h3>
+        <h3 className="truncate text-base font-bold leading-snug transition-colors group-hover:text-primary">
+          {log.title}
+        </h3>
         <div className="meta mt-1 text-xs sm:text-sm">
           <SysBadge sys={sys} />
-          {showScenario && <span className="truncate max-w-48">{sc.title}</span>}
-          {tb && context !== "table" && <span className="truncate max-w-40">{tb.name}</span>}
+          {showScenario && <span className="max-w-48 truncate">{sc.title}</span>}
+          {tb && context !== "table" && <span className="max-w-40 truncate">{tb.name}</span>}
           {playMin > 0 && <span className="tabular-nums">{fmtDur(playMin)}</span>}
         </div>
         <Cast log={log} showKp={showKp} />
       </div>
     </Link>
   );
-}
+});
+
+type RoleFilter = "all" | "kp" | "pl";
+
+const PAGE_SIZE = 30;
 
 export default function Sessions() {
   const { state } = useStore();
   const nav = useNavigate();
   const [q, setQ] = useState("");
+  const deferredQ = useDeferredValue(q);
   const [sys, setSys] = useState("all");
+  const [tableFilter, setTableFilter] = useState("all");
+  const [role, setRole] = useState<RoleFilter>("all");
+  const [visibleCount, setVisibleCount] = useVisibleCount(PAGE_SIZE, [deferredQ, sys, tableFilter, role]);
 
   const myLogs = useMemo(() => sessionsOfMe(state), [state]);
   const usedSystems = useMemo(() => new Set(myLogs.map((l) => l.systemId)), [myLogs]);
+  const usedTableIds = useMemo(
+    () => new Set(myLogs.map((l) => l.tableId).filter((id): id is string => Boolean(id && state.tables[id]))),
+    [myLogs, state.tables],
+  );
+  const hasKpLogs = useMemo(() => myLogs.some((l) => l.ownerId === state.me), [myLogs, state.me]);
+  const hasPlLogs = useMemo(() => myLogs.some((l) => l.ownerId !== state.me), [myLogs, state.me]);
+
+  const searchIndex = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const l of myLogs) {
+      const sc = l.scenarioId ? (state.scenarios[l.scenarioId]?.title ?? "") : "";
+      const tb = l.tableId ? (state.tables[l.tableId]?.name ?? "") : "";
+      const kpName = state.users[l.ownerId]?.name ?? "";
+      const parts = [l.title, sc, tb, kpName];
+      for (const [uid, p] of Object.entries(l.players)) {
+        if (state.users[uid]?.name) parts.push(state.users[uid]!.name);
+        for (const cid of p.characterIds) {
+          if (state.characters[cid]?.name) parts.push(state.characters[cid]!.name);
+        }
+      }
+      map.set(l.id, parts.join("\0").toLowerCase());
+    }
+    return map;
+  }, [myLogs, state.scenarios, state.tables, state.users, state.characters]);
 
   const logs = useMemo(() => {
-    let list = [...myLogs];
-    if (sys !== "all") list = list.filter((l) => l.systemId === sys);
-    const needle = q.trim().toLowerCase();
-    if (needle) {
-      list = list.filter((l) => {
-        const sc = l.scenarioId ? state.scenarios[l.scenarioId]?.title : "";
-        const tb = l.tableId ? state.tables[l.tableId]?.name : "";
-        return [l.title, sc, tb].some((t) => t?.toLowerCase().includes(needle));
-      });
-    }
+    const needle = deferredQ.trim().toLowerCase();
+    const list = myLogs.filter((l) => {
+      if (role === "kp" && l.ownerId !== state.me) return false;
+      if (role === "pl" && l.ownerId === state.me) return false;
+      if (sys !== "all" && l.systemId !== sys) return false;
+      if (tableFilter !== "all" && l.tableId !== tableFilter) return false;
+      if (needle && !(searchIndex.get(l.id) ?? "").includes(needle)) return false;
+      return true;
+    });
     return list.sort((a, b) => b.t0 - a.t0);
-  }, [myLogs, q, sys, state.scenarios, state.tables]);
+  }, [myLogs, deferredQ, sys, tableFilter, role, state.me, searchIndex]);
+
+  const shownLogs = useMemo(() => logs.slice(0, visibleCount), [logs, visibleCount]);
 
   /** 年月ごとにまとめて、長い一覧でも時期で探せるようにする */
   const groups = useMemo(() => {
     const out: { key: string; label: string; items: Log[] }[] = [];
     const thisYear = Number(todayStr().slice(0, 4));
-    for (const l of logs) {
+    for (const l of shownLogs) {
       const [y, m] = (l.dates[0] ?? "2026-01-01").split("-").map(Number);
       const key = `${y}-${m}`;
       let g = out[out.length - 1];
@@ -111,7 +155,7 @@ export default function Sessions() {
       g.items.push(l);
     }
     return out;
-  }, [logs]);
+  }, [shownLogs]);
 
   const sysOptions = useMemo(
     () => [
@@ -120,10 +164,20 @@ export default function Sessions() {
     ],
     [usedSystems],
   );
+  const tableOptions = useMemo(
+    () => [
+      { value: "all", label: "すべての卓" },
+      ...[...usedTableIds]
+        .map((id) => state.tables[id]!)
+        .sort((a, b) => a.name.localeCompare(b.name, "ja"))
+        .map((t) => ({ value: t.id, label: t.name })),
+    ],
+    [usedTableIds, state.tables],
+  );
 
   if (myLogs.length === 0) {
     return (
-      <>
+      <div className="max-w-4xl">
         <PageHead title="セッション" />
         <div className="surface">
           <EmptyState
@@ -143,34 +197,61 @@ export default function Sessions() {
             CCFOLIA・Udonarium・テキストのログに対応しています。ログがなくても記録は残せます。
           </EmptyState>
         </div>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
+    <div className="max-w-4xl">
       <PageHead title="セッション" />
 
-      <div className="mb-5 flex flex-col gap-2 sm:flex-row">
-        <label className="input flex flex-1 items-center gap-2">
-          <IconSearch width={16} height={16} className="shrink-0 opacity-50" aria-hidden />
-          <input
-            type="search"
-            className="min-w-0 grow"
-            placeholder="タイトル・シナリオ・卓で検索"
-            aria-label="セッションを検索"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-        </label>
-        {sysOptions.length > 2 && (
-          <Select
-            ariaLabel="システムで絞り込み"
-            value={sys}
-            options={sysOptions}
-            onChange={setSys}
-            className="sm:w-60"
-          />
+      <div className="mb-5 flex flex-col gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="input flex flex-1 items-center gap-2">
+            <IconSearch width={16} height={16} className="shrink-0 opacity-50" aria-hidden />
+            <input
+              type="search"
+              className="min-w-0 grow"
+              placeholder="タイトル・シナリオ・卓・キャラで検索"
+              aria-label="セッションを検索"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </label>
+          {hasKpLogs && hasPlLogs && (
+            <Seg<RoleFilter>
+              ariaLabel="立場"
+              value={role}
+              onChange={setRole}
+              options={[
+                { v: "all", label: "すべて" },
+                { v: "kp", label: "GM" },
+                { v: "pl", label: "PL" },
+              ]}
+            />
+          )}
+        </div>
+        {(sysOptions.length > 2 || tableOptions.length > 2) && (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {sysOptions.length > 2 && (
+              <Select
+                ariaLabel="システムで絞り込み"
+                value={sys}
+                options={sysOptions}
+                onChange={setSys}
+                className="w-full"
+              />
+            )}
+            {tableOptions.length > 2 && (
+              <Select
+                ariaLabel="卓で絞り込み"
+                value={tableFilter}
+                options={tableOptions}
+                onChange={setTableFilter}
+                className="w-full"
+              />
+            )}
+          </div>
         )}
       </div>
 
@@ -184,6 +265,8 @@ export default function Sessions() {
                 onClick={() => {
                   setQ("");
                   setSys("all");
+                  setTableFilter("all");
+                  setRole("all");
                 }}
               >
                 絞り込みを解除
@@ -203,8 +286,14 @@ export default function Sessions() {
               </div>
             </section>
           ))}
+          <LoadMore
+            shown={shownLogs.length}
+            total={logs.length}
+            step={PAGE_SIZE}
+            onMore={() => setVisibleCount((n) => n + PAGE_SIZE)}
+          />
         </div>
       )}
-    </>
+    </div>
   );
 }
