@@ -203,8 +203,9 @@ export function buildDraft(opts: {
     } else if (matched.user) {
       const u = matched.user;
       if (kinds[sp] === "PC") {
-        if (/^GM(?:$|[\s:：／/])/i.test(sp)) kinds[sp] = "GM";
-        else if (/^KP(?:$|[\s:：／/])/i.test(sp)) kinds[sp] = "KP";
+        // 「GM」「KP」だけの名前は isGenericRoleName で誰にも結び付かないので、ここでは区切りが続く形だけを見る
+        if (/^GM[\s:：／/]/i.test(sp)) kinds[sp] = "GM";
+        else if (/^KP[\s:：／/]/i.test(sp)) kinds[sp] = "KP";
         else kinds[sp] = "PL";
       }
       speakerLinks[sp] = { userId: u.id };
@@ -215,7 +216,8 @@ export function buildDraft(opts: {
 
   const players = Array.from(playerMap.entries()).map(([userId, characterIds]) => ({ userId, characterIds }));
   const rawDerived = deriveSessionFromMessages(channels);
-  const derived = rawDerived && (rawDerived.t0 > 0 || rawDerived.t1 > 0) ? rawDerived : null;
+  // t1 >= t0 なので「どちらかが正」は「t1 が正」と同じ
+  const derived = rawDerived && rawDerived.t1 > 0 ? rawDerived : null;
 
   return {
     fileName,
@@ -248,7 +250,8 @@ export function remapChannelTimestamps(
   const flat: { chIdx: number; msgIdx: number; ts: number }[] = [];
   channels.forEach((c, chIdx) => c.msgs.forEach((m, msgIdx) => flat.push({ chIdx, msgIdx, ts: m.ts })));
   if (flat.length === 0) return channels;
-  flat.sort((a, b) => a.ts - b.ts || a.chIdx - b.chIdx || a.msgIdx - b.msgIdx);
+  // flat はチャンネル順・発言順に積んであり、sort は安定なので同時刻の順序はそのまま保たれる
+  flat.sort((a, b) => a.ts - b.ts);
 
   const next = channels.map((c) => ({ ...c, msgs: c.msgs.map((m) => ({ ...m })) }));
   const total = flat.length;
@@ -266,7 +269,8 @@ export function remapChannelTimestamps(
 
   const dayCount = dates.length;
   flat.forEach((item, i) => {
-    const bucket = Math.min(dayCount - 1, Math.floor((i * dayCount) / total));
+    // i < total なので bucket は dayCount - 1 を超えない
+    const bucket = Math.floor((i * dayCount) / total);
     const bucketStartIdx = Math.floor((bucket * total) / dayCount);
     const bucketEndIdx = Math.floor(((bucket + 1) * total) / dayCount) - 1;
     const bucketLen = Math.max(1, bucketEndIdx - bucketStartIdx);

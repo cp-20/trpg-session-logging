@@ -1,4 +1,5 @@
 import { deriveSessionFromMessages, uid } from "../lib/time";
+import { historyRowEpochs, type PlayHistoryRow } from "../lib/history-import";
 import { SYSTEMS } from "../data/systems";
 import type { Channel, Log, MsgKind, Policy, Scope, State } from "../types";
 
@@ -185,3 +186,177 @@ export type LogPatch = Partial<
     "title" | "dates" | "t0" | "t1" | "scenarioId" | "tableId" | "systemId" | "scope" | "speakerIcons"
   >
 >;
+
+export interface CommitHistoryResult {
+  ok: boolean;
+  createdLogs: number;
+  createdScenarios: number;
+  createdCharacters: number;
+  skippedRows: number;
+}
+
+const SCENARIO_BG = ["#efe6d8", "#e8dfd5", "#ede4d7", "#f0e1dc", "#f0e6d2", "#e7eadc", "#e6e2da"];
+
+export async function commitPlayHistoryImport(
+  rows: PlayHistoryRow[],
+  snapshot: State,
+  apply: (fn: (s: State) => void) => void,
+  opts?: { scope?: Scope },
+): Promise<CommitHistoryResult> {
+  const validRows = rows.filter((r) => Boolean(r.title.trim()));
+  const skippedRows = rows.length - validRows.length;
+  if (validRows.length === 0) {
+    return { ok: false, createdLogs: 0, createdScenarios: 0, createdCharacters: 0, skippedRows };
+  }
+
+  let createdLogs = 0;
+  let createdScenarios = 0;
+  let createdCharacters = 0;
+  const scope = opts?.scope ?? "members";
+  const nowIso = new Date().toISOString();
+
+  apply((s) => {
+    const scenarioIndex = new Map<string, string>();
+    for (const sc of Object.values(s.scenarios)) {
+      scenarioIndex.set(sc.title.trim().toLowerCase(), sc.id);
+    }
+
+    const myCharIndex = new Map<string, string>();
+    for (const ch of Object.values(s.characters)) {
+      if (ch.ownerId === s.me) {
+        myCharIndex.set(ch.name.trim().toLowerCase(), ch.id);
+      }
+    }
+
+    const userIndex = new Map<string, string>();
+    for (const u of Object.values(s.users)) {
+      userIndex.set(u.name.trim().toLowerCase(), u.id);
+    }
+
+    for (const row of validRows) {
+      const logId = `s_${uid()}`;
+      const slug = uid("s") + uid("");
+      const sysId = SYSTEMS[row.systemId] ? row.systemId : "general";
+
+      const scTitle = (row.scenarioTitle || row.title).trim();
+      const scKey = scTitle.toLowerCase();
+      let scenarioId = scenarioIndex.get(scKey);
+      if (!scenarioId && scTitle) {
+        scenarioId = `sc_${uid()}`;
+        s.scenarios[scenarioId] = {
+          id: scenarioId,
+          title: scTitle,
+          author: "自由記述（未登録）",
+          systemId: sysId,
+          source: "manual",
+          policy: "public",
+          emoji: SYSTEMS[sysId]?.short ?? "汎用",
+          bg: SCENARIO_BG[Object.keys(s.scenarios).length % SCENARIO_BG.length]!,
+          tags: [],
+          claimedBy: null,
+          addedBy: "user",
+          addedByUid: s.me,
+        };
+        scenarioIndex.set(scKey, scenarioId);
+        createdScenarios++;
+      }
+
+      const myCharIds: string[] = [];
+      for (const rawName of row.characterNames) {
+        const chName = rawName.trim();
+        if (!chName) continue;
+        const chKey = chName.toLowerCase();
+        let chId = myCharIndex.get(chKey);
+        if (!chId) {
+          chId = `ch_${uid()}`;
+          s.characters[chId] = {
+            id: chId,
+            ownerId: s.me,
+            name: chName,
+            systemId: sysId,
+            color: SYSTEMS[sysId]?.color ?? "#5348c8",
+            archetype: "",
+            bio: "",
+            tags: [],
+            stats: {},
+            sessions: [],
+            growth: [],
+            share: {
+              enabled: false,
+              scope: "private",
+              includeProfile: true,
+              includeStats: true,
+              includeGrowth: true,
+              includeSessions: true,
+            },
+            import: { source: "通過履歴インポート", importedAt: row.date },
+          };
+          myCharIndex.set(chKey, chId);
+          createdCharacters++;
+        }
+        if (!myCharIds.includes(chId)) myCharIds.push(chId);
+      }
+
+      const players: Log["players"] = {
+        [s.me]: { linked: true, hidden: false, characterIds: myCharIds },
+      };
+      for (const pName of row.playerNames) {
+        const uidMatch = userIndex.get(pName.trim().toLowerCase());
+        if (uidMatch && !players[uidMatch]) {
+          players[uidMatch] = { linked: true, hidden: false, characterIds: [] };
+        }
+      }
+
+      const { t0, t1 } = historyRowEpochs(row);
+      const logTitle = row.title.trim();
+      s.logs[logId] = {
+        id: logId,
+        title: logTitle,
+        scenarioId,
+        systemId: sysId,
+        ownerId: s.me,
+        scope,
+        hasLog: false,
+        channels: [],
+        players,
+        createdAt: nowIso,
+        dates: [row.date],
+        t0,
+        t1,
+        slug,
+        importedFrom: "通過履歴",
+        ...(row.memo
+          ? {
+              impressions: [
+                {
+                  id: `imp_${uid()}`,
+                  userId: s.me,
+                  text: row.memo,
+                  createdAt: row.date,
+                  spoiler: false,
+                },
+              ],
+            }
+          : {}),
+      };
+
+      for (const cid of myCharIds) {
+        s.characters[cid]?.sessions.push({
+          logId,
+          date: row.date,
+          title: logTitle,
+          scenarioId,
+          delta: {},
+          rolls: [],
+          memo: row.memo ?? "",
+        });
+      }
+
+      createdLogs++;
+    }
+  });
+
+  // 返却値とスナップショットの整合を保つ
+  void snapshot;
+  return { ok: true, createdLogs, createdScenarios, createdCharacters, skippedRows };
+}

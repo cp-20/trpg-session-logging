@@ -31,7 +31,7 @@ export function getTakufuAuth() {
 
 function requireAuth() {
   const auth = getTakufuAuth();
-  if (!auth) throw new Error("サインインの接続設定がありません。");
+  if (!auth) throw new Error("ログインの接続設定がありません。");
   return auth;
 }
 
@@ -44,7 +44,7 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
 export async function linkXAccount(): Promise<FirebaseUser> {
   const user = requireAuth().currentUser;
   if (!user || !user.providerData.some((p) => p.providerId === "google.com")) {
-    throw new Error("Googleでサインインしてから連携してください。");
+    throw new Error("Googleでログインしてから連携してください。");
   }
   return (await linkWithPopup(user, new TwitterAuthProvider())).user;
 }
@@ -52,7 +52,7 @@ export async function linkXAccount(): Promise<FirebaseUser> {
 export async function unlinkXAccount(): Promise<FirebaseUser> {
   const user = requireAuth().currentUser;
   if (!user || !user.providerData.some((p) => p.providerId === "google.com")) {
-    throw new Error("Googleのサインイン情報を確認できません。もう一度サインインしてください。");
+    throw new Error("Googleのログイン情報を確認できません。もう一度ログインしてください。");
   }
   return unlink(user, "twitter.com");
 }
@@ -90,16 +90,16 @@ export function firebaseUserProfile(user: FirebaseUser): User {
 export function authErrorMessage(error: unknown): string {
   const code = (error as { code?: string })?.code;
   const messages: Record<string, string> = {
-    "auth/popup-closed-by-user": "サインイン画面を閉じました。もう一度お試しください。",
-    "auth/cancelled-popup-request": "別のサインイン操作が進行中です。",
+    "auth/popup-closed-by-user": "ログイン画面を閉じました。もう一度お試しください。",
+    "auth/cancelled-popup-request": "別のログイン操作が進行中です。",
     "auth/popup-blocked": "ブラウザでポップアップを許可してから、もう一度お試しください。",
-    "auth/unauthorized-domain": "このURLではまだサインインを利用できません。",
+    "auth/unauthorized-domain": "このURLではまだログインを利用できません。",
     "auth/operation-not-allowed": "この連携は準備中です。しばらくしてからお試しください。",
     "auth/credential-already-in-use": "このアカウントは別の卓譜アカウントに連携されています。",
     "auth/account-exists-with-different-credential":
-      "Googleでサインインしてから、設定でアカウントを連携してください。",
+      "Googleでログインしてから、設定でアカウントを連携してください。",
     "auth/network-request-failed": "接続できませんでした。通信状態を確認してください。",
-    "auth/requires-recent-login": "もう一度Googleでサインインしてからお試しください。",
+    "auth/requires-recent-login": "もう一度Googleでログインしてからお試しください。",
   };
   return (
     (code && messages[code]) ||

@@ -14,7 +14,7 @@ export interface ShareViewerOptions {
 
 /**
  * 共有ビューで誰がログを見られるかの判定(純関数)。
- * viewerId はサインイン済みなら uid、未認証なら null(=匿名)。
+ * viewerId はログイン済みなら uid、未認証なら null(=匿名)。
  * 匿名は public ログだけを読める。
  */
 export function evaluateShareGate(

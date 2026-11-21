@@ -1,4 +1,5 @@
 import type { Channel, Msg, MsgKind } from "../types";
+import { parseCcfoliaHtmlEntriesFallback } from "./html-xml-fallback";
 import { sessionDay } from "./time";
 
 /**
@@ -65,7 +66,6 @@ function mapKind(sp: string, explicit: unknown): MsgKind {
   if (e === "PC" || e === "NPC" || e === "KP" || e === "PL" || e === "GM" || e === "SYSTEM")
     return e as MsgKind;
   if (/^(KP|GM)[\s:：]/.test(sp) || sp === "KP" || sp === "GM") return "KP";
-  if (e === "SYSTEM") return "SYSTEM";
   return "PC";
 }
 
@@ -98,22 +98,22 @@ export function parseCcfoliaLog(raw: string): ParsedLog | null {
   }
   const candidates: Candidate[] = [];
   collectMessages(root, candidates);
-  if (candidates.length === 0) return null;
 
-  const entries = candidates.map((c, i) => {
+  /* 候補が無ければ assembleChannels が null を返す */
+  const entries = candidates.map((c): LogEntry => {
     const sp = str(c.name) ?? str(c.speakerId) ?? str(c.cn) ?? "不明な発言者";
     const text = str(c.text) ?? str(c.message) ?? str(c.body) ?? "";
     const explicitType = str(c.type)?.toLowerCase();
     const isNote = explicitType === "note" || text.startsWith("◆");
-    const isSystem = explicitType === "system";
     const ts = toSeconds(c.createdAt) ?? toSeconds(c.t) ?? toSeconds(c.time) ?? 0;
     const roll = buildRoll(c);
     return {
       sp,
-      text: isNote || !isSystem ? text : text,
+      text,
       ts,
       kind: mapKind(sp, c.kind ?? c.role),
-      type: isNote ? ("note" as const) : isSystem ? ("system" as const) : ("text" as const),
+      /* type: system は Msg では text と同じ扱いなので区別しない */
+      type: isNote ? "note" : "text",
       channel: str(c.channel) ?? str(c.channelId) ?? str(c.tab) ?? "メイン",
       ...(roll ? { roll } : {}),
     };
@@ -161,8 +161,7 @@ function assembleChannels(entries: LogEntry[]): ParsedLog | null {
   /* 正規チャンネル名の判定(ヒューリスティック) */
   const nameFor = (raw: string, speakerCount: number): { name: string; secret: boolean } => {
     const lower = raw.toLowerCase();
-    if (lower === "main" || raw === "メイン" || lower.includes("main"))
-      return { name: "メイン", secret: false };
+    if (lower.includes("main") || raw === "メイン") return { name: "メイン", secret: false };
     if (lower === "info" || raw === "情報" || raw.includes("info")) return { name: "情報", secret: false };
     if (lower === "chat" || raw === "チャット" || raw.includes("chat") || raw === "雑談")
       return { name: "チャット", secret: false };
@@ -200,7 +199,17 @@ export function summarizeParsed(parsed: ParsedLog): string[] {
    ============================================================ */
 
 export function parseCcfoliaLogHtml(html: string): ParsedLog | null {
-  if (typeof DOMParser === "undefined") return null;
+  if (typeof DOMParser === "undefined") {
+    const entries: LogEntry[] = parseCcfoliaHtmlEntriesFallback(html).map((e) => ({
+      sp: e.sp,
+      text: e.text,
+      ts: 0,
+      kind: e.sp === "system" ? "SYSTEM" : mapKind(e.sp, undefined),
+      type: e.text.startsWith("◆") ? "note" : "text",
+      channel: e.tab,
+    }));
+    return assembleChannels(entries);
+  }
   const doc = new DOMParser().parseFromString(html, "text/html");
   const entries: LogEntry[] = [];
   let chIndex = 0;
@@ -212,11 +221,11 @@ export function parseCcfoliaLogHtml(html: string): ParsedLog | null {
   });
   for (const p of rawPs) {
     const spans = [...p.querySelectorAll(":scope > span")];
-    const tab = (spans[0].textContent ?? "").trim().replace(/^\[|\]$/g, "");
-    const sp = (spans[1].textContent ?? "").trim();
+    const tab = spans[0].textContent.trim().replace(/^\[|\]$/g, "");
+    const sp = spans[1].textContent.trim();
     const text = spans
       .slice(2)
-      .map((s) => s.textContent ?? "")
+      .map((s) => s.textContent)
       .join("\n")
       .trim();
     if (!sp || !text) continue;
@@ -233,11 +242,12 @@ export function parseCcfoliaLogHtml(html: string): ParsedLog | null {
   /* (2) 旧整形ログ: div.tab 単位 */
   if (entries.length === 0) {
     for (const tab of doc.querySelectorAll("div.tab")) {
-      const title = tab.querySelector(":scope > .tabtitle")?.textContent?.trim() ?? "";
+      const title = tab.querySelector(":scope > .tabtitle")?.textContent.trim() ?? "";
       chIndex++;
       for (const row of tab.querySelectorAll(":scope > p.player")) {
-        const sp = row.querySelector(":scope > b")?.textContent?.trim() ?? "";
-        const text = (row.textContent ?? "").slice(sp.length).trim();
+        const rawSp = row.querySelector(":scope > b")?.textContent ?? "";
+        const sp = rawSp.trim();
+        const text = withoutFirst(row.textContent, rawSp).trim();
         if (!sp || !text) continue;
         entries.push({
           sp,
@@ -254,11 +264,11 @@ export function parseCcfoliaLogHtml(html: string): ParsedLog | null {
   /* (3) 新整形ログ: section.tab 単位 */
   if (entries.length === 0) {
     for (const tab of doc.querySelectorAll("section.tab")) {
-      const title = tab.querySelector(":scope > .tabtitle")?.textContent?.trim() ?? "";
+      const title = tab.querySelector(":scope > .tabtitle")?.textContent.trim() ?? "";
       chIndex++;
       for (const row of tab.querySelectorAll(".player")) {
-        const sp = row.querySelector(".speaker-text")?.textContent?.trim() ?? "";
-        const text = row.querySelector(".player-message")?.textContent?.trim() ?? "";
+        const sp = row.querySelector(".speaker-text")?.textContent.trim() ?? "";
+        const text = row.querySelector(".player-message")?.textContent.trim() ?? "";
         if (!sp || !text) continue;
         entries.push({
           sp,
@@ -273,7 +283,7 @@ export function parseCcfoliaLogHtml(html: string): ParsedLog | null {
   }
 
   /* どの形式でも取れなければ null */
-  return entries.length > 0 ? assembleChannels(entries) : null;
+  return assembleChannels(entries);
 }
 
 /* ============================================================
@@ -297,14 +307,14 @@ export async function parseCcfoliaLogZip(data: ArrayBuffer | Blob): Promise<Pars
     .sort((a, b) => a.name.split("/").length - b.name.split("/").length);
   for (const f of jsons) {
     const parsed = parseCcfoliaLog(await f.async("string"));
-    if (parsed && parsed.messageCount > 0) return parsed;
+    if (parsed) return parsed; // null でなければ 1 件以上ある
   }
   const htmls = files
     .filter((f) => /\.html?$/i.test(f.name))
     .sort((a, b) => a.name.split("/").length - b.name.split("/").length);
   for (const f of htmls) {
     const parsed = parseCcfoliaLogHtml(await f.async("string"));
-    if (parsed && parsed.messageCount > 0) return parsed;
+    if (parsed) return parsed; // null でなければ 1 件以上ある
   }
   return null;
 }
@@ -321,4 +331,11 @@ export function sessionDatesOf(parsed: ParsedLog): string[] {
     }
   }
   return dates;
+}
+
+/** 行の文字列から発言者部分（<b> の生の文字列）を 1 回だけ取り除く。前後の空白や位置に依らない */
+function withoutFirst(text: string, part: string): string {
+  if (!part) return text;
+  const i = text.indexOf(part);
+  return i < 0 ? text : text.slice(0, i) + text.slice(i + part.length);
 }

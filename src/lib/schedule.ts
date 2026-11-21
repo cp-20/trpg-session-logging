@@ -1,7 +1,7 @@
 /**
  * 予定・日程調整の純粋な計算（カレンダーと卓の画面で共用）。React に依存しない。
  */
-import type { State, TableEvent, TableEventCandidate } from "../types";
+import type { BusyRange, Prefs, State, TableEvent, TableEventCandidate } from "../types";
 
 export const VALID_TIME = /^(?:[01]?\d|2\d|3[01]):[0-5]\d$/;
 export const VALID_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -202,4 +202,190 @@ export function myScheduleView(
       )
       .reverse(),
   };
+}
+
+/** 日程調整の候補日に自分の返事を書き込む */
+export function applyCandidateRsvp(
+  s: Pick<State, "events" | "me">,
+  eventId: string,
+  candidateId: string,
+  value: "ok" | "maybe" | "ng",
+): void {
+  const target = s.events?.[eventId];
+  if (!target) return;
+  if (target.candidates && target.candidates.length > 0) {
+    const cand = target.candidates.find((c) => c.id === candidateId);
+    if (cand) cand.responses[s.me] = value;
+  } else {
+    target.responses[s.me] = value;
+  }
+}
+
+/** 日程調整の候補日を確定して通常の予定にする */
+export function applyConfirmCandidate(
+  s: Pick<State, "events">,
+  eventId: string,
+  cand: TableEventCandidate,
+): void {
+  const target = s.events?.[eventId];
+  if (!target) return;
+  target.status = "confirmed";
+  target.date = cand.date;
+  target.startTime = cand.startTime;
+  target.endTime = cand.endTime;
+  target.durationMin = eventDurationMinutes(cand.startTime, cand.endTime, target.durationMin);
+  target.responses = { ...cand.responses };
+  delete target.candidates;
+}
+
+/* ============================================================
+ * 自分の予定との照らし合わせ
+ *   候補の「日」ではなく「開始から長さぶんの時間帯」と重なるかで判定する。
+ *   昼の予定がある日に夜の候補を「予定あり」としないため。
+ * ============================================================ */
+
+const DAY_MS = 86_400_000;
+const JST_MS = 9 * 3600 * 1000;
+
+/** JST の日付の 0:00 を epoch ミリ秒で */
+function jstMidnightMs(date: string): number {
+  return Date.parse(`${date}T00:00:00Z`) - JST_MS;
+}
+
+/** 候補（日付・開始・長さ）の時間帯。開始は 25:00 のような翌日表記も受け付ける */
+export function slotRange(
+  date: string,
+  startTime: string,
+  durationMin: number,
+): { start: number; end: number } | null {
+  if (!VALID_DATE.test(date) || !VALID_TIME.test(startTime.trim())) return null;
+  const [h, m] = startTime.trim().split(":").map(Number);
+  const start = jstMidnightMs(date) + (h! * 60 + m!) * 60_000;
+  const minutes = Number.isFinite(durationMin) && durationMin > 0 ? durationMin : 180;
+  return { start, end: start + minutes * 60_000 };
+}
+
+/** JST の 0:00 から 0:00 まで丸ごと埋まる時間帯（終日の予定）か */
+export function isAllDayRange(start: number, end: number): boolean {
+  return end - start >= DAY_MS && (start + JST_MS) % DAY_MS === 0 && (end + JST_MS) % DAY_MS === 0;
+}
+
+export type BusyCheck = (date: string, startTime: string, durationMin: number) => boolean;
+
+/**
+ * 設定から「この候補の時間帯に自分の予定があるか」を返す関数を作る。
+ * - 手で入れた日（busyDates）はその日まるごと予定あり
+ * - Google の時間帯は、許可しているときだけ・オンにしたカレンダーの分だけ使う
+ * - 終日の時間帯は countAllDay のときだけ数える（祝日・誕生日などの取りこぼしを避ける）
+ */
+export function busyChecker(prefs: Pick<Prefs, "busyDates" | "googleBusy">): BusyCheck {
+  const ranges: { start: number; end: number }[] = [];
+  for (const d of prefs.busyDates ?? []) {
+    if (VALID_DATE.test(d)) ranges.push({ start: jstMidnightMs(d), end: jstMidnightMs(d) + DAY_MS });
+  }
+  const g = prefs.googleBusy;
+  if (g) {
+    const on = new Set(g.calendars.filter((c) => c.on).map((c) => c.id));
+    for (const r of g.ranges) {
+      if (!on.has(r.calendarId)) continue;
+      const start = Date.parse(r.start);
+      const end = Date.parse(r.end);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+      if (!g.countAllDay && isAllDayRange(start, end)) continue;
+      ranges.push({ start, end });
+    }
+  }
+  if (ranges.length === 0) return () => false;
+  return (date, startTime, durationMin) => {
+    const slot = slotRange(date, startTime, durationMin);
+    if (!slot) return false;
+    return ranges.some((r) => r.start < slot.end && r.end > slot.start);
+  };
+}
+
+/** 照らし合わせに使える予定が 1 件でもあるか（「予定のない日をまとめて◯」の出し分け） */
+export function hasBusySource(prefs: Pick<Prefs, "busyDates" | "googleBusy">): boolean {
+  return (
+    (prefs.busyDates?.length ?? 0) > 0 ||
+    Boolean(prefs.googleBusy?.calendars.some((c) => c.on) && prefs.googleBusy.ranges.length > 0)
+  );
+}
+
+/** 日程調整の長さ（分）。候補はすべて同じ長さで、開始だけが違う */
+export function pollDurationMinutes(ev: TableEvent): number {
+  const first = pollCandidates(ev)[0];
+  return eventDurationMinutes(first?.startTime ?? ev.startTime, first?.endTime ?? ev.endTime, ev.durationMin);
+}
+
+/**
+ * 日程調整を編集した内容を書き込む。候補の長さはそろえ、日時を変えた候補の回答は消す
+ * （別の日時への回答として残さないため）。
+ */
+export function applyPollEdit(
+  s: Pick<State, "events">,
+  eventId: string,
+  patch: {
+    title: string;
+    note?: string;
+    durationMin: number;
+    candidates: { id: string; date: string; startTime: string }[];
+  },
+): void {
+  const target = s.events?.[eventId];
+  if (!target || patch.candidates.length === 0) return;
+  const prev = new Map(pollCandidates(target).map((c) => [c.id, c]));
+  const next: TableEventCandidate[] = patch.candidates.map((c) => {
+    const old = prev.get(c.id);
+    const startTime = c.startTime.trim();
+    const same = old && old.date === c.date && old.startTime === startTime;
+    return {
+      id: c.id,
+      date: c.date,
+      startTime,
+      endTime: computeEndTime(startTime, patch.durationMin),
+      responses: same ? { ...old.responses } : {},
+    };
+  });
+  next.sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+  const first = next[0]!;
+  target.title = patch.title.trim();
+  target.note = patch.note?.trim() || undefined;
+  target.durationMin = patch.durationMin;
+  target.candidates = next;
+  target.date = first.date;
+  target.startTime = first.startTime;
+  target.endTime = first.endTime;
+  target.responses = {};
+}
+
+/** 自分の回答をまとめて書き込む（回答画面の「回答を保存」） */
+export function applyPollAnswers(
+  s: Pick<State, "events" | "me">,
+  eventId: string,
+  answers: Record<string, "ok" | "maybe" | "ng">,
+): void {
+  for (const [cid, v] of Object.entries(answers)) applyCandidateRsvp(s, eventId, cid, v);
+}
+
+/**
+ * 終わった時間帯と重複を落とす（保存量を抑える）。
+ * 終日の判定が変わらないよう、隣り合う時間帯はまとめない。
+ */
+export function compactBusyRanges(ranges: readonly BusyRange[], nowMs: number): BusyRange[] {
+  const seen = new Set<string>();
+  const out: BusyRange[] = [];
+  for (const r of ranges) {
+    const start = Date.parse(r.start);
+    const end = Date.parse(r.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end <= nowMs) continue;
+    const key = `${r.calendarId}|${start}|${end}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      calendarId: r.calendarId,
+      start: new Date(start).toISOString(),
+      end: new Date(end).toISOString(),
+    });
+  }
+  return out.sort((a, b) => a.start.localeCompare(b.start));
 }

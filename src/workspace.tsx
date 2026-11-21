@@ -1,11 +1,50 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { User as FirebaseUser } from "firebase/auth";
 import type { State } from "./types";
-import { StoreProvider, emptyState } from "./store";
+import { StoreProvider, emptyState, type RestoreIssue } from "./store";
 import { observeAuth, firebaseUserProfile, signOutAccount } from "./lib/auth";
-import { loadCloudState } from "./lib/cloud-state";
-import { parseSavedState } from "./lib/state-schema";
+import { idbGet, idbSet, LOCAL_STORAGE_MAX_CHARS } from "./lib/local-db";
+import { parseSavedState, validateSavedState } from "./lib/state-schema";
 import { download, todayStr } from "./lib/time";
+
+async function readLocalSnapshot(storageKey: string): Promise<{
+  state: State | null;
+  raw: string | null;
+  corrupt: boolean;
+}> {
+  try {
+    const useIdb = localStorage.getItem(`${storageKey}-idb`) === "1";
+    const localRaw = localStorage.getItem(storageKey);
+    if (useIdb) {
+      const idbVal = await idbGet<unknown>(storageKey);
+      const parsed = idbVal ? validateSavedState(idbVal) : null;
+      if (parsed) {
+        parsed.events ??= {};
+        return { state: parsed, raw: null, corrupt: false };
+      }
+    }
+    if (localRaw) {
+      const parsed = parseSavedState(localRaw);
+      if (parsed) {
+        parsed.events ??= {};
+        return { state: parsed, raw: localRaw, corrupt: false };
+      }
+      return { state: null, raw: localRaw, corrupt: true };
+    }
+    const idbFallback = await idbGet<unknown>(storageKey);
+    if (idbFallback) {
+      const parsed = validateSavedState(idbFallback);
+      if (parsed) {
+        parsed.events ??= {};
+        return { state: parsed, raw: null, corrupt: false };
+      }
+      return { state: null, raw: JSON.stringify(idbFallback), corrupt: true };
+    }
+  } catch {
+    /* Storage unavailable */
+  }
+  return { state: null, raw: null, corrupt: false };
+}
 
 /** Real accounts and the local demonstration never share a storage key or seed data. */
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
@@ -13,9 +52,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     user: FirebaseUser | null;
     state?: State;
     revision?: string;
+    issue?: RestoreIssue;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [recovery, setRecovery] = useState<string | null>(null);
+
   useEffect(() => {
     let alive = true;
     let generation = 0;
@@ -27,11 +68,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (!user) {
           if (previouslySignedIn) {
             try {
-              const raw = localStorage.getItem("takufu-state-v4");
-              const demo = raw ? parseSavedState(raw) : null;
-              if (demo) {
-                demo.entered = false;
-                localStorage.setItem("takufu-state-v4", JSON.stringify(demo));
+              const snap = await readLocalSnapshot("takufu-state-v4");
+              if (snap.state) {
+                snap.state.entered = false;
+                const json = JSON.stringify(snap.state);
+                if (json.length <= LOCAL_STORAGE_MAX_CHARS) {
+                  localStorage.setItem("takufu-state-v4", json);
+                  localStorage.removeItem("takufu-state-v4-idb");
+                } else {
+                  await idbSet("takufu-state-v4", snap.state);
+                  localStorage.setItem("takufu-state-v4-idb", "1");
+                }
               }
             } catch {
               /* Keep existing records intact when browser storage is unavailable. */
@@ -39,44 +86,93 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           }
           previouslySignedIn = false;
           setRecovery(null);
-          if (alive) setSession({ user: null });
+          const demoSnap = await readLocalSnapshot("takufu-state-v4");
+          if (!alive || run !== generation) return;
+          if (demoSnap.state) {
+            setSession({ user: null, state: demoSnap.state, issue: "none" });
+            return;
+          }
+          const { seedState } = await import("./data/seed");
+          if (!alive || run !== generation) return;
+          setSession({
+            user: null,
+            state: seedState(),
+            issue: demoSnap.corrupt ? "corrupt" : "missing",
+          });
           return;
         }
+
         previouslySignedIn = true;
         setSession(null);
         try {
-          const cloud = await loadCloudState(user.uid);
-          if (!alive || run !== generation) return;
-          const restored = cloud ? parseSavedState(JSON.stringify(cloud.state)) : null;
-          if (cloud && !restored)
-            throw new Error("保存した記録を読み込めませんでした。元の記録は変更されていません。");
-          const profile = firebaseUserProfile(user);
-          let state = restored ?? emptyState(profile);
           const key = `takufu-cloud-${user.uid}`;
+          const [localSnap, cloudMod] = await Promise.all([
+            readLocalSnapshot(key),
+            import("./lib/cloud-state"),
+          ]);
+          if (!alive || run !== generation) return;
+
+          let knownRevision: string | null = null;
+          let hasPendingLocal = false;
           try {
-            const localRaw = localStorage.getItem(key);
-            const cached = localRaw ? parseSavedState(localRaw) : null;
-            const knownRevision = localStorage.getItem(`${key}-cloud-revision`);
-            if (cached?.me === user.uid) {
-              if ((knownRevision ?? null) === (cloud?.revision ?? null)) state = cached;
-              else if (localStorage.getItem(`${key}-pending`) === "true" && localRaw) {
-                localStorage.setItem(`${key}-backup-${Date.now()}`, localRaw);
-                setRecovery(localRaw);
-              }
-            }
+            knownRevision = localStorage.getItem(`${key}-cloud-revision`);
+            hasPendingLocal = localStorage.getItem(`${key}-pending`) === "true";
           } catch {
-            /* Never let a browser cache failure prevent access to cloud records. */
+            /* ignore storage read errors */
           }
+
+          const manifest = await cloudMod.fetchCloudWorkspaceManifest(user.uid);
+          if (!alive || run !== generation) return;
+
+          const cacheMatchesCloud =
+            localSnap.state?.me === user.uid && (knownRevision ?? null) === (manifest?.revision ?? null);
+
+          let state: State | null = null;
+          let effectiveRevision: string | undefined = manifest?.revision;
+
+          if (cacheMatchesCloud && localSnap.state) {
+            state = localSnap.state;
+          } else {
+            const cloud = manifest ? await cloudMod.loadCloudState(user.uid) : null;
+            if (!alive || run !== generation) return;
+            effectiveRevision = cloud?.revision;
+            const restored = cloud ? validateSavedState(cloud.state) : null;
+            if (cloud && !restored)
+              throw new Error("保存した記録を読み込めませんでした。元の記録は変更されていません。");
+            const profile = firebaseUserProfile(user);
+            state = restored ?? emptyState(profile);
+            if (localSnap.state?.me === user.uid && hasPendingLocal) {
+              const rawBackup = localSnap.raw ?? JSON.stringify(localSnap.state);
+              try {
+                localStorage.setItem(`${key}-backup-${Date.now()}`, rawBackup);
+              } catch {
+                /* best effort */
+              }
+              setRecovery(rawBackup);
+            }
+          }
+
+          const profile = firebaseUserProfile(user);
+          const existing = state.users[user.uid];
           state.entered = true;
-          state.users[user.uid] = { ...state.users[user.uid], ...profile };
-          setSession({ user, state, revision: cloud?.revision });
+          state.users[user.uid] = {
+            ...profile,
+            ...existing,
+            id: user.uid,
+            accounts: profile.accounts,
+            email: profile.email ?? existing?.email,
+            name: existing?.name || profile.name,
+            image: existing?.image !== undefined ? existing.image : profile.image,
+            profilePublic: existing?.profilePublic ?? true,
+          };
+          setSession({ user, state, revision: effectiveRevision, issue: "none" });
         } catch (cause) {
           if (alive && run === generation)
             setError(cause instanceof Error ? cause.message : "記録を読み込めませんでした。");
         }
       },
       () => {
-        if (alive) setError("サインイン情報を確認できませんでした。");
+        if (alive) setError("ログイン情報を確認できませんでした。");
       },
     );
     return () => {
@@ -85,6 +181,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       unsubscribe();
     };
   }, []);
+
   if (error)
     return (
       <main className="min-h-screen grid place-items-center p-6">
@@ -96,8 +193,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             <button className="btn btn-primary" onClick={() => location.reload()}>
               再読み込み
             </button>
-            <button className="btn btn-ghost" onClick={() => signOutAccount()}>
-              サインアウト
+            <button className="btn btn-quiet" onClick={() => signOutAccount()}>
+              ログアウト
             </button>
           </div>
         </div>
@@ -114,6 +211,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     <StoreProvider
       key={session.user?.uid ?? "demo"}
       initialState={session.state}
+      initialIssue={session.issue}
       authUser={session.user}
       cloudRevision={session.revision}
       storageKey={session.user ? `takufu-cloud-${session.user.uid}` : undefined}

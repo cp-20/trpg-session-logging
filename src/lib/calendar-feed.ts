@@ -2,7 +2,7 @@
  * カレンダー購読の配信。
  *
  * 予定は利用者ごとの保存領域にあり、サーバーは利用者の認証情報を持たない。そこで、
- * サインイン中のブラウザが「確定した予定」を推測できないトークン名の文書
+ * ログイン中のブラウザが「確定した予定」を推測できないトークン名の文書
  * （Firestore: calendarFeeds/{token}）に書き出し、/api/calendar/{token}.ics がそれを
  * カレンダー形式で返す。文書はトークンを知る人だけが 1 件ずつ読め、一覧はできない
  * （firestore.rules）。リンクを作り直すと古いトークンの文書は消える。
@@ -51,11 +51,11 @@ export function buildFeedIcs(state: State, today: string): string {
 }
 
 async function feedDoc(token: string) {
-  const [{ doc }, { getTakufuFirestore }] = await Promise.all([
+  const [{ doc }, { getCloudFirestore }] = await Promise.all([
     import("firebase/firestore"),
-    import("./firebase"),
+    import("./cloud-state"),
   ]);
-  const db = getTakufuFirestore();
+  const db = getCloudFirestore();
   if (!db) throw new Error("Firebase is not configured");
   return doc(db, "calendarFeeds", token);
 }

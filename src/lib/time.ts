@@ -67,6 +67,8 @@ export function sessionMinutes(t0: number, t1: number): number {
   return Math.max(1, Math.round((t1 - t0) / 60));
 }
 
+const playMinutesCache = new WeakMap<object, number>();
+
 /**
  * 実プレイ時間の概算（分）。複数日セッションでは日ごとの区間を合算する
  * （夜間の空白を含まない）。ログがなければ t1−t0 を使う。
@@ -78,21 +80,29 @@ export function sessionPlayMinutes(log: {
   t1: number;
 }): number {
   if (!log.hasLog) return sessionMinutes(log.t0, log.t1);
-  const byDay = new Map<string, number[]>();
-  log.channels.forEach((c) =>
-    c.msgs.forEach((m) => {
+  const cached = playMinutesCache.get(log.channels);
+  if (cached !== undefined) return cached;
+  const bounds = new Map<string, [number, number]>();
+  for (const c of log.channels) {
+    for (const m of c.msgs) {
       const d = sessionDay(m.ts);
-      const arr = byDay.get(d) ?? [];
-      arr.push(m.ts);
-      byDay.set(d, arr);
-    }),
-  );
-  if (byDay.size === 0) return sessionMinutes(log.t0, log.t1);
+      const b = bounds.get(d);
+      if (!b) {
+        bounds.set(d, [m.ts, m.ts]);
+      } else {
+        if (m.ts < b[0]) b[0] = m.ts;
+        if (m.ts > b[1]) b[1] = m.ts;
+      }
+    }
+  }
+  if (bounds.size === 0) return sessionMinutes(log.t0, log.t1);
   let total = 0;
-  byDay.forEach((arr) => {
-    total += (Math.max(...arr) - Math.min(...arr)) / 60;
-  });
-  return Math.max(1, Math.round(total));
+  for (const [min, max] of bounds.values()) {
+    total += (max - min) / 60;
+  }
+  const result = Math.max(1, Math.round(total));
+  playMinutesCache.set(log.channels, result);
+  return result;
 }
 
 export interface SessionRangeInput {

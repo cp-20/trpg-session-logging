@@ -7,9 +7,10 @@ export const SYSTEMS: Record<string, SystemDef> = {
     short: "クトゥルフ神話TRPG 7版",
     color: "#3f5e78",
     emoji: "CoC7",
+    /* SAN と幸運は卓をまたいで続く。HP・MP は毎回戻るので記録しない */
     stats: [
-      { key: "san", label: "SAN", max: 99 },
-      { key: "mp", label: "MP", max: 20 },
+      { key: "san", label: "SAN", max: 99, carry: true },
+      { key: "luck", label: "幸運", max: 99, carry: true },
     ],
     growthLabel: "成長ロール",
     growthNote: "成功した技能を卓後に振って、失敗すれば値が上がります",
@@ -35,10 +36,7 @@ export const SYSTEMS: Record<string, SystemDef> = {
     short: "クトゥルフ神話TRPG 6版",
     color: "#4e5b7c",
     emoji: "CoC6",
-    stats: [
-      { key: "san", label: "SAN", max: 99 },
-      { key: "mp", label: "MP", max: 20 },
-    ],
+    stats: [{ key: "san", label: "SAN", max: 99, carry: true }],
     growthLabel: "成長ロール",
     growthNote: "成功した技能を卓後に振って、失敗すれば値が上がります",
     skills: [
@@ -60,10 +58,8 @@ export const SYSTEMS: Record<string, SystemDef> = {
     short: "エモクロアTRPG",
     color: "#854c68",
     emoji: "エモ",
-    stats: [
-      { key: "von", label: "共鳴", max: 10 },
-      { key: "taisyo", label: "対象", max: 10 },
-    ],
+    /* 共鳴は永続共鳴として残る。共鳴対象などは卓ごとの値 */
+    stats: [{ key: "von", label: "共鳴", max: 10, carry: true }],
     growthLabel: "修得",
     growthNote: "セッション報酬で能力を修得します",
     skills: ["神術", "魔術", "近接", "弓術", "知識", "交渉", "運動", "感知"],
@@ -74,9 +70,12 @@ export const SYSTEMS: Record<string, SystemDef> = {
     short: "ソード・ワールド2.5",
     color: "#a85224",
     emoji: "SW",
+    /* 冒険者レベル・経験点・名誉点は続く。HP・MP は卓ごとに戻る */
     stats: [
-      { key: "hp", label: "HP", max: 40 },
-      { key: "mp", label: "MP", max: 30 },
+      { key: "lv", label: "冒険者レベル", carry: true },
+      { key: "exp", label: "経験点", carry: true },
+      { key: "honor", label: "名誉点", carry: true },
+      { key: "hp", label: "HP" },
     ],
     growthLabel: "成長",
     growthNote: "経験点を消費して技能Lvを上げます",
@@ -118,6 +117,11 @@ export const SYSTEMS: Record<string, SystemDef> = {
 };
 
 export const SYSTEM_LIST = Object.values(SYSTEMS);
+
+/** 卓をまたいで続く値（キャラクターの「今」として見せるもの） */
+export function carriedStats(sys: SystemDef | undefined) {
+  return (sys?.stats ?? []).filter((s) => s.carry);
+}
 
 /**
  * ログのロール形式・テキストからシステムを自動推定する。

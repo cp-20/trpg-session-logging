@@ -11,14 +11,70 @@ import {
   type Firestore,
 } from "firebase/firestore";
 import { getTakufuFirestore } from "./firebase";
+import { mediaForSharedPage } from "./session-media";
 import type { Character, Log, Policy, Scenario, Scope, State, User } from "../types";
+
+export interface CloudAuthUserLike {
+  uid: string;
+  displayName?: string | null;
+  email?: string | null;
+  photoURL?: string | null;
+  providerData?: { providerId: string; email?: string | null; displayName?: string | null }[];
+}
+
+export interface CloudRuntime {
+  getFirestore: () => Firestore | null;
+  getCurrentUser?: () => CloudAuthUserLike | null;
+  toUserProfile?: (user: CloudAuthUserLike) => User;
+}
+
+let cloudRuntime: CloudRuntime | null = null;
+
+/** モバイル環境など Next.js 以外のランタイムから Firestore / Auth を注入する */
+export function configureCloudRuntime(runtime: CloudRuntime | null): void {
+  cloudRuntime = runtime;
+}
+
+export function getCloudFirestore(): Firestore | null {
+  return cloudRuntime?.getFirestore() ?? getTakufuFirestore();
+}
+
+async function resolveCurrentUserAndProfile(): Promise<{
+  user: CloudAuthUserLike | null;
+  profile: User | null;
+}> {
+  if (cloudRuntime?.getCurrentUser) {
+    const user = cloudRuntime.getCurrentUser();
+    if (!user) return { user: null, profile: null };
+    if (cloudRuntime.toUserProfile) {
+      return { user, profile: cloudRuntime.toUserProfile(user) };
+    }
+    return {
+      user,
+      profile: {
+        id: user.uid,
+        name: user.displayName || user.email?.split("@")[0] || "プレイヤー",
+        email: user.email || undefined,
+        image: user.photoURL || undefined,
+        color: "#0e7490",
+        accounts: [],
+      },
+    };
+  }
+  const { getTakufuAuth, firebaseUserProfile } = await import("./auth");
+  const current = getTakufuAuth()?.currentUser ?? null;
+  return {
+    user: current,
+    profile: current ? firebaseUserProfile(current) : null,
+  };
+}
 
 // Each UTF-16 chunk is at most 480KB of UTF-8, safely below Firestore's 1MiB document limit.
 const CHUNK_LENGTH = 120_000;
 const MAX_CHUNKS = 200;
 
 function database(): Firestore {
-  const db = getTakufuFirestore();
+  const db = getCloudFirestore();
   if (!db) throw new Error("保存先に接続できません。");
   return db;
 }
@@ -40,8 +96,32 @@ export function splitCloudData(value: unknown): string[] {
   return chunks;
 }
 
+async function runConcurrent<T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  if (items.length === 0) return;
+  let cursor = 0;
+  const count = Math.min(concurrency, items.length);
+  await Promise.all(
+    Array.from({ length: count }, async () => {
+      while (cursor < items.length) {
+        const idx = cursor++;
+        await worker(items[idx]!);
+      }
+    }),
+  );
+}
+
+function safeMemberImage(img?: string): string {
+  if (!img) return "";
+  return new TextEncoder().encode(img).length <= 4096 ? img : "";
+}
+
 async function writeChunks(db: Firestore, path: string[], chunks: string[], ownerId?: string) {
   // Keep each commit below Firestore's 10MiB request limit, even for four-byte text.
+  const batches: ReturnType<typeof writeBatch>[] = [];
   for (let offset = 0; offset < chunks.length; offset += 10) {
     const batch = writeBatch(db);
     chunks.slice(offset, offset + 10).forEach((data, i) =>
@@ -50,8 +130,9 @@ async function writeChunks(db: Firestore, path: string[], chunks: string[], owne
         ...(ownerId ? { ownerId } : {}),
       }),
     );
-    await batch.commit();
+    batches.push(batch);
   }
+  await runConcurrent(batches, 3, (batch) => batch.commit());
 }
 
 async function readChunks(db: Firestore, path: string[], chunkCount: number): Promise<unknown> {
@@ -68,9 +149,13 @@ async function readChunks(db: Firestore, path: string[], chunkCount: number): Pr
 async function removeChunks(db: Firestore, path: string[]) {
   const rows = await getDocs(collection(db, path.join("/")));
   if (rows.empty) return;
-  const batch = writeBatch(db);
-  rows.forEach((row) => batch.delete(row.ref));
-  await batch.commit();
+  const batches: ReturnType<typeof writeBatch>[] = [];
+  for (let offset = 0; offset < rows.docs.length; offset += 200) {
+    const batch = writeBatch(db);
+    rows.docs.slice(offset, offset + 200).forEach((row) => batch.delete(row.ref));
+    batches.push(batch);
+  }
+  await runConcurrent(batches, 3, (batch) => batch.commit());
 }
 
 async function readGeneration(db: Firestore, manifestPath: string[], parentPath: string[]) {
@@ -102,6 +187,28 @@ export interface CloudWorkspace {
   revision: string;
 }
 
+export interface CloudWorkspaceManifest {
+  revision: string;
+  chunkCount: number;
+  updatedAt?: string;
+}
+
+/** ワークスペースの revision だけを確認し、変更がなければチャンク読込を省く */
+export async function fetchCloudWorkspaceManifest(uid: string): Promise<CloudWorkspaceManifest | null> {
+  const db = database();
+  const manifest = await getDocFromServer(doc(db, "users", uid, "workspace", "current"));
+  if (!manifest.exists() || manifest.data().enabled === false || manifest.data().revision === "revoked") {
+    return null;
+  }
+  const data = manifest.data();
+  if (typeof data.revision !== "string") return null;
+  return {
+    revision: data.revision,
+    chunkCount: typeof data.chunkCount === "number" ? data.chunkCount : 1,
+    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : undefined,
+  };
+}
+
 export function cloudStateProjection(state: State): State {
   return state;
 }
@@ -122,7 +229,7 @@ export async function saveCloudState(
   expectedRevision: string | null,
 ): Promise<string> {
   if (state.me !== uid || !state.users[uid])
-    throw new Error("サインイン中のアカウントと保存データが一致しません。");
+    throw new Error("ログイン中のアカウントと保存データが一致しません。");
   const db = database();
   const chunks = splitCloudData(cloudStateProjection(state));
   const revision = crypto.randomUUID();
@@ -155,6 +262,14 @@ export interface SharedLogData {
   scenario?: Scenario;
 }
 
+/** 共有ページを読める範囲。シナリオの共有方針がセッションの共有範囲より狭ければ、そちらに合わせる */
+export function sharedPageScope(log: Log, state: State): Scope {
+  const scenarioPolicy = log.scenarioId ? (state.scenarios[log.scenarioId]?.policy ?? "unknown") : "unknown";
+  if (scenarioPolicy === "members") return "members";
+  if (scenarioPolicy === "passed" && log.scope === "public") return "passed";
+  return log.scope;
+}
+
 export function sharedLogProjection(log: Log, state: State): SharedLogData {
   const scenario = log.scenarioId ? state.scenarios[log.scenarioId] : undefined;
   // Identity lives in individually controlled member documents, never in a public body snapshot.
@@ -168,6 +283,10 @@ export function sharedLogProjection(log: Log, state: State): SharedLogData {
   };
   // File names may contain personal information and do not belong on public pages.
   delete sharedLog.importedFrom;
+  // 関連するもの（録画など）は、共有ページを読める人に見せてよい範囲のものだけを載せる
+  const media = mediaForSharedPage(log.media, sharedPageScope(log, state));
+  if (media.length) sharedLog.media = media;
+  else delete sharedLog.media;
   return {
     log: sharedLog,
     users,
@@ -186,12 +305,7 @@ export async function publishSharedLog(log: Log, state: State): Promise<void> {
   const db = database();
   const projection = sharedLogProjection(log, state);
   const scenarioPolicy = log.scenarioId ? (state.scenarios[log.scenarioId]?.policy ?? "unknown") : "unknown";
-  const scope: Scope =
-    scenarioPolicy === "members"
-      ? "members"
-      : scenarioPolicy === "passed" && log.scope === "public"
-        ? "passed"
-        : log.scope;
+  const scope = sharedPageScope(log, state);
   const chunks = splitCloudData(projection);
   const revision = crypto.randomUUID();
   const ref = doc(db, "sharedLogs", log.slug);
@@ -229,7 +343,7 @@ export async function publishSharedLog(log: Log, state: State): Promise<void> {
     inviteId: ownMember.data()?.inviteId || "",
     displayName: ownProfile.name,
     color: ownProfile.color,
-    image: ownProfile.image || "",
+    image: safeMemberImage(ownProfile.image),
     hidden: state.prefs.hideSelfOnShare || Boolean(log.players[state.me]?.hidden),
     linked: true,
   });
@@ -294,9 +408,8 @@ export async function getSharedLogAccess(
 
 /** This is a self-declaration, not a proof of play. Rules check scope and the declaring UID. */
 export async function confirmPlayedLog(slug: string): Promise<void> {
-  const { getTakufuAuth } = await import("./auth");
-  const user = getTakufuAuth()?.currentUser;
-  if (!user) throw new Error("Googleでサインインしてから、プレイ済みか確認してください。");
+  const { user } = await resolveCurrentUserAndProfile();
+  if (!user) throw new Error("Googleでログインしてから、プレイ済みか確認してください。");
   const db = database();
   const batch = writeBatch(db);
   batch.set(doc(db, "sharedLogs", slug, "access", user.uid), { passed: true });
@@ -329,6 +442,9 @@ export function sharedCharacterProjection(character: Character, state: State): S
       : [],
   };
   delete projected.import;
+  /* キャラシは能力値と同じ扱い。同期の設定（URL・エラー）は共有ページに載せない */
+  delete projected.externalSync;
+  if (!share.includeStats) delete projected.sheet;
   const hideOwner = state.prefs.hideSelfOnShare;
   return {
     character: projected,
@@ -446,17 +562,19 @@ export async function getSharedInvite(token: string): Promise<SharedInvite | nul
 }
 
 export async function acceptSharedInvite(token: string): Promise<SharedLogData> {
-  const { getTakufuAuth } = await import("./auth");
-  const user = getTakufuAuth()?.currentUser;
-  if (!user) throw new Error("Googleでサインインしてから、招待を受け取ってください。");
+  const { user, profile } = await resolveCurrentUserAndProfile();
+  if (!user || !profile) throw new Error("Googleでログインしてから、招待を受け取ってください。");
   const invite = await getSharedInvite(token);
   if (!invite) throw new Error("招待リンクの有効期限が切れているか、招待が取り消されています。");
   const db = database();
   const ref = doc(db, "sharedLogs", invite.slug, "members", user.uid);
-  const profile = (await import("./auth")).firebaseUserProfile(user);
   await runTransaction(db, async (transaction) => {
     const existing = await transaction.get(ref);
-    const identity = { displayName: profile.name, color: profile.color, image: profile.image || "" };
+    const identity = {
+      displayName: profile.name,
+      color: profile.color,
+      image: safeMemberImage(profile.image),
+    };
     if (!existing.exists())
       transaction.set(ref, { inviteId: token, hidden: false, linked: true, ...identity });
     else transaction.update(ref, { linked: true, ...identity });
@@ -470,22 +588,20 @@ export async function updateSharedMembership(
   slug: string,
   state: { linked: boolean; hidden: boolean },
 ): Promise<void> {
-  const { getTakufuAuth } = await import("./auth");
-  const user = getTakufuAuth()?.currentUser;
-  if (!user) throw new Error("Googleでサインインしてください。");
+  const { user, profile } = await resolveCurrentUserAndProfile();
+  if (!user || !profile) throw new Error("Googleでログインしてください。");
   const db = database();
   const ref = doc(db, "sharedLogs", slug, "members", user.uid);
   const current = await getDocFromServer(ref);
   const batch = writeBatch(db);
   if (current.exists()) batch.update(ref, state);
   else {
-    const profile = (await import("./auth")).firebaseUserProfile(user);
     batch.set(ref, {
       inviteId: "",
       ...state,
       displayName: profile.name,
       color: profile.color,
-      image: profile.image || "",
+      image: safeMemberImage(profile.image),
     });
   }
   await batch.commit();

@@ -1,3 +1,5 @@
+import type { CharacterSheet } from "./lib/sheet";
+import type { SessionMedia } from "./lib/session-media";
 export type Provider = "google" | "discord" | "x" | "booth" | "talto";
 export type AccountStatus = "linked" | "pending" | "none";
 
@@ -22,19 +24,47 @@ export interface User {
   profilePublic?: boolean;
 }
 
+/** システムの値。`carry` は卓をまたいで続く値（SAN など）。HP・MP のように毎回戻るものは付けない */
+export interface SystemStatDef {
+  key: string;
+  label: string;
+  max?: number;
+  carry?: boolean;
+}
+
 export interface SystemDef {
   id: string;
   name: string;
   short: string;
   color: string;
   emoji: string;
-  stats: { key: string; label: string; max?: number }[];
+  stats: SystemStatDef[];
   growthLabel: string;
   growthNote: string;
   skills: string[];
 }
 
 export type Policy = "public" | "passed" | "members" | "unknown";
+
+export type ExternalSyncProvider =
+  | "iachara"
+  | "charasheet"
+  | "ytsheet"
+  | "emoklore"
+  | "charaeno"
+  | "charash"
+  | "booth"
+  | "talto";
+
+export interface ExternalSyncConfig {
+  provider: ExternalSyncProvider;
+  url: string;
+  lastSyncedAt?: string;
+  lastStatus?: "ok" | "error";
+  lastError?: string;
+  contentHash?: string;
+  autoSync: boolean;
+}
 
 export interface Scenario {
   id: string;
@@ -54,6 +84,7 @@ export interface Scenario {
   addedByUid?: string;
   /** カタログ上で既知のラン数（この卓での記録の外側） */
   extraRuns?: number;
+  externalSync?: ExternalSyncConfig;
 }
 
 /** 卓: メンバーグループ。セッションに紐付け、後から日程調整にも使う */
@@ -137,6 +168,8 @@ export interface Log {
   /** タイムラインの発言者名(sp)ごとのアイコン画像(data URL または Character/User ID) */
   speakerIcons?: Record<string, string>;
   impressions?: SessionImpression[];
+  /** 録画・録音・配信・卓報告・絵など、このセッションに紐付くもの */
+  media?: SessionMedia[];
 }
 
 export interface SessionStat {
@@ -184,14 +217,40 @@ export interface Character {
   growth: GrowthRecord[];
   share: CharacterShare;
   import?: { source: string; importedAt: string };
+  externalSync?: ExternalSyncConfig;
+  /** 取り込んだキャラシ（汎用形式の JSON）。あるときは名前・能力値・技能はキャラシが正 */
+  sheet?: CharacterSheet;
 }
 
 export interface Prefs {
   hideSelfOnShare: boolean;
   onboardingDone?: boolean;
+  /** 本人が手で入れた「予定のある日」（終日扱い） */
   busyDates?: string[];
   /** カレンダー購読リンクのトークン（作成済みのときだけ） */
   calendarFeedToken?: string;
+  /** Google カレンダーの空き時間の照らし合わせ。本人が設定で許可したときだけ存在する */
+  googleBusy?: GoogleBusyPrefs;
+}
+
+/** Google カレンダーから取り込んだ「予定が入っている時間帯」。件名などは持たない */
+export interface BusyRange {
+  /** どのカレンダーの時間帯か（カレンダーを外したときに消すため） */
+  calendarId: string;
+  start: string; // ISO 8601
+  end: string; // ISO 8601
+}
+
+export interface GoogleBusyPrefs {
+  /** 許可した日時（ISO 8601） */
+  consentedAt: string;
+  /** 照らし合わせに使うカレンダー（名前は設定画面で見分けるためだけに持つ） */
+  calendars: { id: string; name: string; on: boolean }[];
+  /** 終日の予定も「予定あり」に数える */
+  countAllDay: boolean;
+  ranges: BusyRange[];
+  /** 最後に取り込んだ日時（ISO 8601） */
+  syncedAt?: string;
 }
 
 export type Availability = "ok" | "maybe" | "ng";
@@ -220,11 +279,21 @@ export interface TableEvent {
   createdBy: string;
 }
 
+export interface ScenarioEditChanges {
+  title?: string;
+  author?: string;
+  systemId?: string;
+  sourceUrl?: string;
+  tags?: string[];
+  description?: string;
+}
+
 export interface ScenarioEditRequest {
   id: string;
   scenarioId: string;
   uid: string;
   at: string;
+  changes?: ScenarioEditChanges;
   note?: string;
   status: "pending" | "accepted" | "rejected";
 }

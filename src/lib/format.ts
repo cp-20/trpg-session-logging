@@ -22,11 +22,18 @@ export function jstTime30(ts: number, baseTs: number): string {
     : `${String(h).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
 }
 
+const fmtDateCache = new Map<string, string>();
+
 export function fmtDate(s: string): string {
+  const hit = fmtDateCache.get(s);
+  if (hit !== undefined) return hit;
   const d = new Date(s + "T00:00:00");
   const w = ["日", "月", "火", "水", "木", "金", "土"][d.getDay()];
   const [, m, dd] = s.split("-");
-  return `${+m}月${+dd}日(${w})`;
+  const formatted = `${+m}月${+dd}日(${w})`;
+  if (fmtDateCache.size >= 2000) fmtDateCache.clear();
+  fmtDateCache.set(s, formatted);
+  return formatted;
 }
 
 export function fmtDateShort(s: string): string {
@@ -54,6 +61,15 @@ export function fmtDur(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
   return h > 0 ? `${h}時間${m ? `${m}分` : ""}` : `${m}分`;
+}
+
+/**
+ * 能力値の増減。括弧で包み、負号は全角幅のマイナス（−）にする: -3 → "(−3)"、7 → "(+7)"、0 → "(±0)"。
+ * 「SAN 50→47 (−3)」のように、前後の値の後ろに添える。
+ */
+export function fmtDelta(diff: number): string {
+  if (diff === 0) return "(±0)";
+  return diff > 0 ? `(+${diff})` : `(\u2212${-diff})`;
 }
 
 /** 複数日セッションの見せ方: "11月8日(土)", "11月8日(土)〜9日(日)", "11月8日(土)・14日(金)" */

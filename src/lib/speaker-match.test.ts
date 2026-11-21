@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Channel, Character, State, User } from "../types";
+import type { Channel, Character, Log, State, User } from "../types";
 import {
   buildDraft,
+  compactName,
   isGenericRoleName,
   matchSpeakerToState,
   remapChannelTimestamps,
@@ -56,16 +57,26 @@ function world(): Pick<State, "me" | "users" | "characters" | "tables" | "scenar
 
 describe("発言者名の正規化", () => {
   it("注記と役割の接頭辞を落とす", () => {
+    expect(compactName(" 遠沢　澄花 ")).toBe("遠沢澄花");
     expect(stripSpeakerDecorations("KP: 灯馬【進行】")).toBe("灯馬");
-    expect(stripSpeakerDecorations("遠沢 澄花（みかん）")).toBe("遠沢澄花");
+    expect(stripSpeakerDecorations("GM／[HO1]白瀬 怜(テスト)")).toBe("白瀬怜");
+    expect(stripSpeakerDecorations("PC2：凛（PL：みかん）")).toBe("凛");
+    expect(stripSpeakerDecorations("NPC/案内人")).toBe("案内人");
+    expect(stripSpeakerDecorations("サブ KP: テスト")).toBe("サブkp:テスト");
   });
   it("括弧内を PL 名の手がかりとして取り出す", () => {
-    expect(speakerHints("遠沢澄花（みかん）")).toEqual(["みかん"]);
+    expect(speakerHints("遠沢澄花（みかん）[PL1]【HO2】(sub)")).toEqual(["みかん", "pl1", "ho2", "sub"]);
+    expect(speakerHints("遠沢()澄花(x)")).toEqual(["x"]);
     expect(speakerHints("白瀬怜")).toEqual([]);
   });
   it("役割だけの名前は誰にも結び付けない", () => {
-    expect(isGenericRoleName("KP")).toBe(true);
-    expect(matchSpeakerToState("KP", world())).toEqual({ character: null, user: null });
+    for (const r of ["KP", " gm ", "PL", "PC1", "PC12", "NPC", "system", "キーパー", "進行役"]) {
+      expect(isGenericRoleName(r)).toBe(true);
+      expect(matchSpeakerToState(r, world())).toEqual({ character: null, user: null });
+    }
+    expect(isGenericRoleName("PC1A")).toBe(false);
+    expect(isGenericRoleName("MyKP")).toBe(false);
+    expect(isGenericRoleName("KP:夜霜")).toBe(false);
   });
 });
 
@@ -101,10 +112,36 @@ describe("matchSpeakerToState", () => {
     expect(matchSpeakerToState("怜", world()).character).toBeNull();
   });
 
-  it("キャラが見つからなければ PL 名でユーザーを返す", () => {
+  it("キャラが見つからなければ PL 名でユーザーを返し、文字列コンテキスト・境界スコア・弱一致フォールバックを扱う", () => {
     const r = matchSpeakerToState("そら", world());
     expect(r.character).toBeNull();
     expect(r.user?.id).toBe("u_b");
+
+    // 文字列第3引数は preferredSystemId として扱われる
+    expect(matchSpeakerToState("遠沢澄花", world(), "emoklore").character?.id).toBe("c2");
+
+    // 部分一致 51点 (<55) かつ所有者ヒント一致なしなら、user ヒント (>= 50) が勝ち、無ければ弱いキャラへフォールバック
+    const w = world();
+    w.characters.c4 = char("c4", "u_a", "アリスインワンダ"); // sp=アリス(3)/len=8 で score=51 (<55)
+    expect(matchSpeakerToState("アリス（そら）", w)).toMatchObject({
+      character: null,
+      user: { id: "u_b" },
+    });
+    expect(matchSpeakerToState("アリス", w).character?.id).toBe("c4");
+    w.characters.c5 = char("c5", "u_b", "一二三四五六"); // sp=一二三(3)/len=6 で score=55
+    expect(matchSpeakerToState("一二三", w).character?.id).toBe("c5");
+
+    // spClean 長さ1文字・nClean 長さ1文字・文字長タイブレーク (20 文字上限)・user 参加者スコア(+10)・未知キャラ
+    w.characters.c6 = char("c6", "u_a", "あ");
+    expect(matchSpeakerToState("あ(補足)", w).character).toBeNull();
+    expect(matchSpeakerToState("か(補足)", w).character).toBeNull();
+    expect(matchSpeakerToState("あいうえお（白瀬怜）", w).character).toBeNull();
+    expect(matchSpeakerToState("遠沢澄花さん", w, { participantIds: ["u_a"] }).character?.id).toBe("c1");
+
+    // user 同点時に participantIds と文字長タイブレークが効く
+    w.users.u_c = user("u_c", "あ"); // len=1 なので nameScore 0, hint 60
+    expect(matchSpeakerToState("未知（あ）（そら）", w, { participantIds: ["u_b"] }).user?.id).toBe("u_b");
+    expect(matchSpeakerToState("完全に未知の発言者", w)).toEqual({ character: null, user: null });
   });
 });
 
@@ -136,7 +173,6 @@ describe("buildDraft", () => {
     });
     expect(d.speakerLinks["遠沢澄花"]).toEqual({ userId: "u_a", characterId: "c1" });
     expect(d.speakerIcons["遠沢澄花"]).toBe("char:c1");
-    // PL 名で話している人は PC ではなく PL として扱う
     expect(d.kinds["そら"]).toBe("PL");
     expect(d.players).toEqual(
       expect.arrayContaining([
@@ -145,6 +181,136 @@ describe("buildDraft", () => {
       ]),
     );
     expect(d.kinds.KP).toBe("KP");
+  });
+
+  it("attachLog・presetScenario・GM/KP 昇格・ts=0 の derived null・卓なしフォールバックを検証する", () => {
+    const w = world();
+    w.scenarios.sc1 = {
+      id: "sc1",
+      title: "潮騒",
+      author: "A",
+      systemId: "emoklore",
+      source: "manual",
+      policy: "public",
+      emoji: "🎲",
+      bg: "#fff",
+      tags: [],
+      claimedBy: null,
+      addedBy: "user",
+    };
+    const attachLog: Log = {
+      id: "log1",
+      title: "添付先卓",
+      tableId: "t1",
+      scenarioId: "sc1",
+      systemId: "sw25",
+      ownerId: "u_kp",
+      scope: "public",
+      hasLog: false,
+      speakerIcons: { "GM:みかん": "https://cdn.example.com/gm.png" },
+      channels: [],
+      players: {
+        u_kp: { linked: true, hidden: false, characterIds: [] },
+        u_b: { linked: true, hidden: false, characterIds: ["c2"] },
+      },
+      createdAt: "2026-01-01",
+      dates: ["2026-01-01"],
+      t0: 100,
+      t1: 200,
+      slug: "s1",
+    };
+    const zeroTsChannels: Channel[] = [
+      {
+        id: "main",
+        name: "メイン",
+        secret: false,
+        msgs: [
+          { id: "m1", ts: 0, sp: "GM:みかん", kind: "PC", type: "text", text: "開会" },
+          { id: "m2", ts: 0, sp: "KP:そら", kind: "PC", type: "text", text: "進行" },
+          { id: "m3", ts: 0, sp: "遠沢澄花（みかん）", kind: "PC", type: "text", text: "参加" },
+          { id: "m4", ts: 0, sp: "白瀬怜", kind: "PC", type: "text", text: "重複しない" },
+          { id: "m5", ts: 0, sp: "遠沢澄花（そら）", kind: "PC", type: "text", text: "既存重複防止" },
+          { id: "m6", ts: 0, sp: "GM:みかん", kind: "GM", type: "text", text: "補足" },
+        ],
+      },
+    ];
+    const attached = buildDraft({
+      fileName: "a.html",
+      channels: zeroTsChannels,
+      attachLog,
+      presetTable: "",
+      presetScenario: "",
+      manual: null,
+      state: w,
+      avatars,
+    });
+    expect(attached.meta).toEqual({ title: "添付先卓", systemId: "sw25" });
+    expect(attached.scope).toBe("public");
+    expect(attached.scenarioId).toBe("sc1");
+    expect(attached.tableId).toBe("t1");
+    expect(attached.derived).toBeNull();
+    expect(attached.kinds["GM:みかん"]).toBe("GM");
+    expect(attached.kinds["KP:そら"]).toBe("KP");
+    // 既存の attachLog.speakerIcons を上書きしない
+    expect(attached.speakerIcons["GM:みかん"]).toBe("https://cdn.example.com/gm.png");
+    expect(attached.speakerIcons["KP:そら"]).toBe("user:u_b");
+    expect(attached.players).toEqual(
+      expect.arrayContaining([
+        { userId: "u_b", characterIds: ["c2", "c3"] },
+        { userId: "u_a", characterIds: ["c1"] },
+      ]),
+    );
+
+    // presetScenario からの title/systemId 補完 + 卓なしは general / 空 players な attachLog / table.systemId / SYSTEM 優先順位 / 逆順タイムスタンプ再マップ
+    w.tables.t2 = {
+      id: "t2",
+      name: "CoC6卓",
+      ownerId: "u_kp",
+      systemId: "coc6",
+      memberIds: ["u_kp", "u_a"],
+      createdAt: "2026-01-01",
+    };
+    const presetOnly = buildDraft({
+      fileName: null,
+      channels: [],
+      attachLog: null,
+      presetTable: "",
+      presetScenario: "sc1",
+      manual: { dates: ["2026-10-10"], start: "21:00", end: "23:00" },
+      state: w,
+      avatars,
+    });
+    expect(presetOnly.meta).toEqual({ title: "潮騒", systemId: "emoklore" });
+    expect(presetOnly.derived).toBeNull();
+    expect(presetOnly.guess).toBeNull();
+
+    const emptyPlayersAttach: Log = { ...attachLog, systemId: "general", players: {} };
+    delete (emptyPlayersAttach as Partial<Log>).systemId;
+    const tableFallback = buildDraft({
+      fileName: "b.json",
+      channels: [
+        {
+          id: "c",
+          name: "メイン",
+          secret: false,
+          msgs: [
+            { id: "1", ts: 10, sp: "進行", kind: "SYSTEM", type: "text", text: "システム" },
+            { id: "2", ts: 20, sp: "進行", kind: "PC", type: "text", text: "上書きされない" },
+            { id: "3", ts: 30, sp: "みかん", kind: "PC", type: "text", text: "自参加" },
+          ],
+        },
+      ],
+      attachLog: null,
+      presetTable: "t2",
+      presetScenario: "",
+      manual: null,
+      state: w,
+      avatars,
+    });
+    expect(tableFallback.meta.systemId).toBe("coc6");
+    expect(tableFallback.kinds["進行"]).toBe("SYSTEM");
+    expect(tableFallback.players).toEqual([{ userId: "u_a", characterIds: [] }]);
+    expect(tableFallback.derived).toMatchObject({ t0: 10, t1: 30 });
   });
 });
 
@@ -191,5 +357,66 @@ describe("remapChannelTimestamps", () => {
   it("元のチャンネルを書き換えない", () => {
     remapChannelTimestamps(channels, ["2026-10-10"], 100, 200);
     expect(channels[0]!.msgs[0]!.ts).toBe(0);
+  });
+
+  it("空チャンネル・1メッセージ・同値ts群・3日以上の中間日バケットを正しく写す", () => {
+    const empty: Channel[] = [{ id: "e", name: "空", secret: false, msgs: [] }];
+    expect(remapChannelTimestamps(empty, ["2026-10-10"], 100, 200)).toBe(empty);
+
+    const single: Channel[] = [
+      {
+        id: "a",
+        name: "メイン",
+        secret: false,
+        msgs: [{ id: "1", ts: 500, sp: "A", kind: "PC", type: "text", text: "x" }],
+      },
+    ];
+    expect(remapChannelTimestamps(single, ["2026-10-10"], 1000, 2000)[0]?.msgs[0]?.ts).toBe(1000);
+
+    const equalTs: Channel[] = [
+      {
+        id: "a",
+        name: "メイン",
+        secret: false,
+        msgs: [
+          { id: "1", ts: 50, sp: "A", kind: "PC", type: "text", text: "1" },
+          { id: "2", ts: 50, sp: "A", kind: "PC", type: "text", text: "2" },
+          { id: "3", ts: 50, sp: "A", kind: "PC", type: "text", text: "3" },
+        ],
+      },
+    ];
+    const eqOut = remapChannelTimestamps(equalTs, ["2026-10-10"], 1000, 2000)[0]!.msgs.map((m) => m.ts);
+    expect(eqOut).toEqual([1000, 1500, 2000]);
+
+    // 3日分割 (中日バケットは 21:00 JST 〜 23:55 JST)
+    const sixMsgs: Channel[] = [
+      {
+        id: "a",
+        name: "メイン",
+        secret: false,
+        msgs: [0, 1, 2, 3, 4, 5].map((i) => ({
+          id: String(i),
+          ts: i,
+          sp: "A",
+          kind: "PC",
+          type: "text",
+          text: String(i),
+        })),
+      },
+    ];
+    const d0 = jstEpoch("2026-10-10", "21:00");
+    const d1Start = jstEpoch("2026-10-11", "21:00");
+    const d1End = jstEpoch("2026-10-11", "23:55");
+    const d2End = jstEpoch("2026-10-12", "23:00");
+    const threeDaysOut = remapChannelTimestamps(
+      sixMsgs,
+      ["2026-10-10", "2026-10-11", "2026-10-12"],
+      d0,
+      d2End,
+    )[0]!.msgs.map((m) => m.ts);
+    expect(threeDaysOut[0]).toBe(d0);
+    expect(threeDaysOut[2]).toBeGreaterThanOrEqual(d1Start);
+    expect(threeDaysOut[3]).toBeLessThanOrEqual(d1End);
+    expect(threeDaysOut[5]).toBe(d2End);
   });
 });

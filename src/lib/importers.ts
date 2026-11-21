@@ -15,6 +15,19 @@ import {
   type ParsedLog,
 } from "./ccfolia-parser";
 import { jstEpoch, todayStr } from "./format";
+import type { SheetProvider } from "./sheet";
+import {
+  parseCharaenoJson,
+  parseCharashJson,
+  sheetFromCharasheet,
+  sheetFromStats,
+  sheetFromYtsheet,
+} from "./sheet-sources";
+import {
+  parseUdonariumCharacterFallback,
+  parseUdonariumChatsFallback,
+  type FallbackUdonariumCharData,
+} from "./html-xml-fallback";
 
 export { toCharacterFields, sessionDatesOf, summarizeParsed };
 export type { ParsedCharacter, ParsedLog };
@@ -58,7 +71,7 @@ function normalizeStatKey(raw: string): string {
   return k;
 }
 
-function guessSystemFromText(text: string): string | undefined {
+export function guessSystemFromText(text: string): string | undefined {
   if (/Cthulhu7th|クトゥルフ.*7|CoC\s*7|7版/i.test(text)) return "coc7";
   if (/Cthulhu|CCB|クトゥルフ.*6|CoC\s*6|6版/i.test(text)) return "coc6";
   if (/SwordWorld|SW2|ソード.?ワールド/i.test(text)) return "sw25";
@@ -130,8 +143,8 @@ function assembleLogEntries(entries: LogEntry[]): ParsedLog | null {
   return { channels, kinds, messageCount };
 }
 
+/** 呼び出し元で DOMParser の有無を確かめてから使う */
 function parseXmlDoc(raw: string): Document | null {
-  if (typeof DOMParser === "undefined") return null;
   const doc = new DOMParser().parseFromString(raw, "application/xml");
   if (doc.querySelector("parsererror")) return null;
   return doc;
@@ -190,7 +203,7 @@ const CHARASHEET_NP_MAP: Record<string, string> = {
   NP14: "know",
 };
 
-function parseCharasheetJson(raw: string): ParsedCharacter | null {
+export function parseCharasheetJson(raw: string): ParsedCharacter | null {
   let root: unknown;
   try {
     root = JSON.parse(raw);
@@ -250,7 +263,7 @@ function parseCharasheetJson(raw: string): ParsedCharacter | null {
   };
 }
 
-function parseIacharaText(raw: string): ParsedCharacter | null {
+export function parseIacharaText(raw: string): ParsedCharacter | null {
   const nameMatch = raw.match(/^名前\s*[:：]\s*(.+)$/m);
   if (!nameMatch) return null;
 
@@ -310,11 +323,8 @@ function parseIacharaText(raw: string): ParsedCharacter | null {
     for (const line of skillText.split(/\r?\n/)) {
       const skillRe = /([^\s:：()（）【】\d]+(?:\([^)]+\)|（[^）]+）)?)\s*[:：\s]\s*(\d{1,3})%?/g;
       for (const m of line.matchAll(skillRe)) {
-        const sk = m[1]!.trim();
-        const val = Number(m[2]);
-        if (sk && Number.isFinite(val) && val <= 999) {
-          stats[sk] = val;
-        }
+        // m[1] は空白以外で始まり ) / ） か技能名の文字で終わる。m[2] は 3 桁までの数字。
+        stats[m[1]!] = Number(m[2]);
       }
     }
   }
@@ -339,25 +349,18 @@ function parseIacharaText(raw: string): ParsedCharacter | null {
   };
 }
 
-function parseUdonariumCharacterXml(raw: string): ParsedCharacter | null {
-  if (!/^\uFEFF?\s*</.test(raw) || !/<character\b/i.test(raw)) return null;
-  const doc = parseXmlDoc(raw);
-  if (!doc) return null;
-  const root = doc.querySelector("character");
-  if (!root) return null;
-
+function buildUdonariumCharacter(
+  leafData: FallbackUdonariumCharData[],
+  dicebot: string,
+  paletteText: string,
+): ParsedCharacter | null {
   let name = "";
   let imageId: string | undefined;
   let memo = "";
   const stats: Record<string, number> = {};
 
-  for (const el of root.querySelectorAll("data")) {
-    const dataName = (el.getAttribute("name") ?? "").trim();
-    const dataType = (el.getAttribute("type") ?? "").trim();
-    const hasChildData = el.querySelector(":scope > data") !== null;
-    if (hasChildData) continue;
-
-    const textVal = (el.textContent ?? "").trim();
+  for (const item of leafData) {
+    const { dataName, dataType, currentValue, text: textVal } = item;
     if (dataName === "name" && textVal && !name) {
       name = textVal;
       continue;
@@ -375,8 +378,7 @@ function parseUdonariumCharacterXml(raw: string): ParsedCharacter | null {
     }
     if (dataName === "size") continue;
 
-    const curVal = el.getAttribute("currentValue");
-    const rawNum = curVal !== null && curVal.trim() !== "" ? curVal : textVal;
+    const rawNum = currentValue !== null && currentValue.trim() !== "" ? currentValue : textVal;
     const parsedNum = num(rawNum);
     if (dataName && parsedNum !== undefined) {
       stats[normalizeStatKey(dataName)] = parsedNum;
@@ -385,9 +387,6 @@ function parseUdonariumCharacterXml(raw: string): ParsedCharacter | null {
 
   if (!name) return null;
 
-  const palette = root.querySelector("chat-palette");
-  const dicebot = palette?.getAttribute("dicebot") ?? "";
-  const paletteText = palette?.textContent ?? "";
   const systemId = guessSystemFromText(`${dicebot} ${paletteText} ${memo}`);
 
   return {
@@ -399,35 +398,370 @@ function parseUdonariumCharacterXml(raw: string): ParsedCharacter | null {
   };
 }
 
-export function importCharacterFromText(raw: string): CharacterImportResult | null {
+function parseUdonariumCharacterXml(raw: string): ParsedCharacter | null {
+  if (!/^\uFEFF?\s*</.test(raw) || !/<character\b/i.test(raw)) return null;
+  if (typeof DOMParser === "undefined") {
+    const parsed = parseUdonariumCharacterFallback(raw);
+    if (!parsed) return null;
+    return buildUdonariumCharacter(parsed.leafData, parsed.dicebot, parsed.paletteText);
+  }
+  const doc = parseXmlDoc(raw);
+  if (!doc) return null;
+  const root = doc.querySelector("character");
+  if (!root) return null;
+
+  const leafData: FallbackUdonariumCharData[] = [];
+  for (const el of root.querySelectorAll("data")) {
+    if (el.querySelector(":scope > data") !== null) continue;
+    leafData.push({
+      dataName: (el.getAttribute("name") ?? "").trim(),
+      dataType: (el.getAttribute("type") ?? "").trim(),
+      currentValue: el.getAttribute("currentValue"),
+      text: (el.textContent ?? "").trim(),
+    });
+  }
+
+  const palette = root.querySelector("chat-palette");
+  const dicebot = palette?.getAttribute("dicebot") ?? "";
+  const paletteText = palette?.textContent ?? "";
+  return buildUdonariumCharacter(leafData, dicebot, paletteText);
+}
+
+export function parseYtsheetJson(raw: string): ParsedCharacter | null {
+  let root: unknown;
+  try {
+    root = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isRecord(root)) return null;
+  const name = (str(root.characterName) ?? str(root.pcName) ?? str(root.name))?.trim();
+  if (!name) return null;
+
+  const isYtsheet =
+    root.characterName !== undefined ||
+    root.sttStr !== undefined ||
+    root.hpTotal !== undefined ||
+    root.lv !== undefined ||
+    root.level !== undefined ||
+    root.gameSystem !== undefined ||
+    root.ver !== undefined;
+  if (!isYtsheet) return null;
+
+  const stats: Record<string, number> = {};
+  const ytStatPairs: [string, string[]][] = [
+    ["hp", ["hpTotal", "HP", "hp", "statusHp"]],
+    ["mp", ["mpTotal", "MP", "mp", "statusMp"]],
+    ["san", ["sanTotal", "SAN", "san", "sanLeft"]],
+    ["str", ["sttStr", "STR", "statusStr"]],
+    ["dex", ["sttDex", "DEX", "statusDex"]],
+    ["agi", ["sttAgi", "AGI"]],
+    ["vit", ["sttVit", "CON", "statusCon"]],
+    ["int", ["sttInt", "INT", "statusInt"]],
+    ["mnd", ["sttMnd", "POW", "statusPow"]],
+  ];
+  for (const [statKey, candidates] of ytStatPairs) {
+    for (const key of candidates) {
+      const val = num(root[key]);
+      if (val !== undefined) {
+        stats[statKey] = val;
+        break;
+      }
+    }
+  }
+
+  const race = str(root.race)?.trim();
+  const job = (str(root.job) ?? str(root.class) ?? str(root.works))?.trim();
+  const level = str(root.level) ?? str(root.lv);
+  const note = (str(root.freeNote) ?? str(root.profile) ?? str(root.memo))?.trim();
+
+  const memoLines: string[] = [];
+  if (race || job)
+    memoLines.push([race && `種族: ${race}`, job && `職業: ${job}`].filter(Boolean).join(" / "));
+  if (level) memoLines.push(`Lv.${level}`);
+  if (note) memoLines.push(note.replace(/&lt;br\s*\/?&gt;|<br\s*\/?>/gi, "\n"));
+
+  const gameHint = `${str(root.gameSystem) ?? ""} ${race ?? ""} ${job ?? ""} ${note ?? ""}`;
+  let systemId = guessSystemFromText(gameHint);
+  if (!systemId) {
+    if (root.sttAgi !== undefined || root.sttMnd !== undefined || race) systemId = "sw25";
+    else if (stats.san !== undefined) systemId = (stats.str ?? 0) >= 25 ? "coc7" : "coc6";
+  }
+
+  const imgRaw = str(root.imageURL) ?? str(root.imageUrl);
+  const image = imgRaw && /^https:\/\//i.test(imgRaw.trim()) ? imgRaw.trim() : undefined;
+
+  return {
+    name,
+    memo: memoLines.join("\n") || undefined,
+    systemId,
+    stats,
+    ...(image ? { image } : {}),
+  };
+}
+
+export function parseEmokloreCharacter(raw: string): ParsedCharacter | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
 
-  // 1. キャラクター保管所 JSON (pc_name 優先判定)
-  const charasheet = parseCharasheetJson(trimmed);
-  if (charasheet) {
-    return { character: charasheet, sourceLabel: "キャラクター保管所" };
+  if (trimmed.startsWith("{")) {
+    let root: unknown;
+    try {
+      root = JSON.parse(trimmed);
+    } catch {
+      return null;
+    }
+    if (!isRecord(root)) return null;
+    const isEmo =
+      str(root.system)?.toLowerCase().includes("emo") ||
+      root.resonance !== undefined ||
+      root.taisyo !== undefined ||
+      root.von !== undefined ||
+      root.emotion !== undefined;
+    if (!isEmo) return null;
+    const name = (str(root.name) ?? str(root.characterName))?.trim();
+    if (!name) return null;
+    const stats: Record<string, number> = {};
+    const von = num(root.von ?? root.resonance);
+    const taisyo = num(root.taisyo ?? root.ego);
+    const hp = num(root.hp ?? root.HP);
+    if (von !== undefined) stats.von = von;
+    if (taisyo !== undefined) stats.taisyo = taisyo;
+    if (hp !== undefined) stats.hp = hp;
+    if (isRecord(root.skills)) {
+      for (const [k, v] of Object.entries(root.skills)) {
+        const n = num(v);
+        if (n !== undefined) stats[k] = n;
+      }
+    }
+    const memoParts = [
+      str(root.roots) ? `ルーツ: ${str(root.roots)}` : "",
+      str(root.emotion) ? `共鳴感情: ${str(root.emotion)}` : "",
+      str(root.memo) ?? "",
+    ].filter(Boolean);
+    return {
+      name,
+      memo: memoParts.join("\n") || undefined,
+      systemId: "emoklore",
+      stats,
+    };
   }
 
-  // 2. CCFOLIA JSON
+  const isEmoText = /共鳴者|共鳴感情|DM<=|emoklore|エモクロア/i.test(trimmed);
+  if (!isEmoText) return null;
+  const nameMatch = trimmed.match(/^(?:共鳴者名|名前)\s*[:：]\s*(.+)$/m);
+  if (!nameMatch) return null;
+  const name = nameMatch[1]!.trim();
+  if (!name) return null;
+
+  const stats: Record<string, number> = {};
+  const vonMatch = trimmed.match(/共鳴(?:度)?\s*[:：]?\s*(\d+)/);
+  if (vonMatch) stats.von = Number(vonMatch[1]);
+  const hpMatch = trimmed.match(/HP\s*[:：]?\s*(\d+)/i);
+  if (hpMatch) stats.hp = Number(hpMatch[1]);
+  for (const m of trimmed.matchAll(/〈([^〉]+)〉\s*(?:\[(\d+)\]|[:：]?\s*(\d+))/g)) {
+    stats[m[1]!.trim()] = Number(m[2] ?? m[3]);
+  }
+  const occ = trimmed.match(/^(?:職業|ルーツ)\s*[:：]\s*(.+)$/m)?.[1]?.trim();
+  const emo = trimmed.match(/^共鳴感情\s*[:：]\s*(.+)$/m)?.[1]?.trim();
+  const memoLines = [occ && `職業: ${occ}`, emo && `共鳴感情: ${emo}`].filter(Boolean) as string[];
+  return {
+    name,
+    memo: memoLines.join("\n") || undefined,
+    systemId: "emoklore",
+    stats,
+  };
+}
+
+/** 数値だけの取り込みにも汎用シートを付ける（キャラシの見せ方を同じにする） */
+function withStatsSheet(c: ParsedCharacter, provider: SheetProvider): ParsedCharacter {
+  if (c.sheet) return c;
+  const sheet = sheetFromStats(c.stats, provider, c.systemId);
+  return sheet ? { ...c, sheet } : c;
+}
+
+function jsonOrNull(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function importCharacterFromText(raw: string): CharacterImportResult | null {
+  const result = importCharacterFromTextRaw(raw);
+  if (!result) return null;
+  const provider: SheetProvider =
+    result.sourceLabel === "Udonarium"
+      ? "udonarium"
+      : result.sourceLabel === "いあきゃら"
+        ? "iachara"
+        : result.sourceLabel === "エモクロア"
+          ? "emoklore"
+          : "text";
+  return { ...result, character: withStatsSheet(result.character, provider) };
+}
+
+function importCharacterFromTextRaw(raw: string): CharacterImportResult | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  // 0. キャラッシュ（書き出した JSON）・キャラエノ（API の JSON）
+  if (trimmed.startsWith("{")) {
+    const root = jsonOrNull(trimmed);
+    const charash = root ? parseCharashJson(root) : null;
+    if (charash) return { character: charash, sourceLabel: "キャラッシュ" };
+    const charaeno = root ? parseCharaenoJson(root) : null;
+    if (charaeno) return { character: charaeno, sourceLabel: "キャラエノ" };
+  }
+
+  // 1. ゆとシートⅡ JSON (characterName / sttStr 等を優先判定)
+  const ytsheet = parseYtsheetJson(trimmed);
+  if (ytsheet) {
+    const sheet = sheetFromYtsheet(jsonOrNull(trimmed));
+    return { character: sheet ? { ...ytsheet, sheet } : ytsheet, sourceLabel: "ゆとシートⅡ" };
+  }
+
+  // 2. キャラクター保管所 JSON (pc_name 優先判定)
+  const charasheet = parseCharasheetJson(trimmed);
+  if (charasheet) {
+    const sheet = sheetFromCharasheet(jsonOrNull(trimmed));
+    return { character: sheet ? { ...charasheet, sheet } : charasheet, sourceLabel: "キャラクター保管所" };
+  }
+
+  // 3. エモクロアキャラクターシート JSON / テキスト
+  const emoklore = parseEmokloreCharacter(trimmed);
+  if (emoklore) {
+    return { character: emoklore, sourceLabel: "エモクロア" };
+  }
+
+  // 4. CCFOLIA JSON
   const ccfolia = parseCcfoliaCharacterJson(trimmed);
   if (ccfolia) {
     return { character: ccfolia, sourceLabel: "CCFOLIA" };
   }
 
-  // 3. Udonarium XML
+  // 5. Udonarium XML
   const udonarium = parseUdonariumCharacterXml(trimmed);
   if (udonarium) {
     return { character: udonarium, sourceLabel: "Udonarium" };
   }
 
-  // 4. いあきゃら テキスト
+  // 6. いあきゃら テキスト
   const iachara = parseIacharaText(trimmed);
   if (iachara) {
     return { character: iachara, sourceLabel: "いあきゃら" };
   }
 
   return null;
+}
+
+/** 複数キャラを含む JSON 配列・テキスト・区切りブロックをまとめて読み取る */
+export function importCharactersFromText(raw: string): CharacterImportResult[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith("[")) {
+    try {
+      const arr = JSON.parse(trimmed);
+      if (Array.isArray(arr)) {
+        const results: CharacterImportResult[] = [];
+        for (const item of arr) {
+          const single = importCharacterFromText(JSON.stringify(item));
+          if (single) results.push(single);
+        }
+        return results;
+      }
+    } catch {
+      /* 配列 JSON でなければ単体または分割テキストとして扱う */
+    }
+  }
+  const blocks = trimmed
+    .split(/\n-{3,}\n/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+  if (blocks.length > 1) {
+    const blockResults = blocks
+      .map((b) => importCharacterFromText(b))
+      .filter((r): r is CharacterImportResult => Boolean(r));
+    if (blockResults.length > 1) return blockResults;
+  }
+  const single = importCharacterFromText(trimmed);
+  return single ? [single] : [];
+}
+
+/** 複数ファイル・ZIP アーカイブ内の全キャラを一括で取り込む */
+export async function importCharactersFromFiles(files: FileList | File[]): Promise<CharacterImportResult[]> {
+  const list = Array.from(files);
+  const out: CharacterImportResult[] = [];
+
+  for (const file of list) {
+    const lowerName = file.name.toLowerCase();
+    const isZip =
+      lowerName.endsWith(".zip") ||
+      file.type === "application/zip" ||
+      file.type === "application/x-zip-compressed";
+
+    if (!isZip) {
+      const text = await readFileText(file);
+      out.push(...importCharactersFromText(text));
+      continue;
+    }
+
+    const buf = await readFileArrayBuffer(file);
+    const JSZip = (await import("jszip")).default;
+    let zip: Awaited<ReturnType<typeof JSZip.loadAsync>>;
+    try {
+      zip = await JSZip.loadAsync(buf);
+    } catch {
+      continue;
+    }
+    const entries = Object.values(zip.files).filter((f) => !f.dir);
+
+    for (const f of entries.filter((entry) => /\.xml$/i.test(entry.name))) {
+      const parsed = parseUdonariumCharacterXml(await f.async("string"));
+      if (!parsed) continue;
+      if (parsed.imageId) {
+        const imgFile = entries.find((img) => {
+          const mime = imageMimeFromName(img.name);
+          if (!mime) return false;
+          const base = img.name.split("/").pop() ?? "";
+          const stem = base.replace(/\.(png|jpe?g|gif|webp)$/i, "");
+          return stem === parsed.imageId || base === parsed.imageId;
+        });
+        if (imgFile) {
+          parsed.image = arrayBufferToDataUrl(
+            await imgFile.async("arraybuffer"),
+            imageMimeFromName(imgFile.name)!,
+          );
+        }
+      }
+      out.push({ character: parsed, sourceLabel: "Udonarium" });
+    }
+
+    for (const f of entries.filter((entry) => /\.(json|txt)$/i.test(entry.name))) {
+      const items = importCharactersFromText(await f.async("string"));
+      for (const item of items) {
+        if (item.sourceLabel === "CCFOLIA" && item.character.imageId && !item.character.image) {
+          const img = entries.find((imgEntry) => {
+            const mime = imageMimeFromName(imgEntry.name);
+            if (!mime) return false;
+            return (
+              imgEntry.name === `images/${item.character.imageId}` ||
+              imgEntry.name.replace(/\.(png|jpe?g|gif|webp)$/i, "") === `images/${item.character.imageId}`
+            );
+          });
+          if (img) {
+            item.character.image = arrayBufferToDataUrl(
+              await img.async("arraybuffer"),
+              imageMimeFromName(img.name)!,
+            );
+          }
+        }
+        out.push(item);
+      }
+    }
+  }
+  return out;
 }
 
 export async function importCharacterFromFile(file: File): Promise<CharacterImportResult | null> {
@@ -508,7 +842,25 @@ function parseTimestampAttr(raw: string | null): number {
 
 function parseUdonariumChatXml(raw: string): ParsedLog | null {
   if (!/^\uFEFF?\s*</.test(raw) || !/<chat\b/i.test(raw)) return null;
-  if (typeof DOMParser === "undefined") return null;
+  if (typeof DOMParser === "undefined") {
+    const entries: LogEntry[] = [];
+    for (const chat of parseUdonariumChatsFallback(raw)) {
+      if (!chat.text) continue;
+      const sp = chat.name || "不明な発言者";
+      const tab = chat.tab || "メイン";
+      const ts = parseTimestampAttr(chat.time);
+      const kind = mapKind(sp, chat.type);
+      entries.push({
+        sp,
+        text: chat.text,
+        ts,
+        kind,
+        type: chat.text.startsWith("◆") ? "note" : "text",
+        channel: tab,
+      });
+    }
+    return assembleLogEntries(entries);
+  }
 
   let doc: Document | null = parseXmlDoc(raw);
   if (!doc) {
@@ -528,7 +880,7 @@ function parseUdonariumChatXml(raw: string): ParsedLog | null {
     const tab = (el.getAttribute("tab") ?? "").trim() || "メイン";
     const ts = parseTimestampAttr(el.getAttribute("time") ?? el.getAttribute("timestamp"));
     const typeAttr = (el.getAttribute("type") ?? "").trim().toLowerCase();
-    const kind = typeAttr === "system" ? "SYSTEM" : mapKind(sp, typeAttr);
+    const kind = mapKind(sp, typeAttr);
     entries.push({
       sp,
       text,
@@ -654,6 +1006,183 @@ function parsePlainTextLog(raw: string): ParsedLog | null {
   return assembleLogEntries(entries);
 }
 
+function extractDiscordDiceRoll(text: string): Msg["roll"] | undefined {
+  // BCDice / CCFOLIA / Discord Bot の典型的出力: (1D100<=65) ＞ 32 ＞ 成功
+  const m = text.match(/([^\n(]+)?\(([^)]+)\)\s*[＞>→]\s*([^＞>→\n]+)(?:[＞>→]\s*([^\n]+))?/);
+  if (!m) return undefined;
+  return {
+    cmd: m[2]!.trim(),
+    skill: (m[1] ?? "").trim().replace(/^【|】$/g, ""),
+    dice: m[3]!.trim(),
+    result: (m[4] ?? "").trim() || "判定",
+  };
+}
+
+function parseDiscordLogJson(raw: string): ParsedLog | null {
+  if (!raw.startsWith("{")) return null;
+  let root: unknown;
+  try {
+    root = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isRecord(root) || !Array.isArray(root.messages)) return null;
+
+  const channelMeta = isRecord(root.channel) ? root.channel : undefined;
+  const channelName = str(channelMeta?.name)?.trim() || "メイン";
+  const entries: LogEntry[] = [];
+
+  for (const item of root.messages) {
+    if (!isRecord(item)) continue;
+    const author = isRecord(item.author) ? item.author : undefined;
+    const sp = (str(author?.nickname) ?? str(author?.name) ?? str(item.authorName))?.trim() || "不明な発言者";
+    const ts = parseTimestampAttr(str(item.timestamp) ?? null);
+    const contentParts: string[] = [];
+    const baseText = str(item.content)?.trim();
+    if (baseText) contentParts.push(baseText);
+    if (Array.isArray(item.embeds)) {
+      for (const emb of item.embeds) {
+        if (!isRecord(emb)) continue;
+        const embParts = [str(emb.title)?.trim(), str(emb.description)?.trim()].filter(Boolean);
+        if (embParts.length > 0) contentParts.push(embParts.join("\n"));
+      }
+    }
+    const text = contentParts.join("\n").trim();
+    if (!text) continue;
+    const isBot = author?.isBot === true || /dice|bcdice|bot/i.test(sp);
+    const roll =
+      isBot || /[＞→]\s*(?:クリティカル|ファンブル|成功|失敗)/.test(text)
+        ? extractDiscordDiceRoll(text)
+        : undefined;
+    entries.push({
+      sp,
+      text,
+      ts,
+      kind: isBot ? "SYSTEM" : mapKind(sp),
+      type: text.startsWith("◆") ? "note" : "text",
+      channel: channelName,
+      ...(roll ? { roll } : {}),
+    });
+  }
+  return assembleLogEntries(entries);
+}
+
+function parseDiscordDateStamp(rawDate: string, rawTime: string): number {
+  const m = rawDate.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
+  const tm = rawTime.match(/^(\d{1,2}):(\d{2})/);
+  if (!m || !tm) return 0;
+  const date = `${m[1]}-${m[2]!.padStart(2, "0")}-${m[3]!.padStart(2, "0")}`;
+  const hhmm = `${tm[1]!.padStart(2, "0")}:${tm[2]}`;
+  return jstEpoch(date, hhmm);
+}
+
+function parseDiscordLogText(raw: string): ParsedLog | null {
+  const lines = raw.split(/\r?\n/);
+  const entries: LogEntry[] = [];
+  let current: { sp: string; ts: number; body: string[]; channel: string } | null = null;
+  let channel = "メイン";
+
+  const flush = () => {
+    if (!current) return;
+    const text = current.body.join("\n").trim();
+    if (text) {
+      const roll = extractDiscordDiceRoll(text);
+      entries.push({
+        sp: current.sp,
+        text,
+        ts: current.ts,
+        kind: mapKind(current.sp),
+        type: text.startsWith("◆") ? "note" : "text",
+        channel: current.channel,
+        ...(roll ? { roll } : {}),
+      });
+    }
+    current = null;
+  };
+
+  for (const rawLine of lines) {
+    const chLine = rawLine.match(/^Channel:\s*(.+)$/i);
+    if (chLine && entries.length === 0 && !current) {
+      channel = chLine[1]!.trim() || "メイン";
+      continue;
+    }
+    // DiscordChatExporter TXT: [2026/11/08 21:05] Name  or [2026-11-08 21:05:00] Name
+    const exporterMatch = rawLine.match(
+      /^\[(\d{4}[/-]\d{1,2}[/-]\d{1,2})\s+(\d{1,2}:\d{2}(?::\d{2})?)\]\s+(.+?)(?:\s*\([^)]+\))?\s*$/,
+    );
+    if (exporterMatch) {
+      flush();
+      current = {
+        ts: parseDiscordDateStamp(exporterMatch[1]!, exporterMatch[2]!),
+        sp: exporterMatch[3]!.trim(),
+        body: [],
+        channel,
+      };
+      continue;
+    }
+    // Discord Web コピペ（名前と日付時刻が並ぶ行）
+    const copyMatch = rawLine.match(
+      /^(.+?)\s+[\u2014-]\s+(\d{4}[/-]\d{1,2}[/-]\d{1,2})\s+(\d{1,2}:\d{2})\s*$/,
+    );
+    if (copyMatch) {
+      flush();
+      current = {
+        sp: copyMatch[1]!.trim(),
+        ts: parseDiscordDateStamp(copyMatch[2]!, copyMatch[3]!),
+        body: [],
+        channel,
+      };
+      continue;
+    }
+    if (current) {
+      if (!rawLine.trim() && current.body.length === 0) continue;
+      if (/^={5,}$/.test(rawLine.trim())) continue;
+      current.body.push(rawLine);
+    }
+  }
+  flush();
+  return entries.length > 0 ? assembleLogEntries(entries) : null;
+}
+
+function parseGenericHtmlLog(raw: string): ParsedLog | null {
+  if (!/^\uFEFF?\s*</.test(raw)) return null;
+  const cleaned = raw
+    .replace(/<style\b[\s\S]*?<\/style>/gi, "")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:p|div|li|tr)>/gi, "\n");
+  const lines = cleaned
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .split(/\r?\n/);
+
+  const entries: LogEntry[] = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+    // どどんとふ / 整形HTML: [タブ] 発言者：本文  または 発言者：本文
+    const m = t.match(/^(?:\[([^\]]+)\]\s*)?([^:：\n]{1,32}?)\s*[:：]\s*(.+)$/);
+    if (!m) continue;
+    const ch = m[1]?.trim() || "メイン";
+    const sp = m[2]!.trim();
+    const text = m[3]!.trim();
+    if (!sp || !text || /^https?$/i.test(sp)) continue;
+    entries.push({
+      sp,
+      text,
+      ts: 0,
+      kind: mapKind(sp),
+      type: text.startsWith("◆") ? "note" : "text",
+      channel: ch,
+    });
+  }
+  return assembleLogEntries(entries);
+}
+
 export function importLogFromText(raw: string): LogImportResult | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
@@ -664,13 +1193,31 @@ export function importLogFromText(raw: string): LogImportResult | null {
     return { log: udonarium, sourceLabel: "Udonarium" };
   }
 
-  // 2. CCFOLIA JSON / HTML
+  // 2. DiscordChatExporter JSON
+  const discordJson = parseDiscordLogJson(trimmed);
+  if (discordJson) {
+    return { log: discordJson, sourceLabel: "Discord" };
+  }
+
+  // 3. CCFOLIA JSON / HTML
   const ccfolia = parseCcfoliaLog(trimmed);
   if (ccfolia) {
     return { log: ccfolia, sourceLabel: "CCFOLIA" };
   }
 
-  // 3. 汎用 / Tekey テキストログ
+  // 4. どどんとふ / 汎用整形 HTML
+  const genericHtml = parseGenericHtmlLog(trimmed);
+  if (genericHtml) {
+    return { log: genericHtml, sourceLabel: "どどんとふ / HTML" };
+  }
+
+  // 5. Discord テキストログ (ヘッダ行 + 本文行)
+  const discordTxt = parseDiscordLogText(trimmed);
+  if (discordTxt) {
+    return { log: discordTxt, sourceLabel: "Discord" };
+  }
+
+  // 6. 汎用 / Tekey テキストログ
   const plain = parsePlainTextLog(trimmed);
   if (plain) {
     return { log: plain, sourceLabel: "テキストログ" };
@@ -714,8 +1261,8 @@ export async function importLogFromFile(file: File): Promise<LogImportResult | n
       if (res && res.log.messageCount > 0) return res;
     }
 
-    const txts = files.filter((f) => /\.txt$/i.test(f.name));
-    for (const f of txts) {
+    const jsonsAndTxts = files.filter((f) => /\.(json|txt|html?)$/i.test(f.name));
+    for (const f of jsonsAndTxts) {
       const res = importLogFromText(await f.async("string"));
       if (res && res.log.messageCount > 0) return res;
     }
@@ -725,10 +1272,25 @@ export async function importLogFromFile(file: File): Promise<LogImportResult | n
 
   if (/\.html?$/i.test(lowerName)) {
     const html = await readFileText(file);
-    const parsed = parseCcfoliaLogHtml(html);
-    return parsed ? { log: parsed, sourceLabel: "CCFOLIA" } : null;
+    const ccfoliaHtml = parseCcfoliaLogHtml(html);
+    if (ccfoliaHtml) return { log: ccfoliaHtml, sourceLabel: "CCFOLIA" };
+    const fallbackHtml = parseGenericHtmlLog(html);
+    return fallbackHtml ? { log: fallbackHtml, sourceLabel: "どどんとふ / HTML" } : null;
   }
 
   const text = await readFileText(file);
   return importLogFromText(text);
+}
+
+export async function importLogsFromFiles(
+  files: FileList | File[],
+): Promise<(LogImportResult & { fileName: string })[]> {
+  const results: (LogImportResult & { fileName: string })[] = [];
+  for (const f of Array.from(files)) {
+    const parsed = await importLogFromFile(f);
+    if (parsed && parsed.log.messageCount > 0) {
+      results.push({ ...parsed, fileName: f.name });
+    }
+  }
+  return results;
 }

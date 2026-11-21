@@ -108,40 +108,46 @@ function getBaseJapaneseHolidayName(dateStr: string): string | null {
   return null;
 }
 
+const holidayCache = new Map<string, string | null>();
+
 /**
  * 指定日 (`YYYY-MM-DD`) が日本の国民の祝日・振替休日・国民の休日であれば名称を返し、
  * そうでなければ `null` を返す。
  */
 export function getJapaneseHolidayName(dateStr: string): string | null {
+  if (holidayCache.has(dateStr)) return holidayCache.get(dateStr)!;
   if (!VALID_DATE_RE.test(dateStr)) return null;
   const [y, m, d] = dateStr.split("-").map(Number);
   if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
   if (dateStr !== formatYmd(y, m, d)) return null;
 
-  const base = getBaseJapaneseHolidayName(dateStr);
-  if (base) return base;
+  let result: string | null = getBaseJapaneseHolidayName(dateStr);
+  if (!result) {
+    const dow = dayOfWeekUtc(dateStr);
 
-  const dow = dayOfWeekUtc(dateStr);
-
-  // 振替休日: 日曜日の祝日の翌日以降で最初の祝日でない日
-  if (dow !== 0) {
-    let cursor = addDaysYmd(dateStr, -1);
-    while (getBaseJapaneseHolidayName(cursor) !== null) {
-      if (dayOfWeekUtc(cursor) === 0) {
-        return "振替休日";
+    // 振替休日: 日曜日の祝日の翌日以降で最初の祝日でない日
+    if (dow !== 0) {
+      let cursor = addDaysYmd(dateStr, -1);
+      while (getBaseJapaneseHolidayName(cursor) !== null) {
+        if (dayOfWeekUtc(cursor) === 0) {
+          result = "振替休日";
+          break;
+        }
+        cursor = addDaysYmd(cursor, -1);
       }
-      cursor = addDaysYmd(cursor, -1);
+    }
+
+    // 国民の休日: 前後を国民の祝日に挟まれた平日（2007年以降、実質1988年以降）
+    if (!result && dow !== 0 && y >= 1988) {
+      const prev = addDaysYmd(dateStr, -1);
+      const next = addDaysYmd(dateStr, 1);
+      if (getBaseJapaneseHolidayName(prev) !== null && getBaseJapaneseHolidayName(next) !== null) {
+        result = "国民の休日";
+      }
     }
   }
 
-  // 国民の休日: 前後を国民の祝日に挟まれた平日（2007年以降、実質1988年以降）
-  if (dow !== 0 && y >= 1988) {
-    const prev = addDaysYmd(dateStr, -1);
-    const next = addDaysYmd(dateStr, 1);
-    if (getBaseJapaneseHolidayName(prev) !== null && getBaseJapaneseHolidayName(next) !== null) {
-      return "国民の休日";
-    }
-  }
-
-  return null;
+  if (holidayCache.size >= 2000) holidayCache.clear();
+  holidayCache.set(dateStr, result);
+  return result;
 }

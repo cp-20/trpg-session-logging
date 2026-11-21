@@ -1,4 +1,6 @@
 import type { Character } from "../types";
+import type { CharacterSheet } from "./sheet";
+import { sheetFromCcfolia } from "./sheet-sources";
 
 /**
  * CCFOLIA キャラクターJSON(コマの「クリップボードにコピー」/ 書き出しzip)の tolerant パーサー。
@@ -17,6 +19,8 @@ export interface ParsedCharacter {
   image?: string;
   /** コマJSONの画像参照id(zip 画像の解決に使う) */
   imageId?: string;
+  /** 能力値・技能などのキャラシ全体（src/lib/sheet.ts の汎用形式） */
+  sheet?: CharacterSheet;
 }
 
 type Candidate = Record<string, unknown>;
@@ -47,15 +51,10 @@ function collectStats(node: unknown, out: Record<string, number>, depth = 0): vo
     return;
   }
   for (const [k, v] of Object.entries(node)) {
-    if (
-      typeof v === "number" &&
-      Number.isFinite(v) &&
-      /^(HP|MP|SAN|DB|[A-Z]{2,4})$/i.test(k) &&
-      v >= -100 &&
-      v <= 999
-    ) {
+    /* NaN / ±Infinity は範囲判定で落ちる。配列・オブジェクト以外は collectStats 側で無視する */
+    if (typeof v === "number" && /^(HP|MP|SAN|DB|[A-Z]{2,4})$/i.test(k) && v >= -100 && v <= 999) {
       out[k.toLowerCase()] = v;
-    } else if (isRecord(v) || Array.isArray(v)) {
+    } else {
       collectStats(v, out, depth + 1);
     }
   }
@@ -82,8 +81,9 @@ export function parseCcfoliaCharacterJson(raw: string): ParsedCharacter | null {
   /* 形式A: {characters: {id: {...}}} (コマのクリップボード) */
   const chars = isRecord(root.characters) ? Object.values(root.characters) : [];
   /* 形式B: 単体キャラ({name, ...}) */
-  const single = typeof root.name === "string" ? [root] : [];
-  const clipboard = root.kind === "character" && isRecord(root.data) ? [root.data] : [];
+  const single = [root];
+  const clipboard = root.kind === "character" ? [root.data] : [];
+  /* 名前付きのオブジェクトかは下の filter でまとめて判定する */
   const candidates = [...clipboard, ...chars, ...single].filter(
     (c): c is Candidate => isRecord(c) && typeof c.name === "string" && Boolean(c.name.trim()),
   );
@@ -97,12 +97,15 @@ export function parseCcfoliaCharacterJson(raw: string): ParsedCharacter | null {
 
   const memo = str(c.memo) ?? "";
   const commands = str(c.commands) ?? "";
+  const systemId = guessSystem(memo + " " + commands);
+  const sheet = sheetFromCcfolia(c, systemId);
   return {
     name: c.name as string,
     color: typeof c.color === "string" && /^#[\da-f]{6}$/i.test(c.color) ? c.color : undefined,
     memo: memo || undefined,
-    systemId: guessSystem(memo + " " + commands),
+    systemId,
     stats,
+    ...(sheet ? { sheet } : {}),
     image:
       typeof c.iconUrl === "string" &&
       (/^https:\/\//i.test(c.iconUrl) || /^data:image\/(png|jpeg|gif|webp);base64,/i.test(c.iconUrl))
@@ -138,7 +141,7 @@ export async function parseCcfoliaCharacterZip(data: ArrayBuffer | Blob): Promis
 
 /** キャラJSONの imageId を zip 内の images/ から data URL に復元 */
 async function attachImage(zip: import("jszip"), parsed: ParsedCharacter): Promise<void> {
-  const images = Object.values(zip.files).filter((f) => !f.dir && /^images\//.test(f.name));
+  const images = Object.values(zip.files).filter((f) => !f.dir && f.name.startsWith("images/"));
   if (images.length === 0) return;
   /* 別のキャラクターの画像を誤って使わない。参照先がなければ画像は付けない。 */
   const imageId = parsed.imageId ?? parsed.image?.split("/").at(-1)?.split("?")[0];
@@ -178,5 +181,6 @@ export function toCharacterFields(parsed: ParsedCharacter, sysId: string) {
     bio: parsed.memo ?? "",
     stats: parsed.stats,
     image: parsed.image,
+    ...(parsed.sheet ? { sheet: parsed.sheet } : {}),
   } satisfies Partial<Character>;
 }

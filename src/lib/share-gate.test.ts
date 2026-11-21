@@ -22,12 +22,30 @@ describe("evaluateShareGate", () => {
   });
   it("passed スコープは自己申告で見られるようになる", () => {
     const log = { ...baseLog, scope: "passed" as const };
-    expect(evaluateShareGate(log, "outsider").visible).toBe(false);
-    expect(evaluateShareGate(log, "outsider", { asPassed: true }).visible).toBe(true);
+    const denied = evaluateShareGate(log, "outsider");
+    expect(denied.visible).toBe(false);
+    expect(denied.reason).toContain("このシナリオをプレイした人");
+    expect(evaluateShareGate(log, "outsider", { asPassed: true })).toEqual({ visible: true, reason: null });
+    expect(evaluateShareGate(log, null)).toMatchObject({ visible: false });
+    expect(evaluateShareGate(log, null, { asPassed: true })).toEqual({ visible: true, reason: null });
+  });
+  it("匿名 (viewerId=null) は members を読めず（'null' キーでも不可）、public は読める", () => {
+    const sneaky = {
+      ...baseLog,
+      players: { ...baseLog.players, null: { linked: true, hidden: false, characterIds: [] } },
+    };
+    expect(evaluateShareGate(sneaky, null)).toEqual({
+      visible: false,
+      reason: "このログはメンバー限定です。卓のメンバーだけが読めます。",
+    });
+    expect(evaluateShareGate({ ...baseLog, scope: "public" }, null)).toEqual({
+      visible: true,
+      reason: null,
+    });
   });
   it("public スコープは誰でも見られる", () => {
     const log = { ...baseLog, scope: "public" as const };
-    expect(evaluateShareGate(log, "outsider").visible).toBe(true);
+    expect(evaluateShareGate(log, "outsider")).toEqual({ visible: true, reason: null });
   });
   it("KP自身は常に見られる", () => {
     expect(evaluateShareGate(baseLog, "kp").visible).toBe(true);

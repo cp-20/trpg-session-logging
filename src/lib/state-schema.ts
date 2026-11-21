@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { State } from "../types";
 import { deriveSessionFromMessages } from "./time";
+import { coerceSheet } from "./sheet";
 
 const account = z.looseObject({
   provider: z.enum(["google", "discord", "x", "booth", "talto"]),
@@ -29,6 +30,15 @@ const link = z.looseObject({
   linked: z.boolean(),
   hidden: z.boolean().default(false),
   characterIds: z.array(z.string()).default([]),
+});
+const externalSyncSchema = z.looseObject({
+  provider: z.enum(["iachara", "charasheet", "ytsheet", "emoklore", "charaeno", "charash", "booth", "talto"]),
+  url: z.string(),
+  lastSyncedAt: z.string().optional(),
+  lastStatus: z.enum(["ok", "error"]).optional(),
+  lastError: z.string().optional(),
+  contentHash: z.string().optional(),
+  autoSync: z.boolean().default(true),
 });
 
 export const RestoredStateSchema = z
@@ -92,6 +102,9 @@ export const RestoredStateSchema = z
           includeGrowth: z.boolean(),
           includeSessions: z.boolean(),
         }),
+        externalSync: externalSyncSchema.optional(),
+        /* キャラシは汎用形式の JSON。壊れていてもキャラクター本体の復元は止めず、読めない部分だけ落とす */
+        sheet: z.unknown().transform(coerceSheet).optional(),
       }),
     ),
     scenarios: z.record(
@@ -103,6 +116,7 @@ export const RestoredStateSchema = z
         systemId: z.string(),
         policy: z.enum(["public", "passed", "members", "unknown"]),
         tags: z.array(z.string()).default([]),
+        externalSync: externalSyncSchema.optional(),
       }),
     ),
     logs: z.record(
@@ -151,29 +165,40 @@ export const RestoredStateSchema = z
   );
 
 /** Only migrate fields whose meaning is known; never cast unreadable data to State. */
-export function parseSavedState(raw: string): State | null {
-  try {
-    const data = JSON.parse(raw);
-    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
-    if (data.logs && typeof data.logs === "object") {
-      for (const [id, log] of Object.entries(data.logs) as [string, Record<string, unknown>][]) {
-        if (!log || typeof log !== "object") continue;
-        log.slug ??= id;
-        if (
-          (!Array.isArray(log.dates) || !Number.isFinite(log.t0) || !Number.isFinite(log.t1)) &&
-          Array.isArray(log.channels)
-        ) {
-          const derived = deriveSessionFromMessages(log.channels as State["logs"][string]["channels"]);
-          if (derived) {
-            log.dates ??= derived.dates;
-            log.t0 ??= derived.t0;
-            log.t1 ??= derived.t1;
-          }
+export function validateSavedState(data: unknown): State | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const obj = data as Record<string, unknown>;
+  if (obj.logs && typeof obj.logs === "object") {
+    for (const [id, log] of Object.entries(obj.logs) as [string, Record<string, unknown>][]) {
+      if (!log || typeof log !== "object") continue;
+      log.slug ??= id;
+      if (
+        (!Array.isArray(log.dates) || !Number.isFinite(log.t0) || !Number.isFinite(log.t1)) &&
+        Array.isArray(log.channels)
+      ) {
+        const derived = deriveSessionFromMessages(log.channels as State["logs"][string]["channels"]);
+        if (derived) {
+          log.dates ??= derived.dates;
+          log.t0 ??= derived.t0;
+          log.t1 ??= derived.t1;
         }
       }
     }
-    const result = RestoredStateSchema.safeParse(data);
-    return result.success ? (result.data as unknown as State) : null;
+  }
+  // 以前は本人の明示的な許可なしに Google カレンダーの予定日を busyDates へ混ぜていた。
+  // 許可を取る形に改めたので、その頃の日付（手入力と区別できない）は捨てて取り直してもらう
+  const prefs = obj.prefs as Record<string, unknown> | undefined;
+  if (prefs && typeof prefs === "object" && "googleCalendarSyncedAt" in prefs) {
+    delete prefs.googleCalendarSyncedAt;
+    delete prefs.busyDates;
+  }
+  const result = RestoredStateSchema.safeParse(obj);
+  return result.success ? (result.data as unknown as State) : null;
+}
+
+export function parseSavedState(raw: string): State | null {
+  try {
+    return validateSavedState(JSON.parse(raw));
   } catch {
     return null;
   }
