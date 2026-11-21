@@ -16,7 +16,7 @@ Kimi K3.1 Pro に「アーキテクチャ」「ライブラリ・テスト」「
 | 決定 | 根拠 |
 |---|---|
 | **CCFOLIA ログの tolerant パーサー(`lib/ccfolia-parser.ts`)** | 実ファイルを解析してそのまま保存する(サンプル構造と実記録を混在させない)。チャンネル混線防止(チャンネル単位でソート)、secret ヒューリスティック、roll/note 復元。フィクスチャ+E2Eで検証 |
-| **招待→自己紐付けフロー(`/invite/:id`)** | PLがサインインして発言者を引き受ける/発言者なしで参加(同意書なし、あとから解除可能)。E2Eで永続化まで検証 |
+| **招待→自己紐付けフロー(`/invite/:id`)** | PLがログインして発言者を引き受ける/発言者なしで参加(同意書なし、あとから解除可能)。E2Eで永続化まで検証 |
 | 共有ゲート判定を純関数化(`lib/share-gate.ts`) | 両案一致。UI/サーバーで契約を共有しテスト可能に。**viewerId は未認証で null**(匿名は public のみ閲覧可) |
 | セッション区間組み立てを純関数化(`buildSessionRange` + `sessionClock`) | QuickSession/EditLog/シナリオ作成の共通ロジック。**複数日の二重加算バグを修正** |
 | zod を localStorage 復元境界に導入(`looseObject`) | ライブラリ担当案。未知キーは保持(前方互換)、不整合は seed へフォールバック。**復元に失敗した既存データは自動上書きしない**(persist を止めて警告バナー) |
@@ -34,7 +34,7 @@ Kimi K3.1 Pro に「アーキテクチャ」「ライブラリ・テスト」「
 |---|---|
 | IndexedDB への移行(メタデータ/Log本文の分離) | Firestore+R2 の実装開始時。契約(Log=`SessionMeta`+`LogContent`)の確定が先行タスク。現状は types.ts の Log に暫定集約)
 | TanStack Query | 非同期 API 層が実在してから。同期 localStorage の上には載せない(3重管理になる) |
-| AuthGateway 抽象 | Firebase Auth 実装時。BOOTH/TALTO 文面確認はサインインと別 API として切り出す |
+| AuthGateway 抽象 | Firebase Auth 実装時。BOOTH/TALTO 文面確認はログインと別 API として切り出す |
 | BrowserRouter + `/l/:slug` | OGP/Worker による共有認可を実装するホスト(Vercel/Workers)で SPA rewrite を用意できるとき |
 | zod の外部形式パーサー適用 | CCFOLIA JSON / いあきゃら の実パーサー実装時 |
 | MSW | 実 HTTP(BOOTH/TALTO取得)実装時。Firestore は Emulator 推奨 |
@@ -55,7 +55,7 @@ Node は jsdom の要件(24系)に合わせること。
 
 ```
 src/
-  app/        # main/App/routes/providers/query-client/ErrorBoundary
+  app/        # routes。(store)/ の中だけが記録（ストア）と Firebase を読む。providers.tsx（全画面）/ store-providers.tsx（記録を使う画面）
   domain/     # models / share-policy(純関数)
   api/        # contracts / errors / create-api / mock/(IndexedDB) / firebase/ / logs/(codec+object-store)
   auth/       # gateway / mock-auth / firebase-auth / account-verification
@@ -73,3 +73,13 @@ src/
 - 共有の秘匿は最終的にサーバー側(Worker/Rules)で行う。クライアントの投影フィルタは UI の便宜でしかない
 - `edit`/`remove` には将来 `revision`(expectedRevision)を導入し conflict を返す。無条件リトライは network 系のみ
 - モックのリセット: Settings「モックデータをリセット」(localStorage key `takufu-state-v4`)
+
+## パフォーマンス・スケーラビリティ設計（2026-11-20 強化）
+
+- **構造共有イミュータブル更新（`src/lib/draft.ts`）**: `update(fn)` は `JSON.parse(JSON.stringify(...))` ではなく Proxy ベースの Copy-on-Write (`produceDraft`) を使い、変更したパスだけ新しいオブジェクトを作る。これにより `WeakMap` キャッシュ（`sessionPlayMinutes` / `currentStat` / `lastPlayed`）や `React.memo` が未変更レコードに対してそのまま効く
+- **Context 分割と署名ベースの差分クラウド同期（`src/store.tsx` / `src/workspace.tsx`）**: `StateCtx` と `SyncStatusCtx` を分け、`saving`/`saved` の変化で一覧全体を再描画しない。保存時は JSON 全文比較ではなくログ件数・文字列長等の軽量署名で変更チャンクだけを書き出し、チャンク削除・書き込みは並列バッチ（concurrency=3）で実行する
+- **IndexedDB オーバーフローとマニフェスト先行検証（`src/lib/local-db.ts` / `src/lib/state-schema.ts`）**: `localStorage` の安全上限（3.5MB）を超える大容量ワークスペースは IndexedDB へ逃がす。クラウド同期では先に軽いマニフェストだけを取得し、`revision` がローカルと一致していればチャンク群のダウンロードをスキップする
+- **初期バンドル分割**: `src/data/seed.ts`（`generated.json` 約 544KB）と `src/lib/cloud-state.ts` を `src/store.tsx` / `src/workspace.tsx` / `src/screens/Upload.tsx` から動的 `import()` に分離し、通常ルート（ログイン済み起動など）の初期 JS チャンクから除外する
+- **公開ページはサーバーで描画（2026-11-22）**: 記録（ストア）と Firebase は `src/app/(store)/layout.tsx`（アプリ本体・共有ページ・`/signin`・`/demo`）の中だけで読み込む。LP・規約・ご意見（`src/screens/Landing.tsx`）とルートの layout / `BaseProviders` はストアを読まないので、HTML に本文が入り、JS に Firebase が載らない（`lint-design` で import を禁止）。ヘッダーの「ログイン / ホームを開く」は端末の目印（`src/lib/entered-hint.ts`）で切り替え、サンプルの開始は `/demo` で行う。LP から記録を使う画面へのリンクは `prefetch={false}`。ストアが外れるとき（公開ページへの移動）は保存待ちの変更を書き出す
+- **LP の書体は LP の文字だけ（2026-11-22）**: 見出し（Dela Gothic One）と本文（Noto Sans JP 可変、400〜700）を、LP のソースに出る文字と横書きで使う OpenType 機能だけに絞った 2 ファイル（計約 145KB）にする（`pnpm run fonts:lp` = `scripts/subset-lp-fonts.ts`。要 python3 の fonttools・brotli）。ファイル名に中身のハッシュを入れて 1 年キャッシュ（`next.config.ts`）、`preload` と `@font-face` は LP の HTML に入る。代わりの候補は端末の書体だけにして、読み込み中に Noto の分割ファイルを呼ばない。文言を変えて作り直し忘れると単体テスト（`src/lib/lp-font-chars.test.ts`）が落ちる
+- **UI 段階描画と遅延検索**: 長大なタイムライン（`SessionTimeline`）は `useDeferredValue` + 150 行単位の段階描画（`IntersectionObserver` + 「続きの発言を表示」ボタン、日付ジャンプ時は該当行まで自動展開）、一覧画面（Sessions / Tables / Characters / CharacterDetail / Scenarios / ScenarioDetail / UserDetail）は `LoadMore` で段階表示する

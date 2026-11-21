@@ -19,6 +19,19 @@ pnpm run review         # 全画面をデスクトップ・モバイル・ダー
 pnpm run gen:data       # モックデータ (src/data/generated.json) の再生成
 ```
 
+## モバイルアプリ (`mobile/` · Expo)
+
+iOS / Android 向けのネイティブクライアントを `mobile/` に同梱している。SQLite による即座の起動、3-Way マージ付きのバックグラウンド同期・オフライン送信キュー、端末カレンダー連携、クリップボード/ファイル/画像からのワンタップ取り込み、仮想化ログリーダー（しおり・画面消灯防止・対面の秘匿伏せ表示）、ローカル通知、生体認証ロック、感想カード PNG 書き出しと共有シートを備えている。
+
+```sh
+pnpm run mobile:device  # 実機テスト用サーバー起動 (WSL2 対応トンネル + Expo Go)
+pnpm run mobile:start   # Expo 開発サーバー起動 (実機 Expo Go / Dev Client 向け)
+pnpm run mobile:ios     # iOS シミュレータビルド & 起動
+pnpm run mobile:android # Android エミュレータビルド & 起動
+pnpm run mobile:typecheck
+pnpm run mobile:export  # iOS / Android 本番バンドル書き出し検証
+```
+
 ## 運用・デプロイ (`scripts/ops.ts`)
 
 ```sh

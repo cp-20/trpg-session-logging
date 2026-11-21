@@ -17,6 +17,10 @@ Deploy Now's Next.js builder accepts only npm (`package-lock.json`; pnpm and yar
 
 The deployment command submits an asynchronous build. A successful upload is not proof of readiness: confirm the returned deployment reaches `DEPLOYMENT_STATUS_READY` and visit the public site before reporting success.
 
+## Feedback form
+
+`/feedback` posts to `/api/feedback`, which validates the input (`src/lib/feedback.ts`), drops honeypot submissions, limits each IP to 5 posts per 10 minutes (in memory), and forwards the message to a Discord webhook with all mentions disabled. The webhook URL lives only in the server-side environment variable `DISCORD_FEEDBACK_WEBHOOK_URL` on Deploy Now (never `NEXT_PUBLIC_*`, never in the repository). Without it the form answers 503. Set it with `lolipop env create DISCORD_FEEDBACK_WEBHOOK_URL --value-stdin --sensitive --project <id> < file` (the value then never appears in shell history or listings), then redeploy.
+
 ## Calendar subscription
 
 The server never holds user credentials. A signed-in browser writes its confirmed events, already rendered as a calendar file, to `calendarFeeds/{token}` in Firestore (`src/lib/calendar-feed.ts`); the token is 32 random bytes. Firestore rules let anyone `get` a feed document by its token but never `list` them, and only the owner can write or delete it. `/api/calendar/{token}.ics` reads the document through Firestore's public REST API and returns it as `text/calendar`. Recreating the link deletes the old document. Deploy rule changes with `node scripts/ops.ts rules`.
