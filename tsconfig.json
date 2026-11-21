@@ -12,6 +12,7 @@
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
+    "allowArbitraryExtensions": true,
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
@@ -48,6 +49,7 @@
   ],
   "exclude": [
     "node_modules",
-    ".next"
+    ".next",
+    "mobile"
   ]
 }

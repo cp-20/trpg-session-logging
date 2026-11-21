@@ -1,0 +1,54 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "packageManager": "pnpm",
+  "plugins": [
+    "./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js"
+  ],
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.mutation.config.ts"
+  },
+  "coverageAnalysis": "perTest",
+  "ignoreStatic": true,
+  "concurrency": 6,
+  "timeoutMS": 15000,
+  "reporters": [
+    "clear-text",
+    "json",
+    "progress"
+  ],
+  "jsonReporter": {
+    "fileName": "reports/mutation/mutation.json"
+  },
+  "ignorePatterns": [
+    "mobile",
+    ".next",
+    "out",
+    "reports",
+    ".impeccable",
+    "test-results",
+    "playwright-report",
+    ".stryker-tmp*",
+    "e2e/*.ts"
+  ],
+  "mutate": [
+    "src/lib/draft.ts",
+    "src/lib/share-gate.ts",
+    "src/lib/schedule.ts",
+    "src/lib/time.ts",
+    "src/lib/speaker-match.ts",
+    "src/lib/ics.ts",
+    "src/lib/ccfolia-parser.ts",
+    "src/lib/ccfolia-character.ts",
+    "src/lib/importers.ts",
+    "src/lib/external-sync.ts",
+    "src/lib/external-import-server.ts",
+    "src/lib/history-import.ts",
+    "src/lib/google-calendar.ts",
+    "src/lib/state-schema.ts",
+    "src/lib/html-xml-fallback.ts",
+    "src/lib/calendar-feed.ts",
+    "src/lib/theme.ts",
+    "src/api/commands.ts"
+  ]
+}

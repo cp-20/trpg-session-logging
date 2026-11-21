@@ -4,8 +4,13 @@ dist
 *.log
 test-results/
 playwright-report/
+.stryker-tmp*/
+reports/
 .firebase/
 .impeccable/review/
 .live-review/
 .next/
 next-env.d.ts
+mobile/.expo
+mobile/dist
+mobile/expo-env.d.ts

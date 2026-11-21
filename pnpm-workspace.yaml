@@ -1,3 +1,6 @@
+packages:
+  - "."
+  - "mobile"
 allowBuilds:
   '@firebase/util': false
   protobufjs: false
@@ -55,3 +58,4 @@ minimumReleaseAgeExclude:
   - firebase@13.4.0
   - oxfmt@0.79.0
   - oxlint@1.94.0
+  - expo-web-browser@58.1.0
