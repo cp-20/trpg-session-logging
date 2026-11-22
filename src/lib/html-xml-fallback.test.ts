@@ -1,12 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseCcfoliaLogHtml } from "./ccfolia-parser";
-import {
-  parseCcfoliaHtmlEntriesFallback,
-  parseUdonariumCharacterFallback,
-  parseUdonariumChatsFallback,
-} from "./html-xml-fallback";
-import { importCharacterFromText, importLogFromText } from "./importers";
+import { parseCcfoliaHtmlEntriesFallback, parseUdonariumChatsFallback } from "./html-xml-fallback";
+import { importLogFromText } from "./importers";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -64,40 +60,6 @@ describe("HTML / XML fallback parsers without DOMParser (Hermes compatibility)",
     expect(parsed?.channels[0]?.msgs[1]?.kind).toBe("SYSTEM");
   });
 
-  it("Udonarium キャラクター XML を DOMParser なしで解析する", () => {
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<character>
-  <data name="character">
-    <data name="image">
-      <data type="image" name="imageIdentifier">img_hash_01</data>
-    </data>
-    <data name="common">
-      <data name="name">霧島霞</data>
-      <data name="size">1</data>
-    </data>
-    <data name="detail">
-      <data name="ステータス">
-        <data type="numberResource" currentValue="11" name="HP">12</data>
-        <data type="numberResource" currentValue="10" name="MP">11</data>
-        <data type="numberResource" currentValue="64" name="SAN">64</data>
-      </data>
-      <data name="メモ" type="note">探偵事務所の調査助手</data>
-    </data>
-  </data>
-  <chat-palette dicebot="Cthulhu7th">CC&lt;=70 目星</chat-palette>
-</character>`;
-
-    vi.stubGlobal("DOMParser", undefined);
-    const res = importCharacterFromText(xml);
-
-    expect(res?.sourceLabel).toBe("Udonarium");
-    expect(res?.character.name).toBe("霧島霞");
-    expect(res?.character.systemId).toBe("coc7");
-    expect(res?.character.imageId).toBe("img_hash_01");
-    expect(res?.character.stats).toMatchObject({ hp: 11, mp: 10, san: 64 });
-    expect(res?.character.memo).toBe("探偵事務所の調査助手");
-  });
-
   it("Udonarium chat.xml を DOMParser なしで解析する", () => {
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <chat-log>
@@ -122,7 +84,6 @@ describe("HTML / XML fallback parsers without DOMParser (Hermes compatibility)",
   it("無効な HTML / XML は DOMParser なしでも null を返す", () => {
     vi.stubGlobal("DOMParser", undefined);
     expect(parseCcfoliaLogHtml("<div><span>空</span></div>")).toBeNull();
-    expect(importCharacterFromText("<character><broken></character>")).toBeNull();
     expect(importLogFromText("<chat-log><chat></chat></chat-log>")).toBeNull();
   });
 
@@ -162,19 +123,6 @@ describe("HTML / XML fallback parsers without DOMParser (Hermes compatibility)",
     // unclosed script/style・空属性・数値実体エラー境界・section 空白スキップ
     const edgeHtml = `<section class="tab"><div class="player"><span class="speaker-text"></span><div class="player-message">x</div></div></section>&#9999999;&#x110000;<script>unclosed`;
     expect(parseCcfoliaHtmlEntriesFallback(edgeHtml)).toEqual([]);
-
-    // stray closing tag と末尾テキスト・CDATA・chat-palette 欠落時の XML パース
-    const xmlChar = `<character><!-- cdata follows --><data name=common><data name='name'><![CDATA[星野<光>]]></data></data></bar></character>tail`;
-    const parsedChar = parseUdonariumCharacterFallback(xmlChar)!;
-    expect(parsedChar.dicebot).toBe("");
-    expect(parsedChar.paletteText).toBe("");
-    expect(parsedChar.leafData[0]).toEqual({
-      dataName: "name",
-      dataType: "",
-      currentValue: null,
-      text: "星野<光>",
-    });
-    expect(parseUdonariumCharacterFallback("<empty/>")).toBeNull();
 
     // Udonarium from / timestamp / type="system"
     const chats = parseUdonariumChatsFallback(

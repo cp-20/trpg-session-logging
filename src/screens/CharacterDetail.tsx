@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Link, useParams } from "../lib/router";
-import { Controller, useForm, useWatch } from "react-hook-form";
+import { Controller, useForm, useWatch, type UseFormReturn } from "react-hook-form";
 import { useStore } from "../store";
 import {
   CopyBox,
-  DateInput,
   EmptyState,
   Field,
   InlineNotice,
@@ -14,7 +13,8 @@ import {
   NumberInput,
   PageHead,
   SectionTitle,
-  Select,
+  Combobox,
+  MultiCombobox,
   SplitLayout,
   StatBar,
   StatChange,
@@ -24,21 +24,36 @@ import {
 import { CharAvatar } from "../components/identity";
 import { SheetView } from "../components/sheet";
 import { SYSTEMS, carriedStats } from "../data/systems";
-import { fmtDate, fmtDateShort, todayStr, uid } from "../lib/time";
+import { fmtDateShort, todayStr, uid } from "../lib/time";
+import { userHref } from "../lib/people";
 import {
   EXTERNAL_PROVIDER_LABELS,
   canFetchSheet,
   isSheetLinked,
   mergeExternalCharacterUpdate,
-  parseExternalUrl,
   shouldAutoSync,
   type StatChangeDiff,
 } from "../lib/external-sync";
-import { importCharactersFromText, type ParsedCharacter } from "../lib/importers";
-import { SHEET_PROVIDER_LABELS, sheetSection } from "../lib/sheet";
+import {
+  carriedDeltas,
+  carriedValues,
+  currentSkillValue,
+  reassignGrowth,
+  sessionsNewestFirst,
+} from "../lib/character-growth";
+import {
+  applyLinkedEdit,
+  applyManualEdit,
+  validateSheetUrl,
+  type CharacterOwnedEdit,
+  type LinkedCharacterEdit,
+  type ManualCharacterEdit,
+} from "../lib/character-edit";
+import { SHEET_PROVIDER_LABELS } from "../lib/sheet";
+import { tagOptions } from "../lib/tags";
 import type { Character, GrowthRecord, SessionStat } from "../types";
-import { currentStat, requestExternalSheet } from "./Characters";
-import { IconExternal, IconPencil, IconRefresh, IconShare, IconPlus, IconHistory } from "../components/icons";
+import { requestExternalSheet } from "./Characters";
+import { IconExternal, IconPencil, IconRefresh, IconShare, IconPlus } from "../components/icons";
 
 const CHAR_SESSION_PAGE_SIZE = 15;
 const CHAR_SESSION_STEP = 20;
@@ -49,9 +64,16 @@ export default function CharacterDetail() {
   return <CharacterDetailView key={id ?? ""} id={id} />;
 }
 
-type SyncSummary = { changed: boolean; diffs: StatChangeDiff[]; profileChanges: string[] };
+type SyncSummary = {
+  changed: boolean;
+  /** 成長にならなかった変化（SAN の増減など） */
+  diffs: StatChangeDiff[];
+  profileChanges: string[];
+  /** この同期で自動で残した成長 */
+  growthIds: string[];
+};
 
-/** 取得元の名前（URL で結び付いていればそのサイト、貼り付けならシートの取得元） */
+/** 取得元の名前（URL で結び付いていればそのサイト、そうでなければシートの取得元） */
 function sheetSourceLabel(c: Character): string {
   if (c.externalSync) return EXTERNAL_PROVIDER_LABELS[c.externalSync.provider];
   if (c.sheet) return SHEET_PROVIDER_LABELS[c.sheet.provider];
@@ -70,12 +92,16 @@ function updatedLabel(iso: string | undefined): string | undefined {
   return day === todayStr() ? "今日更新" : `${fmtDateShort(day)}に更新`;
 }
 
+/** セッションの選択肢（新しい順。「11/14 廃校の十三時間目」） */
+function sessionOptions(sessions: SessionStat[]) {
+  return sessions.map((r) => ({ value: r.logId, label: `${fmtDateShort(r.date)} ${r.title}` }));
+}
+
 function CharacterDetailView({ id }: { id: string | undefined }) {
   const { state, update } = useStore();
   const [editOpen, setEditOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [growthOpen, setGrowthOpen] = useState(false);
-  const [pasteOpen, setPasteOpen] = useState(false);
   /* 更新中の表示は Transition の待機状態から得る（Effect から始める自動更新でも余分な描画を挟まない） */
   const [syncing, startSync] = useTransition();
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -88,30 +114,32 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
   const extSync = c?.externalSync;
   const fetchable = Boolean(c && canFetchSheet(c));
 
-  /** 取り込み結果を反映する（URL からでも貼り付けからでも同じ）。卓譜の項目と記録は残す */
+  /** 読み込んだキャラシを反映する。卓譜の項目と記録は残し、上がった技能は成長として残す */
   const applySheet = useCallback(
-    (incoming: ParsedCharacter, meta: { url?: string; fetchedAt?: string; contentHash?: string }) => {
-      if (!c) return;
+    (
+      incoming: Parameters<typeof mergeExternalCharacterUpdate>[1],
+      meta: { url?: string; fetchedAt?: string; contentHash?: string },
+    ) => {
+      if (!c || !extSync) return;
       const syncedAt = meta.fetchedAt ?? new Date().toISOString();
       const merged = mergeExternalCharacterUpdate(c, incoming, {
-        url: meta.url ?? extSync?.url ?? c.sheet?.url ?? "",
-        provider: extSync?.provider ?? "iachara",
+        url: meta.url ?? extSync.url,
+        provider: extSync.provider,
         syncedAt,
-        today: todayStr(),
         contentHash: meta.contentHash,
       });
       const next = merged.next;
-      /* URL で結び付いていないキャラクター（貼り付け・ファイル）には URL 連携を足さない */
-      if (!extSync) delete next.externalSync;
       if (next.sheet && !next.sheet.url && sheetUrlOf(c)) next.sheet = { ...next.sheet, url: sheetUrlOf(c) };
       update((s) => {
         if (s.characters[c.id]) s.characters[c.id] = next;
       });
       setSyncError(null);
+      const grown = new Set(merged.growth.map((g) => g.skill));
       setSyncSummary({
         changed: merged.changed,
-        diffs: merged.statChanges,
+        diffs: merged.statChanges.filter((d) => !grown.has(d.label)),
         profileChanges: merged.profileChanges,
+        growthIds: merged.growth.map((g) => g.id),
       });
     },
     [c, extSync, update],
@@ -151,22 +179,11 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
     syncExternal();
   }, [c, isMineChar, extSync, fetchable, syncExternal]);
 
-  const sessions = useMemo(
-    () => (c ? [...c.sessions].sort((a, b) => b.date.localeCompare(a.date)) : []),
-    [c],
-  );
-  const looseGrowth = useMemo(() => {
-    if (!c) return [];
-    const sessionLogIds = new Set(c.sessions.map((s) => s.logId));
-    return c.growth
-      .filter((g) => !g.logId || !sessionLogIds.has(g.logId))
-      .sort((a, b) => b.date.localeCompare(a.date));
-  }, [c]);
+  const sessions = useMemo(() => (c ? sessionsNewestFirst(c) : []), [c]);
   const growthByLogId = useMemo(() => {
     const map = new Map<string, GrowthRecord[]>();
     if (!c) return map;
     for (const g of c.growth) {
-      if (!g.logId) continue;
       const arr = map.get(g.logId);
       if (arr) arr.push(g);
       else map.set(g.logId, [g]);
@@ -196,23 +213,18 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
   const sys = SYSTEMS[c.systemId];
   const isMine = c.ownerId === state.me;
   const owner = state.users[c.ownerId];
-  const firstDate = sessions.at(-1)?.date;
   const shownSessions = sessions.slice(0, visibleCount);
-  const allSessionsShown = shownSessions.length >= sessions.length;
   const linked = isSheetLinked(c);
   const sheetUrl = sheetUrlOf(c);
   const sourceLabel = sheetSourceLabel(c);
+  const growthLabel = sys?.growthLabel ?? "成長";
 
-  /* 卓をまたいで続く値（SAN など）。上限はキャラシにあればそれを使う */
-  const resources = sheetSection(c.sheet, "resources")?.entries ?? [];
-  const carried = carriedStats(sys)
-    .map((st) => ({
-      ...st,
-      value: currentStat(c, st.key),
-      max: resources.find((e) => e.label === st.label)?.max ?? st.max,
-    }))
-    .filter((st) => st.value != null);
+  /* 卓をまたいで続く値（SAN など）だけ。続かない値は出さない（P3） */
+  const carried = carriedValues(c);
   const hasAside = carried.length > 0 || coCharEntries.length > 0;
+  /* 成長を手で記録するのはキャラシのないキャラクターだけ。キャラシのあるものは同期で残る */
+  const canAddGrowth = isMine && !linked && sessions.length > 0;
+  const syncedGrowth = syncSummary ? c.growth.filter((g) => syncSummary.growthIds.includes(g.id)) : [];
 
   const syncStatus =
     syncing || syncError || extSync?.lastStatus === "error" ? (
@@ -225,12 +237,30 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
         }
       />
     ) : syncSummary?.changed ? (
-      <p role="status" className="text-sm text-ink2 tabular-nums">
-        {[
-          ...syncSummary.diffs.map((d) => `${d.label} ${d.from}→${d.to}`),
-          ...syncSummary.profileChanges.map((p) => `${p}が変わりました`),
-        ].join("・") || "キャラシの内容が変わりました"}
-      </p>
+      <div className="space-y-3">
+        {syncedGrowth.length > 0 && (
+          <SyncedGrowth
+            c={c}
+            growth={syncedGrowth}
+            growthLabel={growthLabel}
+            sessions={sessions}
+            onSession={(session) =>
+              update((s) => {
+                const target = s.characters[c.id];
+                if (target) reassignGrowth(target, syncSummary.growthIds, session);
+              })
+            }
+          />
+        )}
+        {(syncSummary.diffs.length > 0 || syncSummary.profileChanges.length > 0) && (
+          <p role="status" className="text-sm text-ink2 tabular-nums">
+            {[
+              ...syncSummary.diffs.map((d) => `${d.label} ${d.from}→${d.to}`),
+              ...syncSummary.profileChanges.map((p) => `${p}が変わりました`),
+            ].join("・")}
+          </p>
+        )}
+      </div>
     ) : null;
 
   const sheetSection_ = linked ? (
@@ -251,13 +281,13 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
                 <IconExternal width={16} height={16} aria-hidden /> キャラシで開く
               </a>
             )}
-            {isMine && (
+            {isMine && fetchable && (
               <button
                 type="button"
                 className="btn btn-sm"
                 disabled={syncing}
                 aria-busy={syncing || undefined}
-                onClick={() => (fetchable ? syncExternal() : setPasteOpen(true))}
+                onClick={syncExternal}
               >
                 <IconRefresh
                   width={16}
@@ -278,9 +308,7 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
         <SheetView sheet={c.sheet} systemId={c.systemId} busy={syncing} />
       ) : (
         <div className="surface">
-          <EmptyState kind="first" title="キャラシの内容はまだありません">
-            「更新」を押すと、{sourceLabel}から能力値と技能を読み込みます。
-          </EmptyState>
+          <EmptyState kind="first" title="キャラシの内容はまだありません" />
         </div>
       )}
     </section>
@@ -309,22 +337,19 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
 
       <section aria-label="これまでのセッション">
         <SectionTitle
-          sub={firstDate ? `${fmtDate(firstDate)}から` : undefined}
           right={
-            isMine ? (
+            canAddGrowth ? (
               <button className="btn btn-sm" onClick={() => setGrowthOpen(true)}>
-                <IconPlus width={16} height={16} /> {sys?.growthLabel ?? "成長"}を記録
+                <IconPlus width={16} height={16} /> {growthLabel}を記録
               </button>
             ) : undefined
           }
         >
           これまでのセッション
         </SectionTitle>
-        {sessions.length === 0 && looseGrowth.length === 0 ? (
+        {sessions.length === 0 ? (
           <div className="surface">
-            <EmptyState kind="first" title="まだセッションに参加していません">
-              セッションを記録するときに、参加者としてこのキャラクターを選ぶとここに並びます。
-            </EmptyState>
+            <EmptyState kind="first" title="まだセッションに参加していません" />
           </div>
         ) : (
           <>
@@ -334,7 +359,7 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
                 const glist = growthByLogId.get(s.logId) ?? [];
                 const year = s.date.slice(0, 4);
                 const body = (
-                  <div className="py-4 pr-4 sm:pr-5">
+                  <>
                     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
                       <h3 className="font-bold leading-snug transition-colors group-hover:text-primary">
                         {s.title}
@@ -345,43 +370,27 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
                           : fmtDateShort(s.date)}
                       </time>
                     </div>
-                    <Changes s={s} sysStats={carriedStats(sys)} growth={glist} />
+                    <Changes s={s} systemId={c.systemId} growth={glist} />
                     {s.memo.trim() && (
                       <p data-user-content className="mt-1.5 text-sm leading-relaxed text-ink2">
                         {s.memo}
                       </p>
                     )}
                     {!log && <p className="mt-1 text-xs text-ink3">記録は削除されています</p>}
-                  </div>
+                  </>
                 );
                 return (
                   <li key={s.logId} className="tlitem">
                     {log ? (
-                      <Link
-                        to={`/sessions/${s.logId}`}
-                        className="group block transition-colors hover:bg-base-200/40"
-                      >
+                      <Link to={`/sessions/${s.logId}`} className="tlrow row-interactive group">
                         {body}
                       </Link>
                     ) : (
-                      body
+                      <div className="tlrow">{body}</div>
                     )}
                   </li>
                 );
               })}
-              {allSessionsShown && looseGrowth.length > 0 && (
-                <li className="tlitem py-4 pr-4 sm:pr-5">
-                  <h3 className="eyebrow mb-2">セッション外の{sys?.growthLabel ?? "成長"}</h3>
-                  <ul className="space-y-1.5">
-                    {looseGrowth.map((g) => (
-                      <li key={g.id} className="flex flex-wrap items-center gap-x-3 text-sm tabular-nums">
-                        <span className="w-14 text-ink2">{fmtDateShort(g.date)}</span>
-                        <GrowthLine g={g} />
-                      </li>
-                    ))}
-                  </ul>
-                </li>
-              )}
             </ol>
             <LoadMore
               shown={shownSessions.length}
@@ -398,14 +407,11 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
   const asideCol = hasAside ? (
     <div className="space-y-8">
       {carried.length > 0 && (
-        <section aria-label="現在の値">
-          <SectionTitle>現在の値</SectionTitle>
-          <dl className="surface space-y-3.5 p-4 sm:p-5">
-            {carried.map((st) => (
-              <StatBar key={st.key} label={st.label} value={st.value} max={st.max} />
-            ))}
-          </dl>
-        </section>
+        <dl aria-label={carried.map((st) => st.label).join("・")} className="surface space-y-3.5 p-4 sm:p-5">
+          {carried.map((st) => (
+            <StatBar key={st.key} label={st.label} value={st.value} max={st.max} />
+          ))}
+        </dl>
       )}
 
       {coCharEntries.length > 0 && (
@@ -447,7 +453,7 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
             {c.archetype && <span>{c.archetype}</span>}
             <SysBadge sys={sys} />
             {!isMine && owner && (
-              <Link to={`/users/${c.ownerId}`} className="link-hover">
+              <Link to={userHref(owner)} className="link-hover">
                 {owner.name}のキャラクター
               </Link>
             )}
@@ -473,59 +479,85 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
         <div className="max-w-4xl">{mainCol}</div>
       )}
 
-      {editOpen && <EditCharModal key={c.id} c={c} onClose={() => setEditOpen(false)} />}
+      {editOpen &&
+        (linked ? (
+          <EditLinkedCharModal key={c.id} c={c} onClose={() => setEditOpen(false)} />
+        ) : (
+          <EditManualCharModal key={c.id} c={c} onClose={() => setEditOpen(false)} />
+        ))}
       {shareOpen && <ShareCharModal key={c.id} c={c} onClose={() => setShareOpen(false)} />}
-      {growthOpen && <AddGrowthModal key={c.id} c={c} onClose={() => setGrowthOpen(false)} />}
-      {pasteOpen && (
-        <PasteSheetModal
-          c={c}
-          sourceLabel={sourceLabel}
-          onClose={() => setPasteOpen(false)}
-          onApply={(parsed) => {
-            applySheet(parsed, {});
-            setPasteOpen(false);
-          }}
-        />
+      {growthOpen && canAddGrowth && (
+        <AddGrowthModal key={c.id} c={c} sessions={sessions} onClose={() => setGrowthOpen(false)} />
       )}
     </>
+  );
+}
+
+/**
+ * 同期で自動で残した成長。どのセッションのあとかだけを選び直せる（既定は前の同期のあとに遊んだうち最新）
+ */
+function SyncedGrowth({
+  c,
+  growth,
+  growthLabel,
+  sessions,
+  onSession,
+}: {
+  c: Character;
+  growth: GrowthRecord[];
+  growthLabel: string;
+  sessions: SessionStat[];
+  onSession: (session: SessionStat) => void;
+}) {
+  const logId = growth[0]?.logId ?? "";
+  return (
+    <div role="status" className="surface motion-enter p-4 sm:p-5">
+      <b className="block text-sm">{growthLabel}を記録しました</b>
+      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        {growth.map((g) => (
+          <GrowthLine key={g.id} g={g} />
+        ))}
+      </div>
+      {sessions.length > 1 && (
+        <div className="mt-3 max-w-sm">
+          <Combobox
+            ariaLabel={`${c.name}の${growthLabel}のセッション`}
+            size="sm"
+            className="w-full"
+            value={logId}
+            onChange={(v) => {
+              const hit = sessions.find((s) => s.logId === v);
+              if (hit) onSession(hit);
+            }}
+            options={sessionOptions(sessions)}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
 /** 成長 1 件。上がった幅を数字で見せる（細い線のアイコンには頼らない） */
 function GrowthLine({ g }: { g: GrowthRecord }) {
   return (
-    <span className="inline-flex flex-wrap items-baseline gap-x-1.5">
-      <StatChange
-        label={<b className="font-semibold text-base-content">{g.skill}</b>}
-        before={g.from}
-        after={g.to}
-        showZero
-      />
-      {g.note && <span className="text-xs text-ink2">{g.note}</span>}
-    </span>
+    <StatChange
+      label={<b className="font-semibold text-base-content">{g.skill}</b>}
+      before={g.from}
+      after={g.to}
+      showZero
+    />
   );
 }
 
 /** そのセッションでの続く値（SAN など）の増減と成長をまとめて1行に並べる */
-function Changes({
-  s,
-  sysStats,
-  growth,
-}: {
-  s: SessionStat;
-  sysStats: { key: string; label: string }[];
-  growth: GrowthRecord[];
-}) {
-  const deltas = Object.entries(s.delta).flatMap(([k, d]) => {
-    const def = sysStats.find((x) => x.key === k);
-    return def ? [{ k, label: def.label, ...d }] : [];
-  });
+function Changes({ s, systemId, growth }: { s: SessionStat; systemId: string; growth: GrowthRecord[] }) {
+  const deltas = carriedDeltas(systemId, s.delta);
   if (deltas.length === 0 && growth.length === 0) return null;
   return (
     <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-sm">
       {deltas.map((d) => (
         <StatChange
-          key={d.k}
+          key={d.key}
           label={<b className="font-semibold text-base-content">{d.label}</b>}
           before={d.before}
           after={d.after}
@@ -539,133 +571,104 @@ function Changes({
   );
 }
 
-/** 貼り付けで取り込んだキャラクターの更新（いあきゃらなど URL から読めないサイト） */
-function PasteSheetModal({
-  c,
-  sourceLabel,
-  onClose,
-  onApply,
-}: {
-  c: Character;
-  sourceLabel: string;
-  onClose: () => void;
-  onApply: (parsed: ParsedCharacter) => void;
-}) {
-  const [text, setText] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  function apply() {
-    const hit = importCharactersFromText(text)[0];
-    if (!hit) {
-      setError("キャラクターを読み取れませんでした。コピーした内容をそのまま貼り付けてください。");
-      return;
-    }
-    onApply(hit.character);
-  }
-  return (
-    <Modal
-      title={`${c.name}を更新`}
-      onClose={onClose}
-      foot={
-        <>
-          <button type="button" className="btn btn-quiet" onClick={onClose}>
-            キャンセル
-          </button>
-          <button type="button" className="btn btn-primary" disabled={!text.trim()} onClick={apply}>
-            更新する
-          </button>
-        </>
-      }
-    >
-      <p className="text-sm leading-relaxed">
-        {sourceLabel}
-        のキャラシで「ココフォリア駒出力」を押し、コピーした内容を貼り付けてください。ひとこと紹介・タグ・セッションの記録はそのまま残ります。
-      </p>
-      <Field label="ココフォリア駒出力">
-        <textarea
-          className="textarea textarea-bordered w-full font-mono text-sm"
-          rows={6}
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            setError(null);
-          }}
-        />
-      </Field>
-      {error && (
-        <p role="alert" className="mt-3 text-sm text-error">
-          {error}
-        </p>
-      )}
-    </Modal>
+function useTagSuggestions() {
+  const { state } = useStore();
+  // 候補は自分のキャラクターに付けたタグ
+  return useMemo(
+    () => tagOptions(Object.values(state.characters).filter((x) => x.ownerId === state.me)),
+    [state.characters, state.me],
   );
 }
 
-interface EditCharFormValues {
-  name: string;
-  archetype: string;
-  bio: string;
-  tags: string;
-  externalUrl: string;
-  stats: Record<string, number>;
+/** 卓譜だけが持つ項目（ひとこと紹介・タグ・キャラシの URL）の入力欄。2 つの編集フォームで共通の項目だけを触る */
+function OwnedFields({ form }: { form: UseFormReturn<CharacterOwnedEdit> }) {
+  const tagSuggestions = useTagSuggestions();
+  const urlError = form.formState.errors.sheetUrl?.message;
+  return (
+    <>
+      <Field label="ひとこと紹介">
+        <textarea className="textarea textarea-bordered w-full text-sm" {...form.register("bio")} />
+      </Field>
+      <Field label="タグ">
+        <Controller
+          name="tags"
+          control={form.control}
+          render={({ field }) => (
+            <MultiCombobox
+              ariaLabel="タグ"
+              className="w-full"
+              values={field.value}
+              onChange={field.onChange}
+              options={tagSuggestions}
+              placeholder="タグを探すか、新しく追加"
+            />
+          )}
+        />
+      </Field>
+      <Field label="キャラシの URL">
+        <input
+          type="url"
+          inputMode="url"
+          className={cx("input input-bordered w-full", urlError && "input-error")}
+          placeholder="https://charaeno.com/7th/…"
+          {...form.register("sheetUrl", { validate: validateSheetUrl })}
+        />
+        {urlError && (
+          <p role="alert" className="mt-1 text-xs text-error">
+            {urlError}
+          </p>
+        )}
+      </Field>
+    </>
+  );
+}
+
+/** どちらの編集フォームも卓譜だけが持つ項目を同じ名前で持つので、その部分だけを見せる */
+function ownedPart<T extends CharacterOwnedEdit>(form: UseFormReturn<T>): UseFormReturn<CharacterOwnedEdit> {
+  return form as unknown as UseFormReturn<CharacterOwnedEdit>;
+}
+
+function EditFoot({
+  onClose,
+  onSave,
+  disabled,
+}: {
+  onClose: () => void;
+  onSave: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <>
+      <button type="button" className="btn btn-quiet" onClick={onClose}>
+        キャンセル
+      </button>
+      <button type="button" className="btn btn-primary" disabled={disabled} onClick={onSave}>
+        保存
+      </button>
+    </>
+  );
 }
 
 /**
- * 編集。キャラシと結び付いたキャラクターは、名前・職業・能力値をキャラシが正とするので入力欄を出さず、
- * 卓譜だけの項目（ひとこと紹介・タグ）とキャラシの URL だけを直す。
+ * キャラシと結び付いたキャラクターの編集。名前・職業・能力値・技能はキャラシが持つので入力欄を置かず（P3）、
+ * キャラシで直す入口だけを置く。直せるのは卓譜だけが持つ項目と URL
  */
-function EditCharModal({ c, onClose }: { c: Character; onClose: () => void }) {
+function EditLinkedCharModal({ c, onClose }: { c: Character; onClose: () => void }) {
   const { update } = useStore();
-  const sys = SYSTEMS[c.systemId];
-  const linked = isSheetLinked(c);
   const sheetUrl = sheetUrlOf(c);
-  const carried = carriedStats(sys);
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isValid },
-  } = useForm<EditCharFormValues>({
+  const form = useForm<LinkedCharacterEdit>({
     mode: "onChange",
-    defaultValues: {
-      name: c.name,
-      archetype: c.archetype,
-      bio: c.bio,
-      tags: c.tags.join(", "),
-      externalUrl: c.externalSync?.url ?? "",
-      stats: { ...c.stats },
-    },
+    defaultValues: { bio: c.bio, tags: [...c.tags], sheetUrl: c.externalSync?.url ?? "" },
   });
+  const {
+    handleSubmit,
+    formState: { isValid },
+  } = form;
 
-  function onSubmit(values: EditCharFormValues) {
-    const trimmedUrl = values.externalUrl.trim();
-    const parsedUrl = trimmedUrl ? parseExternalUrl(trimmedUrl) : null;
+  function onSubmit(values: LinkedCharacterEdit) {
     update((s) => {
       const ch = s.characters[c.id];
-      if (!linked) {
-        ch.name = values.name.trim();
-        ch.archetype = values.archetype.trim();
-        for (const st of carried) {
-          const v = values.stats[st.key];
-          if (typeof v === "number" && Number.isFinite(v)) ch.stats[st.key] = v;
-        }
-      }
-      ch.bio = values.bio.trim();
-      ch.tags = values.tags
-        .split(/[,、]/)
-        .map((t) => t.trim())
-        .filter(Boolean);
-      if (!trimmedUrl) {
-        delete ch.externalSync;
-      } else if (parsedUrl?.ok && parsedUrl.kind === "character") {
-        const same = ch.externalSync?.url === parsedUrl.displayUrl;
-        /* URL を変えたら次に開いたときに読み直す（最終更新を消す） */
-        ch.externalSync = {
-          provider: parsedUrl.provider,
-          url: parsedUrl.displayUrl,
-          lastSyncedAt: same ? ch.externalSync?.lastSyncedAt : undefined,
-          contentHash: same ? ch.externalSync?.contentHash : undefined,
-          autoSync: true,
-        };
-      }
+      if (ch) applyLinkedEdit(ch, values);
     });
     onClose();
   }
@@ -675,102 +678,98 @@ function EditCharModal({ c, onClose }: { c: Character; onClose: () => void }) {
       title="キャラクターを編集"
       onClose={onClose}
       wide
-      foot={
-        <>
-          <button type="button" className="btn btn-quiet" onClick={onClose}>
-            キャンセル
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={!isValid}
-            onClick={handleSubmit(onSubmit)}
-          >
-            保存
-          </button>
-        </>
-      }
+      foot={<EditFoot onClose={onClose} onSave={handleSubmit(onSubmit)} disabled={!isValid} />}
     >
       <form onSubmit={handleSubmit(onSubmit)}>
-        {linked ? (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-base-300 pb-4">
-            <p className="min-w-0 flex-1 text-sm leading-relaxed">
-              名前・職業・能力値・技能は{sheetSourceLabel(c)}
-              の内容です。直すときはキャラシ側で直してから、このページで「更新」を押してください。
-            </p>
-            {sheetUrl && (
-              <a href={sheetUrl} target="_blank" rel="noreferrer" className="btn btn-sm">
-                <IconExternal width={16} height={16} aria-hidden /> キャラシで編集
-              </a>
-            )}
-          </div>
-        ) : (
-          <div className="grid gap-x-4 sm:grid-cols-2">
-            <Field label="名前" noMargin>
-              <input
-                className={cx("input input-bordered w-full", errors.name && "input-error")}
-                aria-invalid={errors.name ? "true" : undefined}
-                {...register("name", {
-                  validate: (v) => v.trim().length > 0 || "名前を入力してください",
-                })}
-              />
-              {errors.name?.message && (
-                <p role="alert" className="mt-1 text-xs text-error">
-                  {errors.name.message}
-                </p>
-              )}
-            </Field>
-            <div className="mt-4 sm:mt-0">
-              <Field label="職業など" noMargin>
-                <input className="input input-bordered w-full" {...register("archetype")} />
-              </Field>
-            </div>
-          </div>
+        {sheetUrl && (
+          <a href={sheetUrl} target="_blank" rel="noreferrer" className="btn btn-sm">
+            <IconExternal width={16} height={16} aria-hidden /> 名前・能力値を{sheetSourceLabel(c)}で直す
+          </a>
         )}
-        <Field label="ひとこと紹介">
-          <textarea className="textarea textarea-bordered w-full text-sm" {...register("bio")} />
-        </Field>
-        <Field label="タグ（カンマ区切り）">
-          <input className="input input-bordered w-full" {...register("tags")} />
-        </Field>
-        {!linked && carried.length > 0 && (
+        <OwnedFields form={ownedPart(form)} />
+      </form>
+    </Modal>
+  );
+}
+
+/** キャラシのないキャラクターの編集。名前・職業・続く値（SAN など）も直せる */
+function EditManualCharModal({ c, onClose }: { c: Character; onClose: () => void }) {
+  const { update } = useStore();
+  const carried = carriedStats(SYSTEMS[c.systemId]);
+  const form = useForm<ManualCharacterEdit>({
+    mode: "onChange",
+    defaultValues: {
+      name: c.name,
+      archetype: c.archetype,
+      bio: c.bio,
+      tags: [...c.tags],
+      sheetUrl: c.externalSync?.url ?? "",
+      stats: { ...c.stats },
+    },
+  });
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isValid },
+  } = form;
+
+  function onSubmit(values: ManualCharacterEdit) {
+    update((s) => {
+      const ch = s.characters[c.id];
+      if (ch)
+        applyManualEdit(
+          ch,
+          values,
+          carried.map((st) => st.key),
+        );
+    });
+    onClose();
+  }
+
+  return (
+    <Modal
+      title="キャラクターを編集"
+      onClose={onClose}
+      wide
+      foot={<EditFoot onClose={onClose} onSave={handleSubmit(onSubmit)} disabled={!isValid} />}
+    >
+      <form onSubmit={handleSubmit(onSubmit)}>
+        <div className="grid gap-x-4 sm:grid-cols-2">
+          <Field label="名前" noMargin>
+            <input
+              className={cx("input input-bordered w-full", errors.name && "input-error")}
+              aria-invalid={errors.name ? "true" : undefined}
+              {...register("name", {
+                validate: (v) => v.trim().length > 0 || "名前を入力してください",
+              })}
+            />
+            {errors.name?.message && (
+              <p role="alert" className="mt-1 text-xs text-error">
+                {errors.name.message}
+              </p>
+            )}
+          </Field>
+          <div className="mt-4 sm:mt-0">
+            <Field label="職業など" noMargin>
+              <input className="input input-bordered w-full" {...register("archetype")} />
+            </Field>
+          </div>
+        </div>
+        {carried.length > 0 && (
           <div className="grid gap-x-4 sm:grid-cols-2">
             {carried.map((st) => (
-              <Field key={st.key} label={`${st.label}${st.max ? `（最大${st.max}）` : ""}`}>
-                <NumberInput className="w-full" {...register(`stats.${st.key}`, { valueAsNumber: true })} />
+              <Field key={st.key} label={st.label}>
+                <NumberInput
+                  className="w-full"
+                  min={0}
+                  max={st.max}
+                  {...register(`stats.${st.key}`, { valueAsNumber: true })}
+                />
               </Field>
             ))}
           </div>
         )}
-        <Field
-          label="キャラシの URL"
-          hint="キャラエノ・キャラッシュ・キャラクター保管所・ゆとシートⅡ。結び付けると名前や能力値はキャラシの内容になります"
-        >
-          <input
-            type="url"
-            inputMode="url"
-            className={cx("input input-bordered w-full", errors.externalUrl && "input-error")}
-            placeholder="https://charaeno.com/7th/…"
-            {...register("externalUrl", {
-              validate: (v) => {
-                const t = v.trim();
-                if (!t) return true;
-                const parsed = parseExternalUrl(t);
-                if (!parsed.ok) return parsed.error;
-                if (parsed.kind !== "character") return "キャラクターシートの URL を指定してください。";
-                return true;
-              },
-            })}
-          />
-          {errors.externalUrl?.message && (
-            <p role="alert" className="mt-1 text-xs text-error">
-              {errors.externalUrl.message}
-            </p>
-          )}
-        </Field>
-        <p className="mt-4 text-sm text-ink2">
-          システム: <SysBadge sys={sys} />
-        </p>
+        <OwnedFields form={ownedPart(form)} />
       </form>
     </Modal>
   );
@@ -784,18 +783,11 @@ function ShareCharModal({ c, onClose }: { c: Character; onClose: () => void }) {
     update((s) => {
       (s.characters[c.id].share as unknown as Record<string, boolean>)[key] = value;
     });
+  const statsLabel =
+    [...(c.sheet ? ["キャラシ"] : []), ...carriedStats(sys).map((x) => x.label)].join("・") || "能力値";
   const parts: [keyof Character["share"], string][] = [
     ["includeProfile", "プロフィール（職業・紹介・タグ）"],
-    [
-      "includeStats",
-      c.sheet
-        ? "キャラシ（能力値・技能）と現在の値"
-        : `現在の${
-            carriedStats(sys)
-              .map((x) => x.label)
-              .join("・") || "能力値"
-          }`,
-    ],
+    ["includeStats", statsLabel],
     ["includeSessions", "参加したセッション"],
     ["includeGrowth", `${sys?.growthLabel ?? "成長"}の履歴`],
   ];
@@ -816,23 +808,15 @@ function ShareCharModal({ c, onClose }: { c: Character; onClose: () => void }) {
         </>
       }
     >
-      <div className="flex items-start gap-4">
-        <div className="min-w-0 flex-1">
-          <b className="block text-sm">リンクを知っている人に公開</b>
-          <p className="mt-0.5 text-sm text-ink2">
-            {c.share.enabled
-              ? "このリンクを知っている人は、下で選んだ内容を見られます。"
-              : "オフのあいだは、あなた以外は見られません。"}
-          </p>
-        </div>
+      <label className="flex cursor-pointer items-center gap-4">
+        <b className="min-w-0 flex-1 text-sm">リンクを知っている人に公開</b>
         <input
           type="checkbox"
-          className="toggle toggle-primary mt-0.5"
-          aria-label="リンクを知っている人に公開"
+          className="toggle toggle-primary"
           checked={c.share.enabled}
           onChange={(e) => set("enabled", e.target.checked)}
         />
-      </div>
+      </label>
       {c.share.enabled && (
         <>
           <div className="mt-4">
@@ -863,51 +847,63 @@ function ShareCharModal({ c, onClose }: { c: Character; onClose: () => void }) {
 interface AddGrowthFormValues {
   logId: string;
   skill: string;
-  custom: string;
-  gFrom: number;
-  gTo: number;
-  gDate: string;
-  gNote: string;
+  /** 今の値が分からない技能のときだけ尋ねる */
+  from: number;
+  to: number;
 }
 
-function AddGrowthModal({ c, onClose }: { c: Character; onClose: () => void }) {
+/**
+ * キャラシのないキャラクターの成長を手で記録する。尋ねるのはセッション・技能・新しい値だけで、
+ * 前の値は分かる範囲で埋め（前に記録した値）、日付はそのセッションの日付にする（P2）
+ */
+function AddGrowthModal({
+  c,
+  sessions,
+  onClose,
+}: {
+  c: Character;
+  sessions: SessionStat[];
+  onClose: () => void;
+}) {
   const { update } = useStore();
   const sys = SYSTEMS[c.systemId];
-  const recent = [...c.sessions].sort((a, b) => b.date.localeCompare(a.date));
+  // 前に記録した技能（新しい順）を先頭に出す。システムの技能表にないものもここから選び直せる
+  const recentSkills = [...new Set([...c.growth].reverse().map((g) => g.skill))].slice(0, 5);
+  const [extraSkills, setExtraSkills] = useState<string[]>([]);
+  const skillOptions = [...new Set([...(sys?.skills ?? []), ...recentSkills, ...extraSkills])].map(
+    (name) => ({ value: name, label: name }),
+  );
   const {
     register,
     control,
     getValues,
-    setValue,
     trigger,
     handleSubmit,
     formState: { errors, isValid },
   } = useForm<AddGrowthFormValues>({
     mode: "onChange",
     defaultValues: {
-      logId: recent[0]?.logId ?? "",
-      skill: sys.skills[0] ?? "__custom__",
-      custom: "",
-      gFrom: 0,
-      gTo: 0,
-      gDate: recent[0]?.date ?? todayStr(),
-      gNote: "",
+      logId: sessions[0]?.logId ?? "",
+      skill: recentSkills[0] ?? sys?.skills[0] ?? "",
+      from: Number.NaN,
+      to: Number.NaN,
     },
   });
-
   const skill = useWatch({ control, name: "skill" });
+  const known = skill ? currentSkillValue(c, skill) : undefined;
+  const fromOf = () => known ?? getValues("from");
 
   function onSubmit(values: AddGrowthFormValues) {
-    const skillName = values.skill === "__custom__" ? values.custom : values.skill;
+    const session = sessions.find((s) => s.logId === values.logId);
+    if (!session) return;
     update((s) => {
       s.characters[c.id].growth.push({
         id: "g_" + uid(),
-        date: values.gDate || todayStr(),
-        logId: values.logId || undefined,
-        skill: skillName.trim(),
-        from: values.gFrom,
-        to: values.gTo,
-        note: values.gNote.trim() || undefined,
+        logId: session.logId,
+        date: session.date,
+        skill: values.skill.trim(),
+        from: known ?? values.from,
+        to: values.to,
       });
     });
     onClose();
@@ -915,7 +911,7 @@ function AddGrowthModal({ c, onClose }: { c: Character; onClose: () => void }) {
 
   return (
     <Modal
-      title={`${sys.growthLabel}を記録`}
+      title={`${sys?.growthLabel ?? "成長"}を記録`}
       onClose={onClose}
       foot={
         <>
@@ -933,120 +929,95 @@ function AddGrowthModal({ c, onClose }: { c: Character; onClose: () => void }) {
         </>
       }
     >
-      <p className="text-sm text-ink2 flex items-start gap-1.5">
-        <IconHistory width={16} height={16} className="mt-0.5 shrink-0" aria-hidden /> {sys.growthNote}
-      </p>
       <form onSubmit={handleSubmit(onSubmit)}>
-        {recent.length > 0 && (
-          <Field label="どのセッションのあとか">
-            <Controller
-              name="logId"
-              control={control}
-              render={({ field }) => (
-                <Select
-                  ariaLabel="どのセッションのあとか"
-                  className="w-full"
-                  value={field.value}
-                  onChange={(v) => {
-                    field.onChange(v);
-                    const hit = recent.find((r) => r.logId === v);
-                    if (hit) setValue("gDate", hit.date);
-                  }}
-                  options={[
-                    ...recent.map((r) => ({ value: r.logId, label: `${fmtDateShort(r.date)} ${r.title}` })),
-                    { value: "", label: "セッションに紐付けない" },
-                  ]}
-                />
-              )}
-            />
-          </Field>
-        )}
-        <div className="grid sm:grid-cols-2 gap-x-4">
-          <Field label="技能 / 能力">
+        <Field label="セッション" noMargin>
+          <Controller
+            name="logId"
+            control={control}
+            rules={{ validate: (v) => sessions.some((s) => s.logId === v) }}
+            render={({ field }) => (
+              <Combobox
+                ariaLabel="セッション"
+                className="w-full"
+                value={field.value}
+                onChange={field.onChange}
+                options={sessionOptions(sessions)}
+              />
+            )}
+          />
+        </Field>
+        <div className="grid gap-x-4 sm:grid-cols-2">
+          <Field label="技能">
             <Controller
               name="skill"
               control={control}
-              render={({ field }) => (
-                <Select
-                  ariaLabel="技能 / 能力"
-                  className="w-full"
-                  value={field.value}
-                  onChange={(v) => {
-                    field.onChange(v);
-                    void trigger("custom");
-                  }}
-                  options={[
-                    ...sys.skills.map((s) => ({ value: s, label: s })),
-                    { value: "__custom__", label: "自由入力…" },
-                  ]}
-                />
+              rules={{ validate: (v) => v.trim().length > 0 || "技能を選んでください" }}
+              render={({ field, fieldState }) => (
+                <>
+                  <Combobox
+                    ariaLabel="技能"
+                    className="w-full"
+                    value={field.value}
+                    placeholder="技能を探す"
+                    options={skillOptions}
+                    pinned={recentSkills}
+                    pinnedLabel="前に記録した技能"
+                    onChange={(v) => {
+                      field.onChange(v);
+                      void trigger("to");
+                    }}
+                    onCreate={(name) => {
+                      setExtraSkills((xs) => [...xs, name]);
+                      field.onChange(name);
+                    }}
+                    invalid={Boolean(fieldState.error)}
+                  />
+                  {fieldState.error?.message && (
+                    <p role="alert" className="mt-1 text-xs text-error">
+                      {fieldState.error.message}
+                    </p>
+                  )}
+                </>
               )}
             />
           </Field>
-          <Field label={skill === "__custom__" ? "技能名（自由入力）" : "補足"}>
-            {skill === "__custom__" ? (
-              <>
-                <input
-                  className={cx("input input-bordered w-full", errors.custom && "input-error")}
-                  aria-invalid={errors.custom ? "true" : undefined}
-                  placeholder="例: 銃構築"
-                  {...register("custom", {
-                    validate: (v) =>
-                      getValues("skill") !== "__custom__" ||
-                      v.trim().length > 0 ||
-                      "技能名を入力してください",
+          <Field label="値" group>
+            <div className="flex items-center gap-2">
+              {known != null ? (
+                <span className="w-12 shrink-0 text-right text-base tabular-nums text-ink2">{known}</span>
+              ) : (
+                <NumberInput
+                  aria-label="前の値"
+                  className="min-w-0 flex-1"
+                  {...register("from", {
+                    valueAsNumber: true,
+                    validate: (v) => known != null || !Number.isNaN(v),
+                    onChange: () => void trigger("to"),
                   })}
                 />
-                {errors.custom?.message && (
-                  <p role="alert" className="text-xs text-error mt-1">
-                    {errors.custom.message}
-                  </p>
-                )}
-              </>
-            ) : (
-              <input
-                className="input input-bordered w-full"
-                placeholder="例: クリティカルの余韻で"
-                {...register("gNote")}
+              )}
+              <span aria-hidden className="text-ink2">
+                →
+              </span>
+              <NumberInput
+                aria-label="新しい値"
+                className="min-w-0 flex-1"
+                invalid={Boolean(errors.to)}
+                {...register("to", {
+                  valueAsNumber: true,
+                  validate: (v) => {
+                    const from = fromOf();
+                    if (Number.isNaN(v)) return false;
+                    return Number.isNaN(from) || v > from || `${from} より大きい値にしてください`;
+                  },
+                })}
               />
-            )}
-          </Field>
-        </div>
-        {skill === "__custom__" && (
-          <Field label="補足">
-            <input className="input input-bordered w-full" {...register("gNote")} />
-          </Field>
-        )}
-        <div className="grid sm:grid-cols-3 gap-x-4">
-          <Field label="前の値">
-            <NumberInput
-              className="w-full"
-              {...register("gFrom", {
-                valueAsNumber: true,
-                onChange: () => {
-                  void trigger("gTo");
-                },
-              })}
-            />
-          </Field>
-          <Field label="新しい値">
-            <NumberInput
-              className="w-full"
-              invalid={Boolean(errors.gTo)}
-              {...register("gTo", {
-                valueAsNumber: true,
-                validate: (v) =>
-                  (!Number.isNaN(v) && v > getValues("gFrom")) || "前の値より大きい数値を入力してください",
-              })}
-            />
-            {errors.gTo?.message && (
-              <p role="alert" className="text-xs text-error mt-1">
-                {errors.gTo.message}
+            </div>
+            {errors.to?.message && (
+              <p role="alert" className="mt-1 text-xs text-error">
+                {errors.to.message}
               </p>
             )}
-          </Field>
-          <Field label="日付">
-            <DateInput className="w-full" {...register("gDate")} />
           </Field>
         </div>
       </form>

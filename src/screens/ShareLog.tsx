@@ -6,9 +6,11 @@ import { LogReaderBar, RecordingLinkContext, SessionTimeline, TimelineFilter } f
 import { EmptyState, LegalLinks, LogoMark, StatBar, StatChange, SysBadge, cx } from "../components/ui";
 import { Avatar, CharAvatar } from "../components/identity";
 import { SessionMediaSection, recordingLinksAt } from "../components/media";
-import { SYSTEMS, carriedStats } from "../data/systems";
+import { SYSTEMS } from "../data/systems";
+import { carriedDeltas, carriedValues } from "../lib/character-growth";
 import { SheetView } from "../components/sheet";
 import { SYSTEM_RIGHTS } from "../lib/rights";
+import { roleLabel } from "../lib/roles";
 import { authErrorMessage, signInWithGoogle } from "../lib/auth";
 import {
   confirmPlayedLog,
@@ -20,7 +22,7 @@ import {
 } from "../lib/cloud-state";
 import { isFirebaseConfigured } from "../lib/firebase";
 import { evaluateShareGate, visibleShareMembers } from "../lib/share-gate";
-import { fmtDate, fmtDates, fmtDur, jstTime, sessionPlayMinutes } from "../lib/time";
+import { fmtDate, fmtDur, fmtSessionWhen, sessionPlayMinutes } from "../lib/time";
 import { useStore } from "../store";
 import type { Character, Log, State } from "../types";
 
@@ -296,10 +298,7 @@ function ShareLogView({
           {log.title}
         </h1>
         <div className="meta mt-2 text-ink">
-          <span className="tabular-nums">
-            {fmtDates(log.dates)}
-            {log.dates.length > 1 ? `（${log.dates.length}日間）` : ` ${jstTime(log.t0)}–${jstTime(log.t1)}`}
-          </span>
+          <span className="tabular-nums">{fmtSessionWhen(log)}</span>
           {playMin > 0 && <span className="tabular-nums text-ink2">{fmtDur(playMin)}</span>}
           {sc && <ScenarioRef sc={sc} entered={state.entered && !serverAuthorized} />}
         </div>
@@ -311,7 +310,7 @@ function ShareLogView({
               kpChar ? <CharAvatar c={kpChar} size={36} /> : <Avatar u={kpUser} size={36} />,
               kpChar?.name ?? kpUser.name,
               kpChar ? kpUser.name : undefined,
-              "GM",
+              roleLabel(log.systemId, "GM"),
             )}
           {castMembers.map((u) => {
             const user = state.users[u];
@@ -546,13 +545,8 @@ function ShareCharView({
   const sessionsAsc = [...c.sessions].sort((a, b) => a.date.localeCompare(b.date));
   const sessions = [...sessionsAsc].reverse();
   const growth = [...c.growth].sort((a, b) => b.date.localeCompare(a.date));
-  const sanKey = sys?.stats[0]?.key;
-  const sanNow = sanKey
-    ? sessionsAsc
-        .map((s) => s.delta[sanKey]?.after)
-        .filter((n) => n != null)
-        .at(-1)
-    : undefined;
+  /* 卓をまたいで続く値（SAN など）だけを出す（P3） */
+  const carried = carriedValues(c);
 
   return (
     <ShareFrame narrow systemIds={[c.systemId]}>
@@ -594,18 +588,11 @@ function ShareCharView({
         </div>
       )}
 
-      {share.includeStats && carriedStats(sys).some((st) => c.stats[st.key] != null) && (
+      {share.includeStats && carried.length > 0 && (
         <dl className="surface mt-6 grid gap-4 p-4 sm:grid-cols-2 sm:p-5">
-          {carriedStats(sys)
-            .filter((st) => c.stats[st.key] != null)
-            .map((st) => (
-              <StatBar
-                key={st.key}
-                label={st.label}
-                value={st.key === "san" && sanNow != null ? sanNow : c.stats[st.key]}
-                max={st.max}
-              />
-            ))}
+          {carried.map((st) => (
+            <StatBar key={st.key} label={st.label} value={st.value} max={st.max} />
+          ))}
         </dl>
       )}
       {share.includeStats && c.sheet && (
@@ -624,31 +611,30 @@ function ShareCharView({
                   (!remote && state.logs[s.logId]?.scope === "public" ? state.logs[s.logId]?.slug : undefined)
                 : undefined;
               return (
-                <li key={s.logId} className="tlitem py-4 pr-4 sm:pr-5">
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                    <b data-user-content className="text-sm sm:text-base">
-                      {s.title}
-                    </b>
-                    <span className="text-xs tabular-nums text-ink2">{fmtDate(s.date)}</span>
-                  </div>
-                  {Object.keys(s.delta).length > 0 && (
-                    <div className="meta mt-1 text-xs text-base-content">
-                      {Object.entries(s.delta).map(([k, d]) => {
-                        const def = sys?.stats.find((x) => x.key === k);
-                        return (
-                          <StatChange key={k} label={def?.label ?? k} before={d.before} after={d.after} />
-                        );
-                      })}
+                <li key={s.logId} className="tlitem">
+                  <div className="tlrow">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                      <b data-user-content className="text-sm sm:text-base">
+                        {s.title}
+                      </b>
+                      <span className="text-xs tabular-nums text-ink2">{fmtDate(s.date)}</span>
                     </div>
-                  )}
-                  {slugOrNull && (
-                    <Link
-                      className="mt-1.5 inline-block text-sm font-semibold text-primary hover:underline"
-                      to={`/share/l/${slugOrNull}`}
-                    >
-                      公開ログを読む
-                    </Link>
-                  )}
+                    {carriedDeltas(c.systemId, s.delta).length > 0 && (
+                      <div className="meta mt-1 text-xs text-base-content">
+                        {carriedDeltas(c.systemId, s.delta).map((d) => (
+                          <StatChange key={d.key} label={d.label} before={d.before} after={d.after} />
+                        ))}
+                      </div>
+                    )}
+                    {slugOrNull && (
+                      <Link
+                        className="mt-1.5 inline-block text-sm font-semibold text-primary hover:underline"
+                        to={`/share/l/${slugOrNull}`}
+                      >
+                        公開ログを読む
+                      </Link>
+                    )}
+                  </div>
                 </li>
               );
             })}
@@ -670,10 +656,7 @@ function ShareCharView({
                 <span className="tabular-nums text-ink2">
                   {g.from} → <b className="text-success">{g.to}</b>
                 </span>
-                <span className="ml-auto text-xs tabular-nums text-ink2">
-                  {fmtDate(g.date)}
-                  {g.note && <span data-user-content>・{g.note}</span>}
-                </span>
+                <span className="ml-auto text-xs tabular-nums text-ink2">{fmtDate(g.date)}</span>
               </li>
             ))}
           </ul>

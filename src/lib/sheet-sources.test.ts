@@ -3,10 +3,10 @@ import {
   cocSkillGroup,
   parseCharaenoJson,
   parseCharashJson,
-  sheetFromCcfolia,
+  parseLhrpgJson,
+  parseSoukoJson,
   sheetFromCharasheet,
   sheetFromYtsheet,
-  skillsFromPalette,
   ytsheetSystemFromUrl,
 } from "./sheet-sources";
 import {
@@ -24,7 +24,6 @@ import {
   parseExternalResponse,
   parseExternalUrl,
 } from "./external-sync";
-import { importCharacterFromText } from "./importers";
 import { carriedStats, SYSTEMS } from "../data/systems";
 import type { Character } from "../types";
 
@@ -128,7 +127,7 @@ describe("キャラッシュ", () => {
     ]);
   });
 
-  it("エモクロア: 能力値は日本語、技能は段階、共鳴は続く値", () => {
+  it("エモクロア: 能力値は日本語、技能は段階、共鳴は値として残す（卓をまたいでは続かない）", () => {
     const c = parseCharashJson({
       ...base,
       systems: {
@@ -157,12 +156,6 @@ describe("キャラッシュ", () => {
     expect(c.systemId).toBe("general");
     expect(c.sheet?.systemLabel).toBe("ガイアケアTRPG");
     expect(parseCharashJson({ profile: { name: "x" } })).toBeNull();
-  });
-
-  it("書き出した JSON を貼り付けても取り込める", () => {
-    const res = importCharacterFromText(JSON.stringify({ ...base, systems: { coc6: {} } }));
-    expect(res?.sourceLabel).toBe("キャラッシュ");
-    expect(res?.character.systemId).toBe("coc6");
   });
 });
 
@@ -271,37 +264,6 @@ describe("ゆとシートⅡ", () => {
   });
 });
 
-describe("ココフォリアのコマ（いあきゃら等の駒出力）", () => {
-  it("チャットパレットから技能値を拾う（能力値ロール・SAN は除く）", () => {
-    expect(
-      skillsFromPalette(
-        "CCB<=70 【目星】\nCC<=60 聞き耳\nCCB<={SAN} 【SANチェック】\nCCB<=50 【STR×5】\n1d100<=40 【図書館】",
-      ),
-    ).toEqual([
-      { label: "目星", value: 70, group: "探索技能" },
-      { label: "聞き耳", value: 60, group: "探索技能" },
-      { label: "図書館", value: 40, group: "探索技能" },
-    ]);
-  });
-
-  it("status は副能力値、params の英字 3 文字は能力値", () => {
-    const sheet = sheetFromCcfolia(
-      {
-        status: [{ label: "SAN", value: 50, max: 99 }],
-        params: [
-          { label: "STR", value: "10" },
-          { label: "アイデア", value: "60" },
-        ],
-        commands: "CCB<=80 【図書館】",
-      },
-      "coc6",
-    )!;
-    expect(sheetSection(sheet, "abilities")?.entries).toEqual([{ label: "STR", value: 10 }]);
-    expect(sheetSection(sheet, "resources")?.entries.map((e) => e.label)).toEqual(["SAN", "アイデア"]);
-    expect(sheetSkillValue(sheet, "図書館")).toBe(80);
-  });
-});
-
 describe("汎用シートの補助", () => {
   it("分類はクトゥルフの順に並べる", () => {
     const g = groupSkills([
@@ -369,6 +331,18 @@ describe("キャラシの URL", () => {
       "https://charaeno.com/api/v1/6th/Ot1AbujwN3lYS3zpUP_hE/summary",
     ],
     ["https://charash.jp/view/abc123", "charash", "https://charash.jp/api/v1/characters/abc123"],
+    /* 閲覧 URL は /view/{id}/{システム} に転送される */
+    [
+      "https://charash.jp/view/Xc6dAeJHMCjV/emoklore",
+      "charash",
+      "https://charash.jp/api/v1/characters/Xc6dAeJHMCjV",
+    ],
+    [
+      "https://character-sheets.appspot.com/dx3/edit.html?key=ahVzfmNoYXJhY3Rlci1zaGVldHMtbXBy",
+      "souko",
+      "https://character-sheets.appspot.com/dx3/display?ajax=1&key=ahVzfmNoYXJhY3Rlci1zaGVldHMtbXBy",
+    ],
+    ["https://lhrpg.com/lhz/pc?id=196293", "lhrpg", "https://lhrpg.com/lhz/api/196293.json"],
     [
       "https://yutorize.work/ytsheet/sw2.5/?id=GYwVqv",
       "ytsheet",
@@ -390,25 +364,33 @@ describe("キャラシの URL", () => {
     expect(parseExternalUrl("https://charash.jp/terms").ok).toBe(false);
   });
 
-  it("入力中の URL を案内する（いあきゃらは貼り付け、旧エモクロアは移転先）", () => {
+  it("入力中の URL を案内する。URL から読めないサイト（旧エモクロア）は受け付けない", () => {
     expect(describeSheetUrl("")).toEqual({ state: "empty" });
     expect(describeSheetUrl("https://charaeno.com/7th/h_wQNXeiHPXDEDtG3r2ac")).toMatchObject({
       state: "ok",
       label: "キャラエノ",
     });
-    expect(describeSheetUrl("https://iachara.com/view/123")).toMatchObject({
-      state: "paste",
+    expect(describeSheetUrl("https://iachara.com/view/123")).toEqual({
+      state: "ok",
+      provider: "iachara",
+      label: "いあきゃら",
       url: "https://iachara.com/view/123",
     });
     expect(describeSheetUrl("https://emoklore.charasheet.jp/sheet/1")).toMatchObject({ state: "invalid" });
     expect(describeSheetUrl("https://booth.pm/ja/items/1")).toMatchObject({ state: "invalid" });
+    expect(
+      describeSheetUrl("https://character-sheets.appspot.com/sw2/edit.html?key=ahVzfmNoYXJhY3Rlci1z"),
+    ).toMatchObject({
+      state: "invalid",
+    });
   });
 });
 
 describe("続く値とひとこと紹介", () => {
-  it("CoC は SAN（7 版は幸運も）、SW は HP を続く値にしない", () => {
+  it("CoC は SAN だけ（幸運は続かない）、エモクロアの共鳴は続かない、SW は HP を続く値にしない", () => {
     expect(carriedStats(SYSTEMS.coc6).map((s) => s.key)).toEqual(["san"]);
-    expect(carriedStats(SYSTEMS.coc7).map((s) => s.key)).toEqual(["san", "luck"]);
+    expect(carriedStats(SYSTEMS.coc7).map((s) => s.key)).toEqual(["san"]);
+    expect(carriedStats(SYSTEMS.emoklore)).toEqual([]);
     expect(carriedStats(SYSTEMS.sw25).map((s) => s.key)).not.toContain("hp");
     expect(carriedStats(SYSTEMS.coc7).map((s) => s.key)).not.toContain("mp");
   });
@@ -429,7 +411,10 @@ describe("続く値とひとこと紹介", () => {
       bio: "自分で書いた紹介",
       tags: [],
       stats: { san: 60 },
-      sessions: [],
+      sessions: [
+        { logId: "s1", date: "2026-11-01", title: "前の卓", delta: {}, rolls: [], memo: "" },
+        { logId: "s2", date: "2026-11-14", title: "廃校", delta: {}, rolls: [], memo: "" },
+      ],
       growth: [],
       share: {
         enabled: false,
@@ -439,7 +424,7 @@ describe("続く値とひとこと紹介", () => {
         includeGrowth: true,
         includeSessions: true,
       },
-      sheet: parseCharaenoJson(CHARAENO_7TH)!.sheet,
+      sheet: { ...parseCharaenoJson(CHARAENO_7TH)!.sheet!, fetchedAt: "2026-11-05T00:00:00.000Z" },
     } satisfies Character;
     const grown = {
       ...CHARAENO_7TH,
@@ -450,12 +435,155 @@ describe("続く値とひとこと紹介", () => {
       url: "https://charaeno.com/7th/abc",
       provider: "charaeno",
       syncedAt: "2026-11-21T00:00:00.000Z",
-      today: "2026-11-21",
     });
     expect(res.changed).toBe(true);
     expect(res.next.bio).toBe("自分で書いた紹介");
-    expect(res.next.growth.map((g) => [g.skill, g.from, g.to])).toEqual([["図書館", 70, 75]]);
+    /* 前の同期（11/5）のあとに遊んだうち最新のセッションのあとの成長。日付はそのセッションの日付 */
+    expect(res.next.growth.map((g) => [g.skill, g.from, g.to, g.logId, g.date])).toEqual([
+      ["図書館", 70, 75, "s2", "2026-11-14"],
+    ]);
+    expect(res.growth).toEqual(res.next.growth);
     expect(res.next.sheet?.fetchedAt).toBe("2026-11-21T00:00:00.000Z");
     expect(sheetSkillValue(res.next.sheet, "図書館")).toBe(75);
+  });
+});
+
+describe("キャラクターシート倉庫", () => {
+  /* character-sheets.appspot.com の display?ajax=1 の形（実物を縮めたもの） */
+  const dx3 = {
+    base: {
+      name: "獅峯 玲緒奈",
+      player: "りんなの",
+      age: "18",
+      sex: "女",
+      cover: "高校生",
+      works: "UGNチルドレンA",
+      syndromes: { primary: { syndrome: "キュマイラ" }, secondary: { syndrome: "エグザイル" }, tertiary: {} },
+      memo: null,
+    },
+    baseAbility: {
+      body: { total: "10" },
+      sense: { total: "1" },
+      mind: { total: "1" },
+      society: { total: "2" },
+    },
+    skills: {
+      hak: { A: { lv: "2" } },
+      kai: { A: { lv: "1" } },
+      sha: { A: { lv: null } },
+      B: [{ name1: null, lv1: null, name4: "UGN", lv4: "1" }],
+    },
+    subAbility: { hp: { total: "61" }, erotion: { total: "38" }, action: { total: "3" } },
+    arts: [{ name: "リザレクト", level: "1", timing: "オート", judge: "自動" }],
+    lois: [{ name: "テレーズブルム", type: "ﾗｲﾌ:恩人", Pfeel: "信頼", Nfeel: "憐憫" }],
+  };
+
+  it("ダブルクロス 3rd: 能力値・技能（追加技能は種類つき）・エフェクト・ロイスを読む", () => {
+    const c = parseSoukoJson(
+      JSON.stringify(dx3),
+      "dx3",
+      "https://character-sheets.appspot.com/dx3/edit.html?key=k",
+    )!;
+    expect(c).toMatchObject({
+      name: "獅峯 玲緒奈",
+      systemId: "DoubleCross",
+      memo: "職業: 高校生",
+      stats: { hp: 61 },
+    });
+    expect(c.sheet?.systemLabel).toBe("ダブルクロス3rd");
+    expect(c.sheet?.profile).toContainEqual({ label: "シンドローム", value: "キュマイラ／エグザイル" });
+    expect(sheetSection(c.sheet, "abilities")?.entries.map((e) => [e.label, e.value])).toEqual([
+      ["肉体", 10],
+      ["感覚", 1],
+      ["精神", 1],
+      ["社会", 2],
+    ]);
+    expect(sheetSection(c.sheet, "skills")?.entries.map((e) => [e.label, e.value, e.group])).toEqual([
+      ["白兵", 2, "肉体"],
+      ["回避", 1, "肉体"],
+      ["情報：UGN", 1, "社会"],
+    ]);
+    expect(sheetSection(c.sheet, "arts")?.entries[0]).toMatchObject({ label: "リザレクト", value: 1 });
+    expect(sheetSection(c.sheet, "lois")?.entries[0]).toMatchObject({
+      label: "テレーズブルム",
+      note: "信頼　憐憫",
+    });
+  });
+
+  it("シノビガミ・インセイン: 習得した特技を特技表の名前で読む（表にない番号は読まない）", () => {
+    const sg = parseSoukoJson(
+      {
+        base: { name: "戦士", cover: "アイドル", level: "上忍頭", belief: "我" },
+        learned: [
+          { id: "skills.row9.name1" },
+          { id: "skills.row3.name1" },
+          { id: "skills.row99.name0" },
+          { id: null },
+        ],
+        ninpou: [{ name: "接近戦攻撃", type: "攻撃", targetSkill: "手練" }],
+      },
+      "shinobigami",
+    )!;
+    expect(sg.systemId).toBe("ShinobiGami");
+    expect(sheetSection(sg.sheet, "skills")?.entries).toEqual([
+      { label: "刀術", value: "習得", group: "体術" },
+      { label: "手練", value: "習得", group: "体術" },
+    ]);
+    expect(sheetSection(sg.sheet, "abilities-list")?.title).toBe("忍法");
+
+    const ins = parseSoukoJson(
+      {
+        base: { name: "新たな探索者", cover: "作家", nightmare: "脅す" },
+        learned: [{ id: "skills.row5.name4" }],
+        hitpoint: { max: "6", value: "6" },
+        sanepoint: { max: "5", value: "5" },
+        item: [{ name: "鎮痛剤", effect: "回復する" }],
+      },
+      "insane",
+    )!;
+    expect(ins.systemId).toBe("Insane");
+    expect(sheetSection(ins.sheet, "skills")?.entries).toEqual([
+      { label: "教養", value: "習得", group: "知識" },
+    ]);
+    expect(sheetSection(ins.sheet, "resources")?.entries).toEqual([
+      { label: "生命力", value: 6, max: 6 },
+      { label: "正気度", value: 5, max: 5 },
+    ]);
+    expect(ins.sheet?.profile).toContainEqual({ label: "恐怖心", value: "脅す" });
+  });
+
+  it("「データが存在しません」・対応外のシステム・名前のないものは読まない", () => {
+    expect(parseSoukoJson({ error: "データが存在しません。" }, "dx3")).toBeNull();
+    expect(parseSoukoJson(dx3, "sw2")).toBeNull();
+    expect(parseSoukoJson({ base: { name: "" } }, "dx3")).toBeNull();
+    expect(parseSoukoJson("{broken", "dx3")).toBeNull();
+  });
+
+  it("URL から読むと倉庫のシステムで振り分ける", () => {
+    const url = "https://character-sheets.appspot.com/dx3/edit.html?key=ahVzfmNoYXJhY3Rlci1z";
+    const p = parseExternalResponse("souko", JSON.stringify(dx3), "text/plain", url);
+    expect(p?.kind === "character" && p.character.systemId).toBe("DoubleCross");
+  });
+});
+
+describe("冒険窓口（ログ・ホライズンTRPG）", () => {
+  it("公開 JSON を読む。形が違えば null", () => {
+    const c = parseLhrpgJson({
+      name: "ベアもん",
+      level: "90",
+      race: "ドワーフ",
+      main_job: "施療神官",
+      sub_job: "戦司祭",
+      max_hitpoint: 56,
+      str_value: 1,
+      skills: [{ name: "ヒール", skill_rank: 1, timing: "メジャー" }],
+    })!;
+    expect(c).toMatchObject({ name: "ベアもん", systemId: "LogHorizon", stats: { hp: 56, lv: 90 } });
+    expect(sheetSection(c.sheet, "skills")?.entries[0]).toMatchObject({
+      label: "ヒール",
+      value: 1,
+      note: "メジャー",
+    });
+    expect(parseLhrpgJson({ name: "x" })).toBeNull();
   });
 });

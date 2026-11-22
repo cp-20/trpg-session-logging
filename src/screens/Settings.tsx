@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "../lib/router";
 import {
   IconChevronRight,
@@ -24,21 +24,14 @@ import {
   cx,
   useVisibleCount,
 } from "../components/ui";
-import { Avatar, ProviderIcon, readAvatarImageFile } from "../components/identity";
+import { Avatar, ImageUploadField, ProviderIcon } from "../components/identity";
+import { findUserByRef, userHref } from "../lib/people";
 import { authErrorMessage, linkXAccount, signOutAccount, unlinkXAccount } from "../lib/auth";
 import { parseSavedState } from "../lib/state-schema";
 import { LEGAL_LINKS } from "../lib/rights";
-import { isFirebaseConfigured } from "../lib/firebase";
-import {
-  GOOGLE_BUSY_DAYS,
-  fetchGoogleBusyRanges,
-  listGoogleCalendars,
-  requestGoogleCalendarAccess,
-} from "../lib/google-calendar";
-import { compactBusyRanges } from "../lib/schedule";
-import { fmtDate, jstDate, jstTime } from "../lib/format";
-import type { GoogleBusyPrefs } from "../types";
-import { download, todayStr } from "../lib/time";
+import { GoogleBusySettings } from "../components/google-busy";
+import { DiscordAccountRow } from "../components/discord";
+import { download, todayStr, sessionStart } from "../lib/time";
 import { resetData, useStore } from "../store";
 import { CharacterCard } from "./Characters";
 import { SessionRow } from "./Sessions";
@@ -72,7 +65,6 @@ export default function Settings() {
 
   const x = me.accounts.find((account) => account.provider === "x" && account.status === "linked");
   const google = me.accounts.find((account) => account.provider === "google");
-  const discord = me.accounts.find((account) => account.provider === "discord");
 
   async function connectX(remove = false) {
     setBusy(true);
@@ -125,7 +117,7 @@ export default function Settings() {
               {authUser ? me.email || google?.displayName : "サンプルデータでお試し中"}
             </p>
           </div>
-          <Link className="btn btn-sm" to={`/users/${state.me}`}>
+          <Link className="btn btn-sm" to={userHref(me)}>
             プロフィール
           </Link>
         </div>
@@ -151,17 +143,7 @@ export default function Settings() {
             <span className="text-sm text-ink2">{google?.status === "linked" ? "連携中" : "未連携"}</span>
           )}
         </SettingRow>
-        <SettingRow
-          icon={<ProviderIcon provider="discord" size={28} />}
-          title="Discord"
-          desc={
-            discord?.status === "linked"
-              ? discord.displayName || discord.username || me.name
-              : authUser
-                ? "連携準備中"
-                : "サンプルでは未連携"
-          }
-        />
+        <DiscordAccountRow />
         <SettingRow
           icon={<ProviderIcon provider="x" size={28} />}
           title="X"
@@ -187,7 +169,7 @@ export default function Settings() {
 
       <SectionTitle>表示</SectionTitle>
       <div className="surface list">
-        <SettingRow title="外観" desc="「端末に合わせる」は OS のライト・ダーク設定に従います。">
+        <SettingRow title="外観">
           <Seg<ThemeMode>
             ariaLabel="外観"
             value={mode}
@@ -220,10 +202,7 @@ export default function Settings() {
             }
           />
         </SettingRow>
-        <SettingRow
-          title="共有ページで名前を隠す"
-          desc="参加したセッションの共有ページに、あなたの名前を出しません。"
-        >
+        <SettingRow title="共有ページで名前を隠す">
           <Toggle
             label="共有ページで名前を隠す"
             on={state.prefs.hideSelfOnShare}
@@ -239,14 +218,11 @@ export default function Settings() {
         </SettingRow>
       </div>
 
-      <GoogleCalendarSettings />
+      <GoogleCalendarSection />
 
       <SectionTitle sub={syncText}>データ</SectionTitle>
       <div className="surface list">
-        <SettingRow
-          title="バックアップ"
-          desc="すべての記録を1つのファイルに保存したり、保存したファイルから戻したりします。"
-        >
+        <SettingRow title="バックアップ">
           <div className="flex flex-wrap gap-2">
             <button
               className="btn btn-sm"
@@ -380,324 +356,14 @@ export default function Settings() {
   );
 }
 
-/* ================= Google カレンダーの空き時間 =================
- * 本人が明示的にオンにしたときだけ読む。オフが既定。
- * 読むのは「予定が入っている時間帯」とカレンダーの名前だけで、予定の件名などは読まない。
- */
-
-type CalendarChoice = GoogleBusyPrefs["calendars"][number];
-
-function CalendarChooser({
-  calendars,
-  onChange,
-}: {
-  calendars: CalendarChoice[];
-  onChange: (next: CalendarChoice[]) => void;
-}) {
+/** 区画の余白はここで持つ（SectionTitle は先頭の子だと上の余白が消える） */
+function GoogleCalendarSection() {
   return (
-    <ul className="list rounded-box border border-base-300" aria-label="照らし合わせに使うカレンダー">
-      {calendars.map((c) => (
-        <li key={c.id} className="flex items-center gap-3 px-4 py-2.5">
-          <span className="min-w-0 flex-1 truncate text-sm">{c.name}</span>
-          <Toggle
-            label={`${c.name}を使う`}
-            on={c.on}
-            onChange={(on) => onChange(calendars.map((x) => (x.id === c.id ? { ...x, on } : x)))}
-          />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** 何を読み、何を保存するか。許可の前に必ず見せる */
-function GoogleCalendarScope() {
-  return (
-    <dl className="grid gap-y-3 text-sm leading-relaxed">
-      <div>
-        <dt className="font-semibold">読み取るもの</dt>
-        <dd className="text-ink2">
-          カレンダーの名前の一覧と、選んだカレンダーの今日から{GOOGLE_BUSY_DAYS}
-          日間の「予定が入っている時間帯」。
-        </dd>
-      </div>
-      <div>
-        <dt className="font-semibold">読み取らないもの</dt>
-        <dd className="text-ink2">予定のタイトル・説明・場所・参加者。予定の作成や変更もしません。</dd>
-      </div>
-      <div>
-        <dt className="font-semibold">保存するもの</dt>
-        <dd className="text-ink2">
-          予定が入っている時間帯と、カレンダーの名前。あなたのアカウントにだけ保存し、ほかの人には見せません。Google
-          の許可はその場の取り込みにだけ使い、保存しません。オフにすると保存した時間帯を消します。
-        </dd>
-      </div>
-      <div>
-        <dt className="font-semibold">使い方</dt>
-        <dd className="text-ink2">
-          日程調整の候補の時間（開始から長さぶん）と重なるときだけ「自分の予定あり」と出します。同じ日でも時間が重ならなければ出しません。
-        </dd>
-      </div>
-    </dl>
-  );
-}
-
-function GoogleCalendarSettings() {
-  const { state, update, authUser } = useStore();
-  const g = state.prefs.googleBusy;
-  const available = isFirebaseConfigured && Boolean(authUser);
-  const [consent, setConsent] = useState<
-    null | { step: "explain" } | { step: "choose"; token: string; calendars: CalendarChoice[] }
-  >(null);
-  const [choosing, setChoosing] = useState<CalendarChoice[] | null>(null);
-  const [working, setWorking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function fetchAndSave(token: string, calendars: CalendarChoice[], consentedAt: string) {
-    const ids = calendars.filter((c) => c.on).map((c) => c.id);
-    const ranges = compactBusyRanges(await fetchGoogleBusyRanges(token, ids), Date.now());
-    update((s) => {
-      s.prefs.googleBusy = {
-        consentedAt,
-        calendars,
-        countAllDay: s.prefs.googleBusy?.countAllDay ?? false,
-        ranges,
-        syncedAt: new Date().toISOString(),
-      };
-    });
-  }
-
-  async function allow() {
-    setWorking(true);
-    setError(null);
-    try {
-      const token = await requestGoogleCalendarAccess();
-      const list = await listGoogleCalendars(token);
-      // 既定はメインのカレンダーだけ。祝日・誕生日などを数えて「予定あり」が増えないように
-      setConsent({
-        step: "choose",
-        token,
-        calendars: list.map((c) => ({ id: c.id, name: c.name, on: c.primary })),
-      });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Google カレンダーに接続できませんでした。");
-    } finally {
-      setWorking(false);
-    }
-  }
-
-  async function importChosen() {
-    if (consent?.step !== "choose") return;
-    setWorking(true);
-    setError(null);
-    try {
-      await fetchAndSave(consent.token, consent.calendars, new Date().toISOString());
-      setConsent(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Google カレンダーの予定を取得できませんでした。");
-    } finally {
-      setWorking(false);
-    }
-  }
-
-  /** 取り込み直す（カレンダーの選択を変えたときも） */
-  async function resync(calendars: CalendarChoice[]) {
-    if (!g) return;
-    setWorking(true);
-    setError(null);
-    try {
-      const token = await requestGoogleCalendarAccess();
-      await fetchAndSave(token, calendars, g.consentedAt);
-      setChoosing(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Google カレンダーの予定を取得できませんでした。");
-    } finally {
-      setWorking(false);
-    }
-  }
-
-  function saveChoice(calendars: CalendarChoice[]) {
-    if (!g) return;
-    const fetched = new Set(g.ranges.map((r) => r.calendarId));
-    const wasOn = new Set(g.calendars.filter((c) => c.on).map((c) => c.id));
-    const added = calendars.some((c) => c.on && !wasOn.has(c.id) && !fetched.has(c.id));
-    if (added) {
-      void resync(calendars);
-      return;
-    }
-    const on = new Set(calendars.filter((c) => c.on).map((c) => c.id));
-    update((s) => {
-      const cur = s.prefs.googleBusy;
-      if (!cur) return;
-      cur.calendars = calendars;
-      cur.ranges = cur.ranges.filter((r) => on.has(r.calendarId));
-    });
-    setChoosing(null);
-  }
-
-  function turnOff() {
-    update((s) => {
-      delete s.prefs.googleBusy;
-    });
-  }
-
-  const onNames = g?.calendars.filter((c) => c.on).map((c) => c.name) ?? [];
-  const syncedMs = g?.syncedAt ? Date.parse(g.syncedAt) : NaN;
-  const syncedLabel = Number.isFinite(syncedMs)
-    ? `${fmtDate(jstDate(syncedMs / 1000))} ${jstTime(syncedMs / 1000)}`
-    : null;
-
-  return (
-    // SectionTitle は先頭の子だと上の余白が消えるので、区画の余白はここで持つ
     <section id="google-calendar" aria-labelledby="settings-google-calendar" className="mt-10">
       <SectionTitle>
         <span id="settings-google-calendar">カレンダー</span>
       </SectionTitle>
-      <div className="surface list">
-        <SettingRow
-          icon={<ProviderIcon provider="google" size={28} />}
-          title="Google カレンダーの空き時間を使う"
-          desc={
-            g
-              ? "日程調整の候補と時間が重なると「自分の予定あり」と出します。オフにすると取り込んだ時間帯を消します。"
-              : !available
-                ? "お試し中は使えません（ログインが必要）。オンにするまで Google カレンダーは読み取りません。"
-                : "日程調整の候補と自分の予定が重なるかを確かめます。オンにすると、読み取る内容の説明が先に出ます。"
-          }
-        >
-          <Toggle
-            label="Google カレンダーの空き時間を使う"
-            on={Boolean(g)}
-            disabled={!available && !g}
-            onChange={(on) => {
-              setError(null);
-              if (on) setConsent({ step: "explain" });
-              else turnOff();
-            }}
-          />
-        </SettingRow>
-        {g && (
-          <>
-            <SettingRow
-              title="使うカレンダー"
-              desc={onNames.length > 0 ? onNames.join("、") : "選んでいません"}
-            >
-              <button type="button" className="btn btn-sm" onClick={() => setChoosing(g.calendars)}>
-                選ぶ
-              </button>
-            </SettingRow>
-            <SettingRow
-              title="終日の予定も数える"
-              desc="オフのときは、旅行や記念日のような終日の予定では「自分の予定あり」と出しません。"
-            >
-              <Toggle
-                label="終日の予定も数える"
-                on={g.countAllDay}
-                onChange={(on) =>
-                  update((s) => {
-                    if (s.prefs.googleBusy) s.prefs.googleBusy.countAllDay = on;
-                  })
-                }
-              />
-            </SettingRow>
-            <SettingRow
-              title="取り込み直す"
-              desc={
-                syncedLabel
-                  ? `最後に取り込んだのは ${syncedLabel}。予定を変えたら取り込み直してください。`
-                  : undefined
-              }
-            >
-              <button
-                type="button"
-                className="btn btn-sm"
-                disabled={working || !available}
-                onClick={() => void resync(g.calendars)}
-              >
-                {working ? "取り込み中…" : "取り込み直す"}
-              </button>
-            </SettingRow>
-          </>
-        )}
-      </div>
-      {error && !consent && !choosing && (
-        <p role="alert" className="mt-2 text-sm text-error">
-          {error}
-        </p>
-      )}
-
-      {consent && (
-        <Modal
-          title="Google カレンダーの空き時間を使う"
-          onClose={() => setConsent(null)}
-          foot={
-            <>
-              <button type="button" className="btn btn-quiet" onClick={() => setConsent(null)}>
-                キャンセル
-              </button>
-              {consent.step === "explain" ? (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={working}
-                  onClick={() => void allow()}
-                >
-                  {working ? "接続中…" : "Google で許可する"}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={working || !consent.calendars.some((c) => c.on)}
-                  onClick={() => void importChosen()}
-                >
-                  {working ? "取り込み中…" : "このカレンダーで使う"}
-                </button>
-              )}
-            </>
-          }
-        >
-          {consent.step === "explain" ? (
-            <GoogleCalendarScope />
-          ) : (
-            <>
-              <p className="mb-3 text-sm text-ink2">
-                照らし合わせに使うカレンダーを選んでください。祝日や誕生日のカレンダーを入れると、遊べる日まで「予定あり」になります。
-              </p>
-              <CalendarChooser
-                calendars={consent.calendars}
-                onChange={(calendars) => setConsent({ ...consent, calendars })}
-              />
-            </>
-          )}
-          <FieldError text={error} />
-        </Modal>
-      )}
-
-      {choosing && (
-        <Modal
-          title="使うカレンダー"
-          onClose={() => setChoosing(null)}
-          foot={
-            <>
-              <button type="button" className="btn btn-quiet" onClick={() => setChoosing(null)}>
-                キャンセル
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={working || !choosing.some((c) => c.on)}
-                onClick={() => saveChoice(choosing)}
-              >
-                保存
-              </button>
-            </>
-          }
-        >
-          <CalendarChooser calendars={choosing} onChange={setChoosing} />
-          <FieldError text={error} />
-        </Modal>
-      )}
+      <GoogleBusySettings />
     </section>
   );
 }
@@ -720,14 +386,19 @@ function UserDetailView({ id }: { id: string | undefined }) {
   const [nameDraft, setNameDraft] = useState("");
   const [bioDraft, setBioDraft] = useState("");
   const [imageDraft, setImageDraft] = useState("");
-  const [imageError, setImageError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [charQ, setCharQ] = useState("");
   const deferredCharQ = useDeferredValue(charQ);
   const [charCount, setCharCount] = useVisibleCount(USER_CHAR_PAGE, [deferredCharQ]);
   const [logCount, setLogCount] = useState(USER_LOG_PAGE);
 
-  const user = state.users[id ?? ""];
+  // URL はユーザー ID（/users/<handle>）。古い uid の URL は ID の URL に置き換える
+  const user = findUserByRef(state, id ?? "");
+  const nav = useNavigate();
+  const canonical = user ? userHref(user) : null;
+  useEffect(() => {
+    if (canonical && id && canonical !== `/users/${id}`) nav({ to: canonical, replace: true });
+  }, [canonical, id, nav]);
   const chars = useMemo(
     () => (user ? Object.values(state.characters).filter((c) => c.ownerId === user.id) : []),
     [user, state.characters],
@@ -742,7 +413,7 @@ function UserDetailView({ id }: { id: string | undefined }) {
       user
         ? Object.values(state.logs)
             .filter((l) => l.ownerId === user.id || l.players[user.id])
-            .sort((a, b) => b.t0 - a.t0)
+            .sort((a, b) => sessionStart(b) - sessionStart(a))
         : [],
     [user, state.logs],
   );
@@ -776,6 +447,7 @@ function UserDetailView({ id }: { id: string | undefined }) {
         title={user.name}
         sub={
           <>
+            {user.handle && <p className="text-ink2">@{user.handle}</p>}
             {user.bio && (
               <p data-user-content className="text-base-content">
                 {user.bio}
@@ -798,7 +470,6 @@ function UserDetailView({ id }: { id: string | undefined }) {
                   setNameDraft(user.name);
                   setBioDraft(user.bio ?? "");
                   setImageDraft(user.image ?? "");
-                  setImageError(null);
                   setProfileError(null);
                   setEditingProfile(true);
                 }}
@@ -846,50 +517,12 @@ function UserDetailView({ id }: { id: string | undefined }) {
           }
         >
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-4">
-              <Avatar u={{ ...user, image: imageDraft || undefined }} size={56} />
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="btn btn-sm cursor-pointer">
-                  画像を選ぶ
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="sr-only"
-                    aria-label="プロフィール画像を選ぶ"
-                    onChange={async (e) => {
-                      const input = e.currentTarget;
-                      const file = input.files?.[0];
-                      if (!file) return;
-                      setImageError(null);
-                      try {
-                        const compressed = await readAvatarImageFile(file, {
-                          maxSize: 128,
-                          maxChars: 3800,
-                        });
-                        setImageDraft(compressed);
-                      } catch (err) {
-                        setImageError(err instanceof Error ? err.message : "画像を読み込めませんでした");
-                      } finally {
-                        input.value = "";
-                      }
-                    }}
-                  />
-                </label>
-                {imageDraft && (
-                  <button
-                    type="button"
-                    className="btn btn-quiet btn-sm"
-                    onClick={() => {
-                      setImageDraft("");
-                      setImageError(null);
-                    }}
-                  >
-                    初期アイコンに戻す
-                  </button>
-                )}
-              </div>
-            </div>
-            <FieldError text={imageError} />
+            <ImageUploadField
+              value={imageDraft}
+              onChange={setImageDraft}
+              label="プロフィール画像を選ぶ"
+              preview={<Avatar u={{ ...user, image: imageDraft || undefined }} size={56} />}
+            />
 
             <Field label="表示名" noMargin>
               <input

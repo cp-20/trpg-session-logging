@@ -27,8 +27,8 @@ describe("Calendar + schedule + ics 結合テスト", () => {
 
     await waitFor(() => expect(screen.getAllByText("新章イントロ相談").length).toBeGreaterThan(0));
 
-    // 「調整中の日程」から PollDetailModal を開き、1つ目の候補で確定する
-    await user.click(screen.getByRole("button", { name: "新章イントロ相談" }));
+    // 暦の候補（凡例なしで「候補」と分かる）から PollDetailModal を開き、1つ目の候補で確定する
+    await user.click(screen.getAllByRole("button", { name: "候補 新章イントロ相談" })[0]!);
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
     const confirmTrigger = screen.getAllByRole("button", { name: /で確定/ })[0]!;
     await user.click(confirmTrigger);

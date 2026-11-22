@@ -4,18 +4,23 @@ import * as Clipboard from "expo-clipboard";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { commitLogImport, type CommitLogResult } from "@shared/api/commands";
+import { recentSystemIds, systemOptions } from "@shared/lib/system-options";
 import { SAMPLE_LOG } from "@shared/data/seed";
-import { SYSTEM_LIST } from "@shared/data/systems";
-import { importLogFromText, type ParsedLog } from "@shared/lib/importers";
-import { buildDraft as buildDraftWith, remapChannelTimestamps, type Draft } from "@shared/lib/speaker-match";
 import {
-  buildSessionRange,
-  deriveSessionFromMessages,
-  fmtDates,
-  fmtDur,
-  sessionPlayMinutes,
-  todayStr,
-} from "@shared/lib/time";
+  importLogFromText,
+  SUPPORTED_LOG_FORMATS_LABEL,
+  UNSUPPORTED_LOG_MESSAGE,
+  type ParsedLog,
+} from "@shared/lib/importers";
+import { buildDraft as buildDraftWith, type Draft } from "@shared/lib/speaker-match";
+import {
+  deriveSittings,
+  nextSittingFields,
+  sittingToFields,
+  sittingsFromFields,
+  type SittingFields,
+} from "@shared/lib/sittings";
+import { fmtSessionWhen, fmtDur, sessionPlayMinutes, todayStr } from "@shared/lib/time";
 import type { Channel, MsgKind, Scope } from "@shared/types";
 import { ScreenFrame, ScreenShell } from "../components/ScreenShell";
 import {
@@ -37,8 +42,8 @@ import {
 } from "../components/icons";
 import {
   Button,
+  Combobox,
   CopyBox,
-  DateList,
   DividerList,
   Field,
   FieldError,
@@ -46,12 +51,13 @@ import {
   PageHead,
   PanelHead,
   SCOPE_META,
-  Seg,
+  ScopePicker,
   Select,
+  type ComboboxOption,
+  type SelectOption,
+  SittingsInput,
   Surface,
   TextField,
-  TimeRange,
-  type SelectOption,
 } from "../components/ui";
 import { pickAndImportLogFile, pickAvatarImageDataUrl } from "../native/file-import";
 import { hapticSuccess } from "../native/haptics";
@@ -112,23 +118,9 @@ export default function UploadScreen() {
     setError(null);
     setCommitting(true);
     try {
-      let schedule: { dates: string[]; t0: number; t1: number } | null = null;
-      if (draft.manual) {
-        const range = buildSessionRange({
-          dates: draft.manual.dates,
-          startTime: draft.manual.start,
-          endTime: draft.manual.end,
-        });
-        if (!range.ok) {
-          setError(range.error ?? "日時を確認してください");
-          return;
-        }
-        schedule = { dates: draft.manual.dates, t0: range.t0, t1: range.t1 };
-      }
-
       const r = await commitLogImport(
         {
-          fileName: draft.fileName,
+          fileName: draft.fileNames.length > 0 ? draft.fileNames.join("、") : null,
           attachId,
           meta: draft.meta,
           channels: draft.channels,
@@ -138,8 +130,14 @@ export default function UploadScreen() {
           tableId: draft.tableId,
           scenarioId: draft.scenarioId,
           newScenario: draft.newScenario,
-          players: draft.players,
-          schedule,
+          // 記録する本人も参加者（役割・キャラはログから推したもの）
+          players: [
+            ...(draft.self.played
+              ? [{ userId: state.me, characterIds: draft.self.characterIds, role: draft.self.role }]
+              : []),
+            ...draft.players.filter((p) => p.userId !== state.me),
+          ],
+          sittings: draft.sittings,
         },
         state,
         update,
@@ -265,7 +263,7 @@ export default function UploadScreen() {
           <Step3Done
             result={result}
             attachId={attachId}
-            scope={draft?.scope ?? "members"}
+            scope={draft ? draft.scope : "members"}
             onRestart={() => {
               setDraft(null);
               setResult(null);
@@ -343,7 +341,7 @@ function Step1({
         }
       : null,
   );
-  const [fileInfo, setFileInfo] = useState<string | null>(draft?.fileName ?? null);
+  const [fileInfo, setFileInfo] = useState<string | null>(draft?.fileNames[0] ?? null);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -368,9 +366,7 @@ function Step1({
       const picked = await pickAndImportLogFile();
       if (!picked) return;
       if (!picked.result || picked.result.log.messageCount === 0) {
-        setError(
-          "読み取れる発言が見つかりませんでした。CCFOLIA（JSON・HTML・ZIP）、Udonarium（chat.xml・ZIP）、テキストログを選んでください。",
-        );
+        setError(UNSUPPORTED_LOG_MESSAGE);
         return;
       }
       setParsed(picked.result.log);
@@ -414,12 +410,11 @@ function Step1({
     const channels = JSON.parse(JSON.stringify(SAMPLE_LOG)) as Channel[];
     onDone(
       buildDraft({
-        fileName: null,
+        fileNames: [],
         channels,
         attachLog,
         presetTable,
         presetScenario,
-        manual: null,
         state,
       }),
     );
@@ -431,12 +426,11 @@ function Step1({
       draft?.channels === parsed.channels
         ? draft
         : buildDraft({
-            fileName: fileInfo,
+            fileNames: fileInfo ? [fileInfo] : [],
             channels: parsed.channels,
             attachLog,
             presetTable,
             presetScenario,
-            manual: null,
             state,
           }),
     );
@@ -447,7 +441,7 @@ function Step1({
       <ManualForm
         presetTable={presetTable}
         presetScenario={presetScenario}
-        initial={draft?.manual ? draft : null}
+        initial={draft && draft.channels.length === 0 ? draft : null}
         onBack={() => setManual(false)}
         onNext={onDone}
       />
@@ -459,11 +453,8 @@ function Step1({
     const speakers = [...new Set(all.map((m) => m.sp))];
     const rolls = all.filter((m) => m.roll).length;
     const secretChannels = parsed.channels.filter((c) => c.secret);
-    const rawDerived = deriveSessionFromMessages(parsed.channels);
-    const derived = rawDerived && (rawDerived.t0 > 0 || rawDerived.t1 > 0) ? rawDerived : null;
-    const playMin = derived
-      ? sessionPlayMinutes({ hasLog: true, channels: parsed.channels, t0: derived.t0, t1: derived.t1 })
-      : 0;
+    const derived = deriveSittings(parsed.channels);
+    const playMin = sessionPlayMinutes({ sittings: derived });
 
     return (
       <Surface style={{ padding: 18 }}>
@@ -490,8 +481,8 @@ function Step1({
         <View style={{ marginTop: 16, borderTopWidth: 1, borderTopColor: tokens.border }}>
           <DividerList>
             <SummaryRow label="日時">
-              {derived
-                ? `${fmtDates(derived.dates)}${playMin > 0 ? `（${fmtDur(playMin)}）` : ""}`
+              {derived.length > 0
+                ? `${fmtSessionWhen({ sittings: derived })}${playMin > 0 ? `（${fmtDur(playMin)}）` : ""}`
                 : "ログから読み取れませんでした。次の画面で入力します。"}
             </SummaryRow>
             <SummaryRow label={`発言者 ${speakers.length}人`}>
@@ -528,7 +519,7 @@ function Step1({
             ログファイルを選ぶ
           </Text>
           <Text style={{ fontSize: 14, lineHeight: 20, color: tokens.ink2, textAlign: "center" }}>
-            CCFOLIA（JSON・HTML・ZIP）、Udonarium（chat.xml・ZIP）、テキストログに対応しています。
+            {SUPPORTED_LOG_FORMATS_LABEL}に対応しています。
           </Text>
           <Button
             variant="primary"
@@ -636,9 +627,11 @@ function ManualForm({
   const { tokens } = useTheme();
   const { state } = useMobileStore();
   const [title, setTitle] = useState(initial?.meta.title ?? "");
-  const [dates, setDates] = useState<string[]>(initial?.manual?.dates ?? [todayStr()]);
-  const [start, setStart] = useState(initial?.manual?.start ?? "21:00");
-  const [end, setEnd] = useState(initial?.manual?.end ?? "25:00");
+  const [rows, setRows] = useState<SittingFields[]>(() =>
+    initial && initial.sittings.length > 0
+      ? initial.sittings.map(sittingToFields)
+      : [nextSittingFields([], todayStr())],
+  );
   const [tableId, setTableId] = useState(initial?.tableId ?? presetTable);
   const [error, setError] = useState<string | null>(null);
 
@@ -652,26 +645,20 @@ function ManualForm({
       setError("タイトルを入力してください。");
       return;
     }
-    if (dates.some((date) => !/^\d{4}-\d{2}-\d{2}$/.test(date)) || new Set(dates).size !== dates.length) {
-      setError("実施日を重複しない日付で入力してください。");
-      return;
-    }
-    const sortedDates = [...dates].sort();
-    const range = buildSessionRange({ dates: sortedDates, startTime: start, endTime: end });
-    if (!range.ok) {
-      setError(range.error ?? "時刻を確認してください");
+    const parsed = sittingsFromFields(rows);
+    if (!parsed.ok) {
+      setError(parsed.error);
       return;
     }
     const members = table?.memberIds.filter((m) => m !== state.me) ?? [];
     onNext({
       ...(initial ??
         buildDraft({
-          fileName: null,
+          fileNames: [],
           channels: [],
           attachLog: null,
           presetTable,
           presetScenario,
-          manual: null,
           state,
         })),
       meta: { title: title.trim(), systemId: table?.systemId ?? initial?.meta.systemId ?? "general" },
@@ -680,7 +667,7 @@ function ManualForm({
         initial?.tableId === tableId
           ? initial.players
           : members.map((m) => ({ userId: m, characterIds: [] })),
-      manual: { dates: sortedDates, start, end },
+      sittings: parsed.sittings,
     });
   }
 
@@ -690,14 +677,11 @@ function ManualForm({
       <Field label="タイトル" noMargin>
         <TextField value={title} onChangeText={setTitle} placeholder="例: 廃校の十三時間目（2陣）" />
       </Field>
-      <Field label="実施日">
-        <DateList dates={dates} setDates={setDates} />
-      </Field>
-      <Field label="時間">
-        <TimeRange start={start} end={end} setStart={setStart} setEnd={setEnd} />
+      <Field label="遊んだ日時">
+        <SittingsInput rows={rows} onChange={setRows} />
       </Field>
       <Field label="卓">
-        <Select
+        <Combobox
           ariaLabel="卓"
           value={tableId}
           onChange={setTableId}
@@ -723,19 +707,22 @@ function ManualForm({
 function Step2Review({
   draft,
   setDraft,
-  attachId,
   manual,
   error,
 }: {
   draft: Draft;
   setDraft: (d: Draft) => void;
-  attachId: string | null;
+  attachId?: string | null;
   manual: boolean;
   error: string | null;
 }) {
   const { tokens } = useTheme();
   const { state } = useMobileStore();
   const [newScOpen, setNewScOpen] = useState(false);
+  /** 遊んだ日時。ログの発言時刻から導いた値を入れておき、そのまま直せる */
+  const [sittingRows, setSittingRows] = useState<SittingFields[]>(() =>
+    draft.sittings.length > 0 ? draft.sittings.map(sittingToFields) : [nextSittingFields([], todayStr())],
+  );
 
   const speakers = useMemo(() => {
     const seen = new Set<string>();
@@ -758,7 +745,7 @@ function Step2Review({
   const charList = Object.values(state.characters);
   const userList = Object.values(state.users);
 
-  const linkOptions: SelectOption<string>[] = [
+  const linkOptions: ComboboxOption<string>[] = [
     { value: "", label: "結び付けない" },
     ...charList.map((c) => {
       const owner = state.users[c.ownerId];
@@ -767,7 +754,7 @@ function Step2Review({
     ...userList.map((u) => ({ value: `user:${u.id}`, label: `PL ${u.name}` })),
   ];
 
-  const iconOptions: SelectOption<string>[] = [
+  const iconOptions: ComboboxOption<string>[] = [
     { value: "", label: "自動（結び付け先に合わせる）" },
     ...charList.map((c) => ({ value: characterAvatarSrc(c), label: c.name })),
     ...userList.map((u) => ({ value: userAvatarSrc(u), label: `PL ${u.name}` })),
@@ -824,15 +811,16 @@ function Step2Review({
           />
         </Field>
         <Field label="システム">
-          <Select
+          <Combobox
             ariaLabel="システム"
             value={draft.meta.systemId}
             onChange={(v) => setDraft({ ...draft, meta: { ...draft.meta, systemId: v } })}
-            options={SYSTEM_LIST.map((s) => ({ value: s.id, label: s.name }))}
+            options={systemOptions()}
+            pinned={recentSystemIds(Object.values(state.logs))}
           />
         </Field>
         <Field label="卓">
-          <Select
+          <Combobox
             ariaLabel="卓"
             value={draft.tableId}
             onChange={(v) => setDraft({ ...draft, tableId: v })}
@@ -843,20 +831,15 @@ function Step2Review({
           />
         </Field>
         <Field label="シナリオ">
-          <Select
+          <Combobox
             ariaLabel="シナリオ"
             value={draft.scenarioId}
             onChange={(v) => {
               const sc = v ? state.scenarios[v] : undefined;
-              const nextScope: Scope =
-                sc && (sc.policy === "public" || sc.policy === "passed" || sc.policy === "members")
-                  ? sc.policy
-                  : draft.scope;
               setDraft({
                 ...draft,
                 scenarioId: v,
                 newScenario: null,
-                scope: nextScope,
                 meta: {
                   ...draft.meta,
                   title: draft.meta.title || sc?.title || "",
@@ -888,7 +871,6 @@ function Step2Review({
                     newScenario: {
                       title: v,
                       author: draft.newScenario?.author ?? "",
-                      policy: draft.newScenario?.policy ?? "public",
                     },
                   })
                 }
@@ -903,7 +885,6 @@ function Step2Review({
                     newScenario: {
                       title: draft.newScenario?.title ?? "",
                       author: v,
-                      policy: draft.newScenario?.policy ?? "public",
                     },
                   })
                 }
@@ -912,34 +893,21 @@ function Step2Review({
           </View>
         )}
 
-        <Field label="共有範囲" hint={SCOPE_META[draft.scope].hint}>
-          <Seg<Scope>
-            value={draft.scope}
-            onChange={(v) => setDraft({ ...draft, scope: v })}
-            options={[
-              { v: "members", label: "メンバー限定" },
-              { v: "passed", label: "プレイした人" },
-              { v: "public", label: "公開" },
-            ]}
-          />
+        <Field label="共有範囲">
+          <ScopePicker value={draft.scope} onChange={(v) => setDraft({ ...draft, scope: v })} />
         </Field>
       </Surface>
 
-      {!manual && !draft.derived && !attachId && (
+      {!manual && (
         <Surface style={{ padding: 18 }}>
-          <PanelHead title="実施日時" sub="ログに日時がなかったため、ここで入力します。" />
-          <Field label="実施日" noMargin>
-            <DateList
-              dates={[todayStr()]}
-              setDates={(nextDates) => {
-                const range = buildSessionRange({ dates: nextDates, startTime: "21:00", endTime: "25:00" });
-                if (range.ok) {
-                  setDraft({
-                    ...draft,
-                    channels: remapChannelTimestamps(draft.channels, nextDates, range.t0, range.t1),
-                    derived: { dates: nextDates, t0: range.t0, t1: range.t1 },
-                  });
-                }
+          <PanelHead title="遊んだ日時" />
+          <Field label="遊んだ日時" noMargin>
+            <SittingsInput
+              rows={sittingRows}
+              onChange={(rows) => {
+                setSittingRows(rows);
+                const parsed = sittingsFromFields(rows);
+                setDraft({ ...draft, sittings: parsed.ok ? parsed.sittings : [] });
               }}
             />
           </Field>
@@ -978,7 +946,7 @@ function Step2Review({
                     />
                   </View>
                   {(kind === "PC" || kind === "PL") && (
-                    <Select
+                    <Combobox
                       size="sm"
                       ariaLabel={`${sp}の紐付け`}
                       value={linkVal}
@@ -987,7 +955,7 @@ function Step2Review({
                     />
                   )}
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <Select
+                    <Combobox
                       size="sm"
                       ariaLabel={`${sp}のアイコン`}
                       value={draft.speakerIcons[sp] ?? ""}

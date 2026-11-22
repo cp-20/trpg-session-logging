@@ -14,14 +14,17 @@ test("作成したログは永続化され、passed にすると外部ユーザ�
   await page.goto("/upload");
   await page.getByRole("button", { name: "ログなしで記録する" }).click({ force: true });
   const title = `E2E セッション ${Date.now()}`;
-  await page.getByLabel("タイトル").fill(title);
+  await page.getByLabel("タイトル", { exact: true }).fill(title);
   // 卓を選ばず、自分だけのセッションにする
-  await page.getByRole("button", { name: "内容と参加者の確認へ進む" }).click({ force: true });
-  await page.getByRole("button", { name: /深淵の呼び声/ }).click({ force: true });
+  await page.getByRole("combobox", { name: "シナリオ" }).fill("深淵の呼び声");
+  await page
+    .getByRole("option", { name: /深淵の呼び声/ })
+    .first()
+    .click({ force: true });
   await page.getByRole("button", { name: "記録する", exact: true }).click({ force: true });
 
   await expect(page.getByRole("heading", { name: "セッションを記録しました", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "セッションを開く", exact: true }).click({ force: true });
+  await page.getByRole("link", { name: "セッションを開く", exact: true }).click({ force: true });
   await expect(page).toHaveURL(/\/sessions\/s_/);
   // localStorage への書き込みはデバウンスされているので、現れるまで待つ
   const slugHandle = await page.waitForFunction(
@@ -38,7 +41,7 @@ test("作成したログは永続化され、passed にすると外部ユーザ�
   // 2. 共有範囲を「プレイした人」へ変更
   await page.getByRole("button", { name: /^共有/ }).click({ force: true });
   await page.getByRole("radio", { name: "プレイした人" }).click({ force: true });
-  await expect(page.getByRole("radio", { name: "プレイした人" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("radio", { name: "プレイした人" })).toBeChecked();
   await page.keyboard.press("Escape");
 
   // 3. 永続化の確認(リロード)
@@ -58,4 +61,23 @@ test("作成したログは永続化され、passed にすると外部ユーザ�
   await page.getByRole("button", { name: "このシナリオをプレイした（記録を開く）" }).click({ force: true });
   await expect(page.getByText(gate)).toHaveCount(0);
   await expect(page.getByPlaceholder("本文・発言者で絞り込み…")).toBeVisible();
+});
+
+test("共有範囲はシナリオに関係なく、選んだとおりに選べて既定はメンバー限定", async ({ page }) => {
+  await page.goto("/demo");
+  await page.waitForURL(/\/home$/);
+  await page.goto("/upload");
+  await page.getByRole("button", { name: "ログなしで記録する" }).click({ force: true });
+  const scope = page.getByRole("radiogroup", { name: "共有範囲" });
+  await expect(scope.getByRole("radio", { name: /メンバー限定/ })).toBeChecked();
+  for (const name of [/プレイした人/, /公開/]) await expect(scope.getByRole("radio", { name })).toBeEnabled();
+  // シナリオを選んでも既定は変わらない
+  await page.getByRole("combobox", { name: "シナリオ" }).fill("深淵の呼び声");
+  await page
+    .getByRole("option", { name: /深淵の呼び声/ })
+    .first()
+    .click({ force: true });
+  await expect(scope.getByRole("radio", { name: /メンバー限定/ })).toBeChecked();
+  await scope.getByRole("radio", { name: /公開/ }).check({ force: true });
+  await expect(scope.getByRole("radio", { name: /公開/ })).toBeChecked();
 });

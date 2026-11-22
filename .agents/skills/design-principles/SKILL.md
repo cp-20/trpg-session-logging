@@ -35,6 +35,21 @@ Apply these when building or reviewing user-facing web apps. They exist to preve
 - **No vanity counters or fake metrics.** Summary totals, progress bars and zeroed widgets look broken on empty or partial data.
 - **Empty states give one direct action**, not an empty dashboard.
 
+## 4b. Model First, Then UI
+- **An awkward UI is usually an awkward data model.** Before patching a screen, check whether the type represents the real-world thing. Example: a multi-day session stored as `dates[] + one start/end time`, which forced a "write 25:30 when you cross midnight" hint; the natural model is a list of sittings, each with a start and end datetime. Fix the type and the hint disappears.
+- **Required relations are required.** If every growth record happens after some session, `sessionId` is not optional and the UI offers no "not linked" choice.
+- **One fact, one source.** When data is mirrored from an external source of truth (a character sheet, a calendar), the mirror is read-only in the UI; changes are derived (diff on sync), not typed in again. Show only values that actually persist; don't show per-session values as "current".
+- **Derive, don't ask.** Before/after values, dates, durations, defaults from the previous step: compute them. Offer one action for the common bulk case ("everyone at the table played").
+- **Accept only input you can read reliably.** Don't ship importers for free-form formats (chat transcripts, arbitrary CSV, plain text) whose parsing is a guess; a wrong import is worse than none.
+- **Security decides discoverability.** Don't let users search other users by name; invite by link. Identifiers that others rely on (user IDs) are immutable.
+
+## 4c. Choosing Controls by Option Count
+- 2–5 options to compare side by side: segmented control. A small fixed list: select. Many options, or a list that can grow (game systems, skills, scenarios, people): searchable combobox. Several values: multi-select combobox with removable tokens (Notion-style). Never ask for comma-separated text.
+
+## 4d. Words Follow Context
+- When a screen is about one specific thing (a session of one game system, one character), use that domain's own vocabulary (e.g. "KP" in Call of Cthulhu). Cross-cutting screens (lists, filters, navigation) use the generic term ("GM").
+- Keep one register for sentences (in Japanese: です・ます, including transient button text like 「コピーしました」). Labels may be nouns.
+
 ## 5. Theme Harmony (Light & Dark)
 - **Navigation surfaces follow the theme** (light sidebar in light mode) unless the product explicitly wants otherwise.
 - **No pure white text in dark mode;** use a muted off-white (~80–85% luminance) for long reading.
@@ -46,10 +61,20 @@ Apply these when building or reviewing user-facing web apps. They exist to preve
 - No native `title=` tooltips (inaccessible on touch). Use visible labels, inline hints or `aria-label`.
 - Put keyboard shortcuts on the control they trigger (`送信 [Ctrl+Enter]`).
 
+- **Explanatory text is a symptom.** Every helper sentence is a sign the label, layout, default or state doesn't speak for itself; fix those first. If an explanation is truly needed, put it where the user who needs it can open it (a guide dialog, a disclosure), concise and in bullets. Budget: one short sentence per paragraph in app UI, and assert it on the rendered DOM.
+- **Drop information nobody decides with:** labels that restate the obvious ("current value"), legends, "recorded since…", import internals, counts you can see.
+
+## 6b. Identity Images
+- People, groups and characters get images users can upload; the default is a deterministic generated image (identicon-like, seeded by an immutable ID) in the product's palette. Never use a single-letter avatar.
+
 ## 7. Inline Feedback & Optimistic UI
 - No floating toasts. Errors and statuses appear next to the control that caused them (`role="alert"` / `role="status"`).
 - Reflect optimistic state immediately; don't add "✓ Saved" banners when the UI already shows the new state.
 - Transient feedback (copy to clipboard) changes the button itself, with a fixed width so nothing shifts.
+- **Mark the moment of completion.** Restraint is not the absence of motion: finishing an important flow (recording a session, finishing onboarding) deserves a clear break (dialog or page change), a short satisfying animation (150–400ms, ease-out, honoring reduced motion) and a curated next step (one primary, the rest secondary). A results page that just lists fields and buttons feels like a dead end.
+- **Controls sit next to what they act on; decisions sit at the end of the flow.** "Back"/"choose again" never occupies the position of the confirm button. Let users change a setting where they notice it instead of sending them to the settings page.
+- **First-run setup is one skippable flow** (name, ID, avatar, first import), not a permanent banner.
+- **Optical alignment:** neighbouring controls must look the same size and weight (icon stroke, button height, container max-width). A secondary button floating on the page ground without a surface looks broken.
 
 ## 8. Controls
 - Replace native `<select>` and native file inputs with themed controls (`role="listbox"`, Escape/outside-click; `<label>` wrapping an `sr-only` file input).
@@ -65,5 +90,6 @@ Apply these when building or reviewing user-facing web apps. They exist to preve
 - **Make the bad version unwritable.** Prefer component APIs that cannot express the banned pattern (e.g. a notice component with no success tone, a system label that resolves its own name) over prose rules; then lint for duplicated primitives so screens cannot fork their own.
 - **Audit the rendered DOM, not just the source:** horizontal overflow, nested surfaces, more than one primary action, text under 12px, banned copy (excluding user-written content), button contrast, dark-mode text glare.
 - Keep formatting, date math and export builders in pure, framework-free modules with unit tests; one format per concept everywhere.
+- **Generalize every critique into a principle** and keep a principle table with a "repeat count". A check written against the critique's literal wording (ban this exact sentence) stops that sentence, not the next instance of the same mistake. When a principle is violated a second time, its enforcement must move from visual review to lint / DOM audit / types.
 - Turn every rule a reviewer had to repeat into a static lint check (regex/AST) or an E2E DOM assertion (overflow, contrast). A rule that only lives in prose will regress.
 - **Verify visually, not by reading code:** after each UI change, screenshot desktop (1440), mobile (390) and dark mode, and check each screen against its question from §0.

@@ -7,12 +7,20 @@ import { BaseProviders } from "./providers";
 export const metadata: Metadata = {
   title: "卓譜",
   description: "TRPGのセッションログ・探索者・卓の記録を管理する卓譜。",
-  icons: {
-    icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23302822'/%3E%3Ccircle cx='22' cy='24' r='7' fill='%23e07850'/%3E%3Ccircle cx='42' cy='24' r='7' fill='%23e07850'/%3E%3Ccircle cx='32' cy='44' r='7' fill='%23dfa84e'/%3E%3C/svg%3E",
-  },
+  // アイコン・OG 画像はこの階層の icon.svg / favicon.ico / apple-icon.png / opengraph-image.png（scripts/gen-brand.ts が書き出す）
+  metadataBase: new URL(process.env.SITE_URL ?? "https://takufu.lolipop-now.app"),
+  openGraph: { siteName: "卓譜", type: "website", locale: "ja_JP" },
+  twitter: { card: "summary_large_image" },
 };
 
-export const viewport: Viewport = { width: "device-width", initialScale: 1 };
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f2ebe0" },
+    { media: "(prefers-color-scheme: dark)", color: "#161311" },
+  ],
+};
 
 /** 描画前にテーマを決めて、ちらつきを防ぐ */
 const THEME_SCRIPT = `try{var m=localStorage.getItem("takufu-theme")||"system";var d=m==="dark"||(m!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.setAttribute("data-theme",d?"takufuDark":"takufu")}catch(e){}`;

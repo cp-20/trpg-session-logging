@@ -4,47 +4,7 @@
  * 軽量フォールバックパーサー経由でも、DOM 経路と同じ結果になることを確かめる。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { importCharacterFromText, importLogFromText } from "./importers";
-
-describe("DOMParser なしの Udonarium キャラクター", () => {
-  beforeEach(() => vi.stubGlobal("DOMParser", undefined));
-  afterEach(() => vi.unstubAllGlobals());
-
-  it("DOMParser が無い", () => {
-    expect(typeof DOMParser).toBe("undefined");
-  });
-
-  it("キャラクターを完全一致で読む", () => {
-    const res = importCharacterFromText(
-      `<character><data name="character"><data name="imageIdentifier">face</data><data name="name">霧島</data><data name="HP" currentValue="11">12</data><data name="メモ">助手</data></data><chat-palette dicebot="Cthulhu7th"></chat-palette></character>`,
-    );
-    expect(res).toStrictEqual({
-      sourceLabel: "Udonarium",
-      character: {
-        name: "霧島",
-        memo: "助手",
-        systemId: "coc7",
-        stats: { hp: 11 },
-        imageId: "face",
-        sheet: {
-          v: 1,
-          provider: "udonarium",
-          profile: [],
-          sections: [
-            { id: "resources", title: "副能力値", kind: "resources", entries: [{ label: "HP", value: 11 }] },
-          ],
-        },
-      },
-    });
-  });
-
-  it("XML で始まらない・character が無い・名前が無いときは null", () => {
-    expect(importCharacterFromText(`メモ <character><data name="name">A</data></character>`)).toBeNull();
-    expect(importCharacterFromText(`<root><data name="name">A</data></root>`)).toBeNull();
-    expect(importCharacterFromText(`<character><data name="HP">1</data></character>`)).toBeNull();
-    expect(importCharacterFromText(`<character-list><data name="name">A</data></character-list>`)).toBeNull();
-  });
-});
+import { importLogFromText } from "./importers";
 
 describe("DOMParser なしの Udonarium chat.xml", () => {
   beforeEach(() => vi.stubGlobal("DOMParser", undefined));

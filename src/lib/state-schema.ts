@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { State } from "../types";
-import { deriveSessionFromMessages } from "./time";
+import { upgradeLogSchedule } from "./sittings";
 import { coerceSheet } from "./sheet";
 
 const account = z.looseObject({
@@ -9,6 +9,7 @@ const account = z.looseObject({
 });
 const user = z.looseObject({
   id: z.string(),
+  handle: z.string().optional(),
   name: z.string(),
   color: z.string().default("#0e7490"),
   accounts: z.array(account).default([]),
@@ -19,7 +20,7 @@ const message = z
     id: z.string(),
     ts: z.number().finite(),
     sp: z.string(),
-    kind: z.enum(["PC", "NPC", "KP", "PL", "GM", "SYSTEM"]),
+    kind: z.enum(["PC", "NPC", "ENEMY", "KP", "PL", "GM", "SYSTEM"]),
     type: z.enum(["text", "note", "roll"]),
     roll: z
       .looseObject({ cmd: z.string(), skill: z.string(), dice: z.string(), result: z.string() })
@@ -30,9 +31,21 @@ const link = z.looseObject({
   linked: z.boolean(),
   hidden: z.boolean().default(false),
   characterIds: z.array(z.string()).default([]),
+  role: z.enum(["GM", "PL"]).optional(),
 });
 const externalSyncSchema = z.looseObject({
-  provider: z.enum(["iachara", "charasheet", "ytsheet", "emoklore", "charaeno", "charash", "booth", "talto"]),
+  provider: z.enum([
+    "iachara",
+    "charasheet",
+    "ytsheet",
+    "emoklore",
+    "charaeno",
+    "charash",
+    "souko",
+    "lhrpg",
+    "booth",
+    "talto",
+  ]),
   url: z.string(),
   lastSyncedAt: z.string().optional(),
   lastStatus: z.enum(["ok", "error"]).optional(),
@@ -89,6 +102,7 @@ export const RestoredStateSchema = z
           z.looseObject({
             id: z.string(),
             date: z.string(),
+            logId: z.string(),
             skill: z.string(),
             from: z.number(),
             to: z.number(),
@@ -114,7 +128,6 @@ export const RestoredStateSchema = z
         title: z.string(),
         author: z.string(),
         systemId: z.string(),
-        policy: z.enum(["public", "passed", "members", "unknown"]),
         tags: z.array(z.string()).default([]),
         externalSync: externalSyncSchema.optional(),
       }),
@@ -128,9 +141,7 @@ export const RestoredStateSchema = z
         ownerId: z.string(),
         scope: z.enum(["members", "passed", "public"]),
         hasLog: z.boolean(),
-        dates: z.array(z.string()),
-        t0: z.number().finite(),
-        t1: z.number().finite(),
+        sittings: z.array(z.object({ start: z.number().finite(), end: z.number().finite() })),
         slug: z.string().min(1),
         channels: z.array(
           z.looseObject({ id: z.string(), name: z.string(), secret: z.boolean(), msgs: z.array(message) }),
@@ -164,6 +175,30 @@ export const RestoredStateSchema = z
     "参照しているユーザーが見つかりません",
   );
 
+/**
+ * 成長は必ずどれかのセッションのあとのもの（P1）。以前の「セッションに紐付けない」成長は、
+ * その日までに遊んだいちばん新しいセッション（なければ最初のセッション）に結び、日付もそれに合わせる。
+ * セッションが 1 つもないキャラクターの成長は結ぶ先がないので捨てる（値はキャラシ・能力値に残っている）。
+ */
+export function migrateLooseGrowth(c: Record<string, unknown>): void {
+  if (!Array.isArray(c.growth)) return;
+  const sessions = (Array.isArray(c.sessions) ? c.sessions : [])
+    .filter(
+      (s): s is { logId: string; date: string } =>
+        Boolean(s) && typeof s.logId === "string" && typeof s.date === "string",
+    )
+    .sort((a, b) => a.date.localeCompare(b.date));
+  c.growth = c.growth.flatMap((g: Record<string, unknown>) => {
+    if (!g || typeof g !== "object") return [];
+    if (typeof g.logId === "string" && g.logId) return [g];
+    const date = typeof g.date === "string" ? g.date : "";
+    const hit = sessions.filter((s) => s.date <= date).at(-1) ?? sessions[0];
+    if (!hit) return [];
+    const { note: _note, ...rest } = g;
+    return [{ ...rest, logId: hit.logId, date: hit.date }];
+  });
+}
+
 /** Only migrate fields whose meaning is known; never cast unreadable data to State. */
 export function validateSavedState(data: unknown): State | null {
   if (!data || typeof data !== "object" || Array.isArray(data)) return null;
@@ -172,25 +207,21 @@ export function validateSavedState(data: unknown): State | null {
     for (const [id, log] of Object.entries(obj.logs) as [string, Record<string, unknown>][]) {
       if (!log || typeof log !== "object") continue;
       log.slug ??= id;
-      if (
-        (!Array.isArray(log.dates) || !Number.isFinite(log.t0) || !Number.isFinite(log.t1)) &&
-        Array.isArray(log.channels)
-      ) {
-        const derived = deriveSessionFromMessages(log.channels as State["logs"][string]["channels"]);
-        if (derived) {
-          log.dates ??= derived.dates;
-          log.t0 ??= derived.t0;
-          log.t1 ??= derived.t1;
-        }
-      }
+      // 遊んだ時間帯は dates + t0 + t1 から sittings（開始・終了の日時の並び）に改めた
+      upgradeLogSchedule(log);
     }
   }
-  // 以前は本人の明示的な許可なしに Google カレンダーの予定日を busyDates へ混ぜていた。
-  // 許可を取る形に改めたので、その頃の日付（手入力と区別できない）は捨てて取り直してもらう
+  // 以前の「予定のある日」（Google から許可なしに混ぜた日・手で入れた日）は扱わなくなった。
+  // 照らし合わせは本人が許可した Google カレンダーの時間帯（googleBusy）だけ
   const prefs = obj.prefs as Record<string, unknown> | undefined;
-  if (prefs && typeof prefs === "object" && "googleCalendarSyncedAt" in prefs) {
+  if (prefs && typeof prefs === "object") {
     delete prefs.googleCalendarSyncedAt;
     delete prefs.busyDates;
+  }
+  if (obj.characters && typeof obj.characters === "object") {
+    for (const c of Object.values(obj.characters) as Record<string, unknown>[]) {
+      if (c && typeof c === "object") migrateLooseGrowth(c);
+    }
   }
   const result = RestoredStateSchema.safeParse(obj);
   return result.success ? (result.data as unknown as State) : null;

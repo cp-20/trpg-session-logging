@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { markSvg } from "@shared/components/brand";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Animated,
+  FlatList,
+  KeyboardAvoidingView,
   Modal as RNModal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,6 +26,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SvgXml } from "react-native-svg";
 import { getJapaneseHolidayName } from "@shared/lib/holidays";
 import { todayStr } from "@shared/lib/format";
+import { fmtDateText, parseDateText } from "@shared/lib/date-text";
+import { nextSittingFields, normalizeTime, type SittingFields } from "@shared/lib/sittings";
+import { comboEntries, hasExactLabel, type ComboEntry, type SearchOption } from "@shared/lib/search-text";
 import type { Scope, SystemDef } from "@shared/types";
 import { hapticImpact, hapticSelection, isReduceMotionEnabled } from "../native/haptics";
 import { useMobileStore } from "../store/mobile-store";
@@ -36,6 +44,7 @@ import {
   IconLink,
   IconLock,
   IconPlus,
+  IconSearch,
   IconUsers,
   IconWifiOff,
   IconWorld,
@@ -43,10 +52,10 @@ import {
   type MobileIconProps,
 } from "./icons";
 
+/** 卓譜のブランドマーク（形は @shared/components/brand。地を主色で塗り、盤と駒を面の色で抜く） */
 export function LogoMark({ size = 22, color }: { size?: number; color?: string }) {
   const { tokens } = useTheme();
-  const c = color ?? tokens.primary;
-  const xml = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18M3 10.5h18M3 15h18" stroke="${c}" stroke-width="1.5" stroke-linecap="round" opacity="0.55" fill="none"/><circle cx="9" cy="14.2" r="2.5" fill="${c}"/><path d="M11.5 14.2V5.5" stroke="${c}" stroke-width="1.8" stroke-linecap="round"/><path d="M11.5 5.5l5 1.4" stroke="${c}" stroke-width="1.8" stroke-linecap="round"/><circle cx="16.5" cy="10" r="2.1" fill="${c}"/></svg>`;
+  const xml = markSvg({ tile: color ?? tokens.primary, on: tokens.surface });
   return <SvgXml xml={xml} width={size} height={size} />;
 }
 
@@ -211,6 +220,25 @@ export const SCOPE_META: Record<
   passed: { label: "プレイした人", hint: "このシナリオを通過した人も読めます", Icon: IconUsers },
   public: { label: "公開", hint: "リンクを知っている人なら誰でも読めます", Icon: IconWorld },
 };
+
+/** 共有範囲を選ぶ。共有範囲の選択はこれだけを使う（Web の ScopePicker と同じ） */
+export function ScopePicker({ value, onChange }: { value: Scope; onChange: (scope: Scope) => void }) {
+  const { tokens } = useTheme();
+  return (
+    <View style={{ gap: 6 }}>
+      <Seg<Scope>
+        value={value}
+        onChange={onChange}
+        options={(["members", "passed", "public"] as const).map((v) => ({
+          v,
+          label: SCOPE_META[v].label,
+          hint: SCOPE_META[v].hint,
+        }))}
+      />
+      <Text style={{ fontSize: 13, color: tokens.ink2 }}>{SCOPE_META[value].hint}</Text>
+    </View>
+  );
+}
 
 export function ScopeLabel({ scope }: { scope: Scope }) {
   const { tokens } = useTheme();
@@ -389,7 +417,8 @@ export function Seg<T extends string>({
   size = "md",
 }: {
   value: T;
-  options: { v: T; label: string; disabled?: boolean }[];
+  /** hint: 読み上げで伝える補足（選べない理由など） */
+  options: { v: T; label: string; disabled?: boolean; hint?: string }[];
   onChange: (v: T) => void;
   size?: "sm" | "md";
 }) {
@@ -407,6 +436,7 @@ export function Seg<T extends string>({
             disabled={opt.disabled}
             accessibilityRole="radio"
             accessibilityState={{ checked: active, disabled: opt.disabled }}
+            accessibilityHint={opt.hint}
             onPress={() => {
               hapticSelection();
               onChange(opt.v);
@@ -448,12 +478,15 @@ export function BottomSheet({
   onClose,
   children,
   footer,
+  fill,
 }: {
   visible: boolean;
   title: string;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  /** 高さを固定し、中身を巻物（ScrollView）に入れずに置く。中で FlatList を使う候補の一覧など */
+  fill?: boolean;
 }) {
   const { tokens } = useTheme();
   const insets = useSafeAreaInsets();
@@ -465,10 +498,18 @@ export function BottomSheet({
       animationType={isReduceMotionEnabled() ? "none" : "slide"}
       onRequestClose={onClose}
     >
-      <View style={[styles.sheetBackdrop, { backgroundColor: tokens.backdrop }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={[styles.sheetBackdrop, { backgroundColor: tokens.backdrop }]}
+      >
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="閉じる" />
         <View
-          style={[styles.sheetContainer, { backgroundColor: tokens.surface, borderColor: tokens.border }]}
+          accessibilityViewIsModal
+          style={[
+            styles.sheetContainer,
+            fill && styles.sheetContainerFill,
+            { backgroundColor: tokens.surface, borderColor: tokens.border },
+          ]}
         >
           <View style={styles.sheetHandleWrap}>
             <View style={[styles.sheetHandle, { backgroundColor: tokens.border }]} />
@@ -481,13 +522,19 @@ export function BottomSheet({
               <IconX size={20} color={tokens.ink} strokeWidth={2.2} />
             </IconButton>
           </View>
-          <ScrollView
-            style={styles.sheetScroll}
-            contentContainerStyle={styles.sheetBody}
-            keyboardShouldPersistTaps="handled"
-          >
-            {children}
-          </ScrollView>
+          {fill ? (
+            <View style={[styles.sheetFillBody, !footer && { paddingBottom: insets.bottom }]}>
+              {children}
+            </View>
+          ) : (
+            <ScrollView
+              style={styles.sheetScroll}
+              contentContainerStyle={styles.sheetBody}
+              keyboardShouldPersistTaps="handled"
+            >
+              {children}
+            </ScrollView>
+          )}
           {footer && (
             <View
               style={[
@@ -503,12 +550,12 @@ export function BottomSheet({
             </View>
           )}
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </RNModal>
   );
 }
 
-/* ---------- セレクト（ボトムシート選択） ---------- */
+/* ---------- セレクト（ボトムシート選択。少なく決まった選択肢だけ。増えうるものは Combobox） ---------- */
 export interface SelectOption<T extends string = string> {
   value: T;
   label: string;
@@ -590,6 +637,510 @@ export function Select<T extends string = string>({
             );
           })}
         </DividerList>
+      </BottomSheet>
+    </>
+  );
+}
+
+/* ---------- 検索できる選択（Combobox / MultiCombobox） ----------
+ * 多い・増えうる選択肢（システム・技能・シナリオ・人・キャラクター・卓）に使う（P7）。少なく決まったものは Select、見比べる少数は Seg。
+ * 欄を押すと、上に検索欄、下に候補の一覧を置いたシートが開く。絞り込みは @shared/lib/search-text
+ * （全角半角・大文字小文字・ひらがなカタカナ・中黒の有無を区別しない）。描くのは COMBOBOX_LIMIT 件までで、残りは「ほか N 件」
+ */
+export type ComboboxOption<T extends string = string> = SearchOption<T>;
+
+/** 一度に描く候補の数。これを超えた分は「ほか N 件」とだけ出し、入力で絞らせる */
+const COMBOBOX_LIMIT = 50;
+
+type ComboRow<T extends string> =
+  | { type: "header"; key: string; title: string }
+  | { type: "entry"; key: string; entry: ComboEntry<T> };
+
+/** 見出しを 1 行として挟んだ、FlatList に渡す並び */
+function comboRows<T extends string>(entries: readonly ComboEntry<T>[]): ComboRow<T>[] {
+  const rows: ComboRow<T>[] = [];
+  let section: string | undefined;
+  entries.forEach((entry, idx) => {
+    if (entry.section && entry.section !== section) {
+      rows.push({ type: "header", key: `h-${idx}-${entry.section}`, title: entry.section });
+    }
+    section = entry.section;
+    rows.push({
+      type: "entry",
+      key: entry.kind === "create" ? "create" : `o-${entry.option.value}-${idx}`,
+      entry,
+    });
+  });
+  return rows;
+}
+
+/** 検索欄と候補の一覧（シートの中身）。Combobox と MultiCombobox で共通 */
+function ComboPanel<T extends string>({
+  label,
+  placeholder,
+  query,
+  onQuery,
+  entries,
+  hidden,
+  isSelected,
+  onChoose,
+  emptyText,
+  top,
+}: {
+  label: string;
+  placeholder?: string;
+  query: string;
+  onQuery: (q: string) => void;
+  entries: ComboEntry<T>[];
+  hidden: number;
+  isSelected: (value: T) => boolean;
+  onChoose: (entry: ComboEntry<T>) => void;
+  emptyText: string;
+  top?: ReactNode;
+}) {
+  const { tokens } = useTheme();
+  const rows = useMemo(() => comboRows(entries), [entries]);
+  const optionCount = entries.filter((e) => e.kind === "option").length;
+  const countText =
+    query.trim() === ""
+      ? null
+      : optionCount === 0
+        ? emptyText
+        : `${optionCount + hidden} 件${hidden > 0 ? `（${optionCount} 件を表示）` : ""}`;
+
+  return (
+    <View style={{ flex: 1, minHeight: 0 }}>
+      {top}
+      <View style={[styles.comboSearch, { borderBottomColor: tokens.border }]}>
+        <View style={[styles.comboSearchBox, { backgroundColor: tokens.ground, borderColor: tokens.border }]}>
+          <IconSearch size={16} color={tokens.ink2} />
+          <TextInput
+            value={query}
+            onChangeText={onQuery}
+            autoFocus
+            autoCorrect={false}
+            autoCapitalize="none"
+            spellCheck={false}
+            returnKeyType="done"
+            placeholder={placeholder ?? `${label}を探す`}
+            placeholderTextColor={tokens.ink3}
+            accessibilityLabel={`${label}を探す`}
+            onSubmitEditing={() => {
+              const first = entries[0];
+              if (query.trim() && first) onChoose(first);
+            }}
+            style={[styles.comboSearchInput, { color: tokens.ink }]}
+          />
+          {query !== "" && (
+            <IconButton accessibilityLabel="入力を消す" onPress={() => onQuery("")}>
+              <IconX size={15} color={tokens.ink2} />
+            </IconButton>
+          )}
+        </View>
+        {countText && (
+          <Text accessibilityLiveRegion="polite" style={[styles.comboCount, { color: tokens.ink2 }]}>
+            {countText}
+          </Text>
+        )}
+      </View>
+      <FlatList
+        data={rows}
+        keyExtractor={(r) => r.key}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        initialNumToRender={20}
+        contentContainerStyle={{ paddingHorizontal: 10, paddingVertical: 6 }}
+        accessibilityLabel={`${label}の候補`}
+        ListEmptyComponent={
+          <Text style={[styles.comboEmpty, { color: tokens.ink2 }]} accessibilityLiveRegion="polite">
+            {emptyText}
+          </Text>
+        }
+        ListFooterComponent={
+          hidden > 0 ? (
+            <Text style={[styles.comboHidden, { color: tokens.ink2 }]}>
+              ほか {hidden} 件。入力して絞り込めます
+            </Text>
+          ) : undefined
+        }
+        renderItem={({ item }) => {
+          if (item.type === "header") {
+            return (
+              <Text accessibilityRole="header" style={[styles.comboHeader, { color: tokens.ink2 }]}>
+                {item.title}
+              </Text>
+            );
+          }
+          const { entry } = item;
+          if (entry.kind === "create") {
+            return (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`「${entry.text}」を追加`}
+                onPress={() => onChoose(entry)}
+                style={({ pressed }) => [
+                  styles.selectOptionRow,
+                  pressed && { backgroundColor: tokens.surfaceHover },
+                ]}
+              >
+                <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <IconPlus size={16} color={tokens.ink2} strokeWidth={2.2} />
+                  <Text style={[styles.selectOptionText, { color: tokens.ink }]} numberOfLines={2}>
+                    「{entry.text}」を追加
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          }
+          const active = isSelected(entry.option.value);
+          return (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                entry.option.hint ? `${entry.option.label}、${entry.option.hint}` : entry.option.label
+              }
+              accessibilityState={{ selected: active }}
+              onPress={() => onChoose(entry)}
+              style={({ pressed }) => [
+                styles.selectOptionRow,
+                active && { backgroundColor: tokens.primaryTint },
+                pressed && !active && { backgroundColor: tokens.surfaceHover },
+              ]}
+            >
+              <Text
+                numberOfLines={2}
+                style={[
+                  styles.selectOptionText,
+                  { color: active ? tokens.primary : tokens.ink, fontWeight: active ? "700" : "500" },
+                ]}
+              >
+                {entry.option.label}
+              </Text>
+              {entry.option.hint && (
+                <Text style={{ fontSize: 12, color: tokens.ink2, marginLeft: 8 }}>{entry.option.hint}</Text>
+              )}
+              {active && <IconCheck size={18} color={tokens.primary} />}
+            </Pressable>
+          );
+        }}
+      />
+    </View>
+  );
+}
+
+/** 閉じているときの欄（Select と同じ見た目）。押すと候補のシートが開く */
+function ComboTrigger({
+  label,
+  text,
+  placeholder,
+  expanded,
+  disabled,
+  invalid,
+  size,
+  style,
+  onPress,
+}: {
+  label: string;
+  text: string | undefined;
+  placeholder?: string;
+  expanded: boolean;
+  disabled?: boolean;
+  invalid?: boolean;
+  size: "sm" | "md";
+  style?: StyleProp<ViewStyle>;
+  onPress: () => void;
+}) {
+  const { tokens } = useTheme();
+  return (
+    <Pressable
+      disabled={disabled}
+      accessibilityRole="combobox"
+      accessibilityLabel={label}
+      accessibilityValue={{ text: text ?? placeholder ?? "未選択" }}
+      accessibilityHint="押すと候補を探せます"
+      accessibilityState={{ expanded, disabled }}
+      onPress={() => {
+        hapticSelection();
+        onPress();
+      }}
+      style={[
+        styles.selectTrigger,
+        size === "sm" ? { minHeight: 38, paddingHorizontal: 12 } : { minHeight: 44, paddingHorizontal: 14 },
+        { backgroundColor: tokens.surface, borderColor: invalid ? tokens.error : tokens.border },
+        disabled && { opacity: 0.45 },
+        style,
+      ]}
+    >
+      <Text style={[styles.selectTriggerText, { color: text ? tokens.ink : tokens.ink3 }]} numberOfLines={1}>
+        {text ?? placeholder ?? ""}
+      </Text>
+      <IconChevronDown size={16} color={tokens.ink2} />
+    </Pressable>
+  );
+}
+
+/**
+ * 1 つを選ぶ、検索できる選択欄。Web の Combobox と同じ props（className の代わりに style）。
+ * - `pinned` は入力が空のときだけ先頭に出す（最近使ったものなど）
+ * - `onCreate` を渡すと、名前の一致がないとき「追加」を出す
+ * - 検索欄の確定（改行キー）で先頭の候補を選ぶ
+ */
+export function Combobox<T extends string = string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  placeholder,
+  pinned,
+  pinnedLabel = "最近使ったもの",
+  allLabel = "すべて",
+  onCreate,
+  emptyText = "見つかりません",
+  size = "md",
+  style,
+  disabled,
+  limit = COMBOBOX_LIMIT,
+  invalid,
+}: {
+  value: T;
+  options: readonly ComboboxOption<T>[];
+  onChange: (value: T) => void;
+  ariaLabel: string;
+  placeholder?: string;
+  pinned?: readonly T[];
+  pinnedLabel?: string;
+  /** pinned があるとき、残りの候補の見出し */
+  allLabel?: string;
+  onCreate?: (text: string) => void;
+  emptyText?: string;
+  size?: "sm" | "md";
+  style?: StyleProp<ViewStyle>;
+  disabled?: boolean;
+  limit?: number;
+  invalid?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const selected = options.find((o) => o.value === value);
+  const { entries, hidden } = useMemo(
+    () =>
+      comboEntries({ options, query, pinned, pinnedLabel, allLabel, canCreate: Boolean(onCreate), limit }),
+    [options, query, pinned, pinnedLabel, allLabel, onCreate, limit],
+  );
+
+  function close() {
+    setOpen(false);
+    setQuery("");
+  }
+
+  function choose(entry: ComboEntry<T>) {
+    hapticSelection();
+    if (entry.kind === "create") {
+      onCreate?.(entry.text);
+      AccessibilityInfo.announceForAccessibility(`「${entry.text}」を追加しました`);
+    } else {
+      onChange(entry.option.value);
+    }
+    close();
+  }
+
+  return (
+    <>
+      <ComboTrigger
+        label={ariaLabel}
+        text={selected?.label}
+        placeholder={placeholder}
+        expanded={open}
+        disabled={disabled}
+        invalid={invalid}
+        size={size}
+        style={style}
+        onPress={() => setOpen(true)}
+      />
+      <BottomSheet visible={open} title={ariaLabel} onClose={close} fill>
+        <ComboPanel
+          label={ariaLabel}
+          placeholder={placeholder}
+          query={query}
+          onQuery={setQuery}
+          entries={entries}
+          hidden={hidden}
+          isSelected={(v) => v === value}
+          onChoose={choose}
+          emptyText={emptyText}
+        />
+      </BottomSheet>
+    </>
+  );
+}
+
+/** 選んだもの 1 つの札。× で外す */
+function ComboToken({
+  label,
+  onRemove,
+  disabled,
+}: {
+  label: string;
+  onRemove: () => void;
+  disabled?: boolean;
+}) {
+  const { tokens } = useTheme();
+  return (
+    <View style={[styles.comboToken, { backgroundColor: tokens.surfaceHover }]}>
+      <Text style={{ fontSize: 13, color: tokens.ink, flexShrink: 1 }} numberOfLines={1}>
+        {label}
+      </Text>
+      {!disabled && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`「${label}」を外す`}
+          hitSlop={10}
+          onPress={onRemove}
+          style={styles.comboTokenRemove}
+        >
+          <IconX size={13} color={tokens.ink2} strokeWidth={2.2} />
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+/**
+ * 複数を選ぶ、検索できる入力欄（タグ・キーワードなど）。カンマ区切りの文字入力は使わない。
+ * - 選んだものは欄の中に薄い面の札で並び、札ごとの × で外せる
+ * - 「追加」を押すと候補のシートが開く。選んでもシートは閉じず、続けて足せる（選んだものは候補から外す）
+ * - `creatable` なら一致しない名前を「追加」できる。追加・削除は読み上げで知らせる
+ */
+export function MultiCombobox({
+  values,
+  options,
+  onChange,
+  ariaLabel,
+  placeholder,
+  creatable = true,
+  emptyText = "見つかりません",
+  style,
+  disabled,
+  limit = COMBOBOX_LIMIT,
+}: {
+  values: readonly string[];
+  options: readonly ComboboxOption[];
+  onChange: (values: string[]) => void;
+  ariaLabel: string;
+  placeholder?: string;
+  creatable?: boolean;
+  emptyText?: string;
+  style?: StyleProp<ViewStyle>;
+  disabled?: boolean;
+  limit?: number;
+}) {
+  const { tokens } = useTheme();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const labelOf = (v: string) => options.find((o) => o.value === v)?.label ?? v;
+  const chosen = useMemo(() => new Set(values), [values]);
+  // 選んだものは候補から外す。名前の一致の判定には選んだものも含める（同じタグを 2 回足さない）
+  const remaining = useMemo(() => options.filter((o) => !chosen.has(o.value)), [options, chosen]);
+  const { entries, hidden } = useMemo(() => {
+    const res = comboEntries({
+      options: remaining,
+      query,
+      pinnedLabel: "",
+      allLabel: "",
+      canCreate: creatable,
+      limit,
+    });
+    const chosenLabels = values.map((v) => ({ label: options.find((o) => o.value === v)?.label ?? v }));
+    return {
+      entries: res.entries.filter((e) => e.kind !== "create" || !hasExactLabel(chosenLabels, e.text)),
+      hidden: res.hidden,
+    };
+  }, [remaining, query, creatable, limit, values, options]);
+
+  function add(entry: ComboEntry<string>) {
+    const value = entry.kind === "create" ? entry.text.trim() : entry.option.value;
+    if (!value || chosen.has(value)) return;
+    hapticSelection();
+    onChange([...values, value]);
+    AccessibilityInfo.announceForAccessibility(
+      `「${entry.kind === "create" ? value : entry.option.label}」を追加しました`,
+    );
+    setQuery("");
+  }
+
+  function remove(idx: number) {
+    const v = values[idx];
+    if (v === undefined) return;
+    hapticSelection();
+    onChange(values.filter((_, i) => i !== idx));
+    AccessibilityInfo.announceForAccessibility(`「${labelOf(v)}」を外しました`);
+  }
+
+  function close() {
+    setOpen(false);
+    setQuery("");
+  }
+
+  const tokenList = (
+    <>
+      {values.map((v, idx) => (
+        <ComboToken key={`${v}-${idx}`} label={labelOf(v)} onRemove={() => remove(idx)} disabled={disabled} />
+      ))}
+    </>
+  );
+
+  return (
+    <>
+      <View
+        accessibilityLabel={ariaLabel}
+        style={[
+          styles.multiField,
+          { backgroundColor: tokens.surface, borderColor: tokens.border },
+          disabled && { opacity: 0.45 },
+          style,
+        ]}
+      >
+        {values.length === 0 && placeholder && (
+          <Text style={{ fontSize: 14, color: tokens.ink3, alignSelf: "center" }}>{placeholder}</Text>
+        )}
+        {tokenList}
+        {!disabled && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${ariaLabel}を追加`}
+            accessibilityState={{ expanded: open }}
+            onPress={() => {
+              hapticSelection();
+              setOpen(true);
+            }}
+            style={({ pressed }) => [
+              styles.multiAdd,
+              { borderColor: tokens.border },
+              pressed && { backgroundColor: tokens.surfaceHover },
+            ]}
+          >
+            <IconPlus size={14} color={tokens.ink2} strokeWidth={2.2} />
+            <Text style={{ fontSize: 13, color: tokens.ink2, fontWeight: "600" }}>追加</Text>
+          </Pressable>
+        )}
+      </View>
+      <BottomSheet visible={open} title={ariaLabel} onClose={close} fill>
+        <ComboPanel
+          label={ariaLabel}
+          placeholder={placeholder}
+          query={query}
+          onQuery={setQuery}
+          entries={entries}
+          hidden={hidden}
+          isSelected={() => false}
+          onChoose={add}
+          emptyText={creatable ? "入力すると追加できます" : emptyText}
+          top={
+            values.length > 0 ? (
+              <View style={[styles.multiChosen, { borderBottomColor: tokens.border }]}>{tokenList}</View>
+            ) : undefined
+          }
+        />
       </BottomSheet>
     </>
   );
@@ -842,7 +1393,7 @@ export function CopyBox({ text, note }: { text: string; note?: string }) {
           size="sm"
           variant="secondary"
           onPress={() => void handleCopy()}
-          style={{ width: 112 }}
+          style={{ width: 140 }}
           icon={
             copied ? (
               <IconCheck size={15} color={tokens.success} />
@@ -851,7 +1402,7 @@ export function CopyBox({ text, note }: { text: string; note?: string }) {
             )
           }
         >
-          {copied ? "コピーした" : "コピー"}
+          {copied ? "コピーしました" : "コピー"}
         </Button>
       </View>
       {note && <Text style={[styles.fieldHint, { color: tokens.ink2 }]}>{note}</Text>}
@@ -874,12 +1425,13 @@ export function weekdayToneColor(date: string, tokens: ReturnType<typeof useThem
 
 export function DateBlock({
   date,
-  days = 1,
+  times = 1,
   showMonth = true,
   muted,
 }: {
   date: string;
-  days?: number;
+  /** 集まりの回数（2 回以上なら曜日の代わりに「2回」） */
+  times?: number;
   showMonth?: boolean;
   muted?: boolean;
 }) {
@@ -890,85 +1442,83 @@ export function DateBlock({
     <View style={[styles.dateBlock, muted && { opacity: 0.6 }]}>
       {showMonth && <Text style={[styles.dateSub, { color: tokens.ink2 }]}>{m}月</Text>}
       <Text style={[styles.dateDay, { color: tokens.ink }]}>{d}</Text>
-      <Text style={[styles.dateSub, { color: days > 1 ? tokens.ink2 : weekdayToneColor(date, tokens) }]}>
-        {days > 1 ? `${days}日間` : wd}
+      <Text style={[styles.dateSub, { color: times > 1 ? tokens.ink2 : weekdayToneColor(date, tokens) }]}>
+        {times > 1 ? `${times}回` : wd}
       </Text>
     </View>
   );
 }
 
-export function DateList({ dates, setDates }: { dates: string[]; setDates: (d: string[]) => void }) {
-  const { tokens } = useTheme();
-  function addDate() {
-    const last = dates.at(-1) || todayStr();
-    const base = new Date(`${last}T00:00:00Z`);
-    base.setUTCDate(base.getUTCDate() + 1);
-    setDates([...dates, base.toISOString().slice(0, 10)]);
-  }
-  return (
-    <View style={{ gap: 8 }}>
-      {dates.map((d, i) => (
-        <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <TextField
-            value={d}
-            placeholder="YYYY-MM-DD"
-            accessibilityLabel={`実施日 ${i + 1}`}
-            onChangeText={(val) => setDates(dates.map((item, idx) => (idx === i ? val : item)))}
-            style={{ flex: 1 }}
-          />
-          {dates.length > 1 && (
-            <IconButton
-              accessibilityLabel={`実施日 ${i + 1} を削除`}
-              onPress={() => setDates(dates.filter((_, idx) => idx !== i))}
-            >
-              <IconX size={16} color={tokens.ink2} />
-            </IconButton>
-          )}
-        </View>
-      ))}
-      <View style={{ alignItems: "flex-start" }}>
-        <Button size="sm" variant="quiet" onPress={addDate} icon={<IconPlus size={14} color={tokens.ink} />}>
-          日を追加
-        </Button>
-      </View>
-    </View>
-  );
-}
-
-export function TimeRange({
-  start,
-  end,
-  setStart,
-  setEnd,
+/**
+ * 遊んだ日時（集まり）の入力。1 行が 1 回で、日付（YYYY/MM/DD）・開始・終了を入れる。
+ * 終了が開始より前なら翌日に終わる集まりとして「翌」を添える（25:30 のような書き方はさせない）
+ */
+export function SittingsInput({
+  rows,
+  onChange,
 }: {
-  start: string;
-  end: string;
-  setStart: (v: string) => void;
-  setEnd: (v: string) => void;
+  rows: SittingFields[];
+  onChange: (rows: SittingFields[]) => void;
 }) {
   const { tokens } = useTheme();
+  const many = rows.length > 1;
+  const set = (i: number, patch: Partial<SittingFields>) =>
+    onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   return (
-    <View>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <TextField
-          value={start}
-          onChangeText={setStart}
-          placeholder="21:00"
-          accessibilityLabel="開始時刻（JST）"
-          style={{ width: 92, textAlign: "center" }}
-        />
-        <Text style={{ color: tokens.ink2, fontSize: 15 }}>〜</Text>
-        <TextField
-          value={end}
-          onChangeText={setEnd}
-          placeholder="25:00"
-          accessibilityLabel="終了時刻（JST）"
-          style={{ width: 92, textAlign: "center" }}
-        />
+    <View style={{ gap: 8 }}>
+      {rows.map((r, i) => {
+        const start = normalizeTime(r.start);
+        const end = normalizeTime(r.end);
+        const nextDay = Boolean(start && end && end <= start);
+        const label = many ? `${i + 1}回目の` : "";
+        return (
+          <View key={i} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+            <TextField
+              value={fmtDateText(r.date)}
+              placeholder="YYYY/MM/DD"
+              keyboardType="numbers-and-punctuation"
+              accessibilityLabel={`${label}日付`}
+              onChangeText={(val) => set(i, { date: parseDateText(val) ?? val })}
+              style={{ width: 132 }}
+            />
+            <TextField
+              value={r.start}
+              onChangeText={(v) => set(i, { start: v })}
+              placeholder="21:00"
+              keyboardType="numbers-and-punctuation"
+              accessibilityLabel={`${label}開始時刻`}
+              style={{ width: 72, textAlign: "center" }}
+            />
+            <Text style={{ color: tokens.ink2, fontSize: 15 }}>〜{nextDay ? " 翌" : ""}</Text>
+            <TextField
+              value={r.end}
+              onChangeText={(v) => set(i, { end: v })}
+              placeholder="00:00"
+              keyboardType="numbers-and-punctuation"
+              accessibilityLabel={`${label}終了時刻${nextDay ? "（翌日）" : ""}`}
+              style={{ width: 72, textAlign: "center" }}
+            />
+            {many && (
+              <IconButton
+                accessibilityLabel={`${i + 1}回目を外す`}
+                onPress={() => onChange(rows.filter((_, idx) => idx !== i))}
+              >
+                <IconX size={16} color={tokens.ink2} />
+              </IconButton>
+            )}
+          </View>
+        );
+      })}
+      <View style={{ alignItems: "flex-start" }}>
+        <Button
+          size="sm"
+          variant="quiet"
+          onPress={() => onChange([...rows, nextSittingFields(rows, todayStr())])}
+          icon={<IconPlus size={14} color={tokens.ink} />}
+        >
+          日時を追加
+        </Button>
       </View>
-      <Text style={[styles.fieldHint, { color: tokens.ink2 }]}>
-        日付をまたぐときは 25:30 のように書きます。
-      </Text>
     </View>
   );
 }
@@ -1216,6 +1766,13 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "700",
   },
+  sheetContainerFill: {
+    height: "88%",
+  },
+  sheetFillBody: {
+    flex: 1,
+    minHeight: 0,
+  },
   sheetScroll: {
     flexGrow: 0,
   },
@@ -1251,6 +1808,93 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
     borderRadius: RADII.sm,
+  },
+  comboSearch: {
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    gap: 6,
+  },
+  comboSearchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: RADII.sm,
+    paddingLeft: 12,
+    paddingRight: 4,
+    minHeight: 44,
+  },
+  comboSearchInput: {
+    flex: 1,
+    fontSize: 15,
+    paddingVertical: 8,
+  },
+  comboCount: {
+    fontSize: 12,
+  },
+  comboHeader: {
+    fontSize: 12,
+    fontWeight: "600",
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  comboEmpty: {
+    fontSize: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+  },
+  comboHidden: {
+    fontSize: 12,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  comboToken: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    maxWidth: "100%",
+    borderRadius: RADII.sm,
+    paddingLeft: 10,
+    paddingRight: 6,
+    minHeight: 30,
+  },
+  comboTokenRemove: {
+    width: 22,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  multiField: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: RADII.sm,
+    padding: 6,
+    minHeight: 44,
+  },
+  multiAdd: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderRadius: RADII.sm,
+    paddingHorizontal: 10,
+    minHeight: 30,
+  },
+  multiChosen: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
   },
   selectOptionText: {
     flex: 1,

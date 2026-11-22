@@ -37,9 +37,7 @@ function makeBaseState(): State {
       u1: { linked: true, hidden: false, characterIds: [] },
     },
     createdAt: "2026-11-01",
-    dates: ["2026-11-10"],
-    t0: 1794300000,
-    t1: 1794310800,
+    sittings: [{ start: 1794300000, end: 1794310800 }],
     slug: "廃校の十三時間目",
     impressions: [],
   };
@@ -75,7 +73,7 @@ function makeBaseState(): State {
   return {
     me: "u1",
     entered: true,
-    prefs: { hideSelfOnShare: false, busyDates: ["2026-11-05"] },
+    prefs: { hideSelfOnShare: false },
     users: {
       u1: { id: "u1", name: "夜霜", color: "#b85d27", accounts: [] },
       u2: { id: "u2", name: "みかん", color: "#3b6e8c", accounts: [] },

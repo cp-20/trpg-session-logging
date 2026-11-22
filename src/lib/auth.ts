@@ -12,6 +12,7 @@ import {
 } from "firebase/auth";
 import { getFirebaseApp } from "./firebase";
 import type { User } from "../types";
+import { userFacingError } from "./user-error";
 
 let emulatorConnected = false;
 
@@ -101,8 +102,5 @@ export function authErrorMessage(error: unknown): string {
     "auth/network-request-failed": "接続できませんでした。通信状態を確認してください。",
     "auth/requires-recent-login": "もう一度Googleでログインしてからお試しください。",
   };
-  return (
-    (code && messages[code]) ||
-    (error instanceof Error && !code ? error.message : "連携できませんでした。もう一度お試しください。")
-  );
+  return (code && messages[code]) || userFacingError(error, "連携できませんでした。もう一度お試しください。");
 }

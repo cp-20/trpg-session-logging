@@ -106,20 +106,20 @@ export function IconUserPlus({ size = 20, color = "#221c17", strokeWidth }: Mobi
   );
 }
 
-export function IconUsersGroup({ size = 20, color = "#221c17", strokeWidth }: MobileIconProps) {
+export function IconTable({ size = 20, color = "#221c17", strokeWidth }: MobileIconProps) {
   return renderIcon(
     "0 0 24 24",
-    '<path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 13a2 2 0 1 0 4 0a2 2 0 0 0-4 0m-2 8v-1a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1M15 5a2 2 0 1 0 4 0a2 2 0 0 0-4 0m2 5h2a2 2 0 0 1 2 2v1M5 5a2 2 0 1 0 4 0a2 2 0 0 0-4 0m-2 8v-1a2 2 0 0 1 2-2h2"/>',
+    '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="7.5" cy="4.75" r="2.25"/><circle cx="16.5" cy="4.75" r="2.25"/><path d="M3.75 11c.55-1.75 1.95-2.75 3.75-2.75s3.2 1 3.75 2.75m1.5 0c.55-1.75 1.95-2.75 3.75-2.75s3.2 1 3.75 2.75"/><ellipse cx="12" cy="17.5" rx="9" ry="3.5"/></g>',
     size,
     color,
     strokeWidth,
   );
 }
 
-export function IconIdBadge({ size = 20, color = "#221c17", strokeWidth }: MobileIconProps) {
+export function IconCharacter({ size = 20, color = "#221c17", strokeWidth }: MobileIconProps) {
   return renderIcon(
     "0 0 24 24",
-    '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M5 6a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3z"/><path d="M10 13a2 2 0 1 0 4 0a2 2 0 1 0-4 0m0-7h4M9 18h6"/></g>',
+    '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M13.192 9h6.616a2 2 0 0 1 1.992 2.183l-.567 6.182A4 4 0 0 1 17.25 21h-1.5a4 4 0 0 1-3.983-3.635l-.567-6.182A2 2 0 0 1 13.192 9M15 13h.01M18 13h.01"/><path d="M15 16.5q1.5 1 3 0m-9.368-.518A4 4 0 0 1 8.25 16h-1.5a4 4 0 0 1-3.983-3.635L2.2 6.183A2 2 0 0 1 4.192 4h6.616a2 2 0 0 1 2 2M6 8h.01M9 8h.01"/><path d="M6 12q1.146-.765 2.291-.36"/></g>',
     size,
     color,
     strokeWidth,

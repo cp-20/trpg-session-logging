@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
 import { SYSTEMS } from "@shared/data/systems";
-import { fmtDur, sessionPlayMinutes } from "@shared/lib/time";
+import { fmtDur, sessionPlayMinutes, sessionDays } from "@shared/lib/time";
 import type { Log } from "@shared/types";
 import { useMobileStore } from "../store/mobile-store";
 import { useTheme } from "../theme/ThemeProvider";
@@ -42,7 +42,11 @@ export function SessionRow({
   return (
     <InteractiveRow onPress={onPress} accessibilityLabel={log.title}>
       <View style={styles.row}>
-        <DateBlock date={log.dates[0] ?? "2026-01-01"} days={log.dates.length} showMonth={showMonth} />
+        <DateBlock
+          date={sessionDays(log)[0] ?? "2026-01-01"}
+          times={log.sittings.length}
+          showMonth={showMonth}
+        />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[styles.title, { color: tokens.ink }]} numberOfLines={2}>
             {log.title}

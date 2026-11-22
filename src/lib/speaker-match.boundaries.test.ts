@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Channel, Character, Log, Msg, MsgKind, State, User } from "../types";
-import { jstEpoch } from "./format";
-import {
-  buildDraft,
-  matchSpeakerToState,
-  remapChannelTimestamps,
-  speakerHints,
-  stripSpeakerDecorations,
-} from "./speaker-match";
+import { buildDraft, matchSpeakerToState, speakerHints, stripSpeakerDecorations } from "./speaker-match";
 
 const user = (id: string, name: string): User => ({ id, name, color: "#888", accounts: [] });
 const char = (id: string, ownerId: string, name: string, extra: Partial<Character> = {}): Character => ({
@@ -195,12 +188,11 @@ function world(): World {
 }
 const draft = (opts: Partial<Parameters<typeof buildDraft>[0]>) =>
   buildDraft({
-    fileName: null,
+    fileNames: [],
     channels: [],
     attachLog: null,
     presetTable: "",
     presetScenario: "",
-    manual: null,
     state: world(),
     avatars,
     ...opts,
@@ -218,9 +210,7 @@ const attach = (extra: Partial<Pick<Log, "tableId" | "players" | "speakerIcons">
   channels: [],
   players: {},
   createdAt: "2026-01-01",
-  dates: ["2026-01-01"],
-  t0: 0,
-  t1: 0,
+  sittings: [],
   slug: "s",
   ...extra,
 });
@@ -232,10 +222,10 @@ describe("buildDraft: 既定値と推定", () => {
     expect(d.scope).toBe("members");
     expect(d.guess).toBeNull();
     expect(d.players).toEqual([]);
-    expect(d.derived).toBeNull();
+    expect(d.sittings).toEqual([]);
   });
 
-  it("ログからシステムを推定し、時刻が 0 から始まっても範囲を出す", () => {
+  it("ログからシステムを推定し、時刻のある発言から遊んだ時間帯を出す", () => {
     const d = draft({
       channels: [
         chan([{ ...msg("1", "謎の声", "PC", 0), text: "CC<=50 目星" }, msg("2", "謎の声", "PC", 1000)]),
@@ -243,7 +233,8 @@ describe("buildDraft: 既定値と推定", () => {
     });
     expect(d.guess).toEqual({ id: "coc7" });
     expect(d.meta.systemId).toBe("coc7");
-    expect(d.derived).toMatchObject({ t0: 0, t1: 1000 });
+    // 時刻 0 の発言（時刻なし）は使わず、時刻のある発言から導く
+    expect(d.sittings).toEqual([{ start: 1000, end: 1000 }]);
   });
 });
 
@@ -338,71 +329,5 @@ describe("buildDraft: 参加者", () => {
       白瀬怜: "https://example.com/rei.png",
       "遠沢澄花（みかん）": "char:c1",
     });
-  });
-});
-
-describe("remapChannelTimestamps: 写し方", () => {
-  const D0 = "2026-10-10";
-  const D1 = "2026-10-11";
-  const D2 = "2026-10-12";
-  const at = (d: string, hm: string) => jstEpoch(d, hm);
-  const half = (a: number, b: number) => Math.round((a + b) / 2);
-  const series = (n: number) =>
-    chan(Array.from({ length: n }, (_, i) => ({ ...msg(String(i), "A", "PC", i), text: `t${i}` })));
-  const tsOf = (cs: Channel[]) => cs.flatMap((c) => c.msgs.map((m) => m.ts));
-
-  it("1 日なら発言時刻の比率を保つ（並び順ではなく時刻の順に最小・最大を決める）", () => {
-    const input = [
-      chan([msg("a", "A", "PC", 200), msg("b", "A", "PC", 100)], "c0"),
-      chan([msg("c", "A", "PC", 110)], "c1"),
-    ];
-    const out = remapChannelTimestamps(input, [D0], 1000, 2000);
-    expect(out.map((c) => c.msgs.map((m) => m.ts))).toEqual([[2000, 1000], [1100]]);
-    // 発言の他の項目は残す
-    expect(out[0]!.msgs[0]).toEqual({ ...input[0]!.msgs[0], ts: 2000 });
-  });
-
-  it("2 日なら発言を半分ずつ割り振り、初日は開始から最長 3 時間、最終日は終了の 1 時間前から", () => {
-    const t0 = at(D0, "19:30");
-    const t1 = at(D1, "18:00");
-    expect(tsOf(remapChannelTimestamps([series(6)], [D0, D1], t0, t1))).toEqual([
-      t0,
-      half(t0, at(D0, "22:30")),
-      at(D0, "22:30"),
-      at(D1, "17:00"),
-      half(at(D1, "17:00"), t1),
-      t1,
-    ]);
-  });
-
-  it("最終日の始まりは 6:00 から 20:00 の間に収める", () => {
-    const late = tsOf(remapChannelTimestamps([series(2)], [D0, D1], at(D0, "21:00"), at(D1, "23:30")));
-    expect(late).toEqual([at(D0, "21:00"), at(D1, "20:00")]);
-    const early = tsOf(remapChannelTimestamps([series(2)], [D0, D1], at(D0, "21:00"), at(D1, "05:00")));
-    expect(early).toEqual([at(D0, "21:00"), at(D1, "06:00")]);
-  });
-
-  it("初日の終わりは 23:55 で打ち切るが、開始から最低 30 分はとる", () => {
-    const t0 = at(D0, "23:50");
-    const t1 = at(D1, "23:00");
-    expect(tsOf(remapChannelTimestamps([series(4)], [D0, D1], t0, t1))).toEqual([
-      t0,
-      t0 + 1800,
-      at(D1, "20:00"),
-      t1,
-    ]);
-  });
-
-  it("3 日なら中日は 21:00 から 23:55", () => {
-    const t0 = at(D0, "21:00");
-    const t1 = at(D2, "23:00");
-    expect(tsOf(remapChannelTimestamps([series(6)], [D0, D1, D2], t0, t1))).toEqual([
-      t0,
-      at(D0, "23:55"),
-      at(D1, "21:00"),
-      at(D1, "23:55"),
-      at(D2, "20:00"),
-      t1,
-    ]);
   });
 });

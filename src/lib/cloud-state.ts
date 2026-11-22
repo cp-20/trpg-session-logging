@@ -12,7 +12,10 @@ import {
 } from "firebase/firestore";
 import { getTakufuFirestore } from "./firebase";
 import { mediaForSharedPage } from "./session-media";
-import type { Character, Log, Policy, Scenario, Scope, State, User } from "../types";
+import { identiconDataUri } from "./identicon";
+import type { Character, Log, Scenario, Scope, State, User } from "../types";
+import { upgradeLogSchedule } from "./sittings";
+import { sharedPageScope } from "./share-scope";
 
 export interface CloudAuthUserLike {
   uid: string;
@@ -262,12 +265,11 @@ export interface SharedLogData {
   scenario?: Scenario;
 }
 
-/** 共有ページを読める範囲。シナリオの共有方針がセッションの共有範囲より狭ければ、そちらに合わせる */
-export function sharedPageScope(log: Log, state: State): Scope {
-  const scenarioPolicy = log.scenarioId ? (state.scenarios[log.scenarioId]?.policy ?? "unknown") : "unknown";
-  if (scenarioPolicy === "members") return "members";
-  if (scenarioPolicy === "passed" && log.scope === "public") return "passed";
-  return log.scope;
+export { sharedPageScope };
+
+/** 共有ページの目録に書く範囲。firestore.rules の validShare を必ず満たす（share-scope.test.ts） */
+export function sharedManifestAccess(log: Pick<Log, "scope">): { scope: Scope } {
+  return { scope: sharedPageScope(log) };
 }
 
 export function sharedLogProjection(log: Log, state: State): SharedLogData {
@@ -284,7 +286,7 @@ export function sharedLogProjection(log: Log, state: State): SharedLogData {
   // File names may contain personal information and do not belong on public pages.
   delete sharedLog.importedFrom;
   // 関連するもの（録画など）は、共有ページを読める人に見せてよい範囲のものだけを載せる
-  const media = mediaForSharedPage(log.media, sharedPageScope(log, state));
+  const media = mediaForSharedPage(log.media, sharedPageScope(log));
   if (media.length) sharedLog.media = media;
   else delete sharedLog.media;
   return {
@@ -295,8 +297,7 @@ export function sharedLogProjection(log: Log, state: State): SharedLogData {
 }
 
 export function publicLogProjection(log: Log, state: State): SharedLogData | null {
-  const scenario = log.scenarioId ? state.scenarios[log.scenarioId] : undefined;
-  if (log.scope !== "public" || scenario?.policy !== "public") return null;
+  if (log.scope !== "public") return null;
   return sharedLogProjection(log, state);
 }
 
@@ -304,8 +305,7 @@ export async function publishSharedLog(log: Log, state: State): Promise<void> {
   if (log.ownerId !== state.me) throw new Error("この記録の共有設定を変更できません。");
   const db = database();
   const projection = sharedLogProjection(log, state);
-  const scenarioPolicy = log.scenarioId ? (state.scenarios[log.scenarioId]?.policy ?? "unknown") : "unknown";
-  const scope = sharedPageScope(log, state);
+  const { scope } = sharedManifestAccess(log);
   const chunks = splitCloudData(projection);
   const revision = crypto.randomUUID();
   const ref = doc(db, "sharedLogs", log.slug);
@@ -320,7 +320,6 @@ export async function publishSharedLog(log: Log, state: State): Promise<void> {
       transaction.set(ref, {
         ownerId: state.me,
         scope,
-        scenarioPolicy,
         revision,
         chunkCount: chunks.length,
         memberIds: Object.entries(log.players)
@@ -360,7 +359,6 @@ export async function deleteSharedLog(slug: string): Promise<void> {
   batch.set(ref, {
     ownerId: manifest.data().ownerId,
     scope: "members",
-    scenarioPolicy: "unknown",
     memberIds: [],
     revision: "revoked",
     chunkCount: 1,
@@ -375,6 +373,8 @@ export async function fetchSharedLog(slug: string): Promise<SharedLogData | null
   const loaded = await readGeneration(db, ["sharedLogs", slug], ["sharedLogs", slug]);
   if (!loaded) return null;
   const payload = loaded.payload as SharedLogData;
+  // 以前に公開したページは遊んだ時間帯を dates + t0 + t1 で持っている。読むときに今の形にする
+  upgradeLogSchedule(payload.log as unknown as Record<string, unknown>);
   const visibleMembers = await getDocs(
     query(
       collection(db, "sharedLogs", slug, "members"),
@@ -396,14 +396,12 @@ export async function fetchSharedLog(slug: string): Promise<SharedLogData | null
   return payload;
 }
 
-export async function getSharedLogAccess(
-  slug: string,
-): Promise<{ scope: Scope; scenarioPolicy: Policy } | null> {
+export async function getSharedLogAccess(slug: string): Promise<{ scope: Scope } | null> {
   const manifest = await getDocFromServer(doc(database(), "sharedLogs", slug));
   if (!manifest.exists()) return null;
-  const { scope, scenarioPolicy, revision } = manifest.data();
+  const { scope, revision } = manifest.data();
   if (revision === "revoked") return null;
-  return { scope, scenarioPolicy };
+  return { scope };
 }
 
 /** This is a self-declaration, not a proof of play. Rules check scope and the declaring UID. */
@@ -561,8 +559,22 @@ export async function getSharedInvite(token: string): Promise<SharedInvite | nul
   };
 }
 
-export async function acceptSharedInvite(token: string): Promise<SharedLogData> {
-  const { user, profile } = await resolveCurrentUserAndProfile();
+/**
+ * 招待を受け取る。me（記録の中の自分）を渡すと、はじめの設定で決めた表示名・アイコンを参加者として載せる
+ * （画像がなければユーザー ID から作った印。Google の画像は本人が選んだときだけ）
+ */
+export async function acceptSharedInvite(token: string, me?: User): Promise<SharedLogData> {
+  const resolved = await resolveCurrentUserAndProfile();
+  const { user } = resolved;
+  const profile =
+    resolved.profile && me && me.id === resolved.profile.id
+      ? {
+          ...resolved.profile,
+          name: me.name,
+          color: me.color,
+          image: me.image || identiconDataUri(me.handle ?? me.id, "user"),
+        }
+      : resolved.profile;
   if (!user || !profile) throw new Error("Googleでログインしてから、招待を受け取ってください。");
   const invite = await getSharedInvite(token);
   if (!invite) throw new Error("招待リンクの有効期限が切れているか、招待が取り消されています。");

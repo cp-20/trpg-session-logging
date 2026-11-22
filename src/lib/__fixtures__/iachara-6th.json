@@ -1,0 +1,720 @@
+{
+  "success": true,
+  "data": {
+    "id": 1200000,
+    "name": "遠沢 澄花",
+    "public": true,
+    "deleted": false,
+    "updatedAt": "2026-04-12T22:36:44.200Z",
+    "data": {
+      "version": "6th",
+      "jsonVersion": "1.0.0",
+      "metadata": {
+        "isPublic": true,
+        "isDeleted": false
+      },
+      "abilities": {
+        "hp": {
+          "fixedDiff": 0,
+          "tmpFixedDiff": 0
+        },
+        "mp": {
+          "fixedDiff": 0,
+          "tmpFixedDiff": 0
+        },
+        "app": {
+          "value": 14,
+          "fixedDiff": 0,
+          "tmpFixedDiff": 0
+        },
+        "con": {
+          "value": 6,
+          "fixedDiff": 0,
+          "tmpFixedDiff": 0
+        },
+        "dex": {
+          "value": 11,
+          "fixedDiff": 1,
+          "tmpFixedDiff": 0
+        },
+        "edu": {
+          "value": 12,
+          "fixedDiff": 0,
+          "tmpFixedDiff": 0
+        },
+        "ide": {
+          "fixedDiff": 0,
+          "tmpFixedDiff": 0
+        },
+        "int": {
+          "value": 13,
+          "fixedDiff": 0,
+          "tmpFixedDiff": 0
+        },
+        "pow": {
+          "value": 13,
+          "fixedDiff": 0,
+          "tmpFixedDiff": 0
+        },
+        "san": {
+          "fixedDiff": 0,
+          "tmpFixedDiff": 0
+        },
+        "siz": {
+          "value": 13,
+          "fixedDiff": 0,
+          "tmpFixedDiff": 0
+        },
+        "str": {
+          "value": 6,
+          "fixedDiff": 0,
+          "tmpFixedDiff": 0
+        },
+        "know": {
+          "fixedDiff": 0,
+          "tmpFixedDiff": 0
+        },
+        "luck": {
+          "fixedDiff": 0,
+          "tmpFixedDiff": 0
+        },
+        "userDB": "",
+        "sanCurrent": 71
+      },
+      "actionSkills": {
+        "static": [
+          {
+            "name": "運転",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 20,
+            "interestPoint": 0,
+            "additionalName": "車",
+            "professionPoint": 0
+          },
+          {
+            "name": "機械修理",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 20,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "重機械操作",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "乗馬",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 5,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "水泳",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 25,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "製作",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 5,
+            "defaultPoint": 5,
+            "interestPoint": 0,
+            "additionalName": "造園",
+            "professionPoint": 65
+          },
+          {
+            "name": "操縦",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "additionalName": "",
+            "professionPoint": 0
+          },
+          {
+            "name": "跳躍",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 25,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "電気修理",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 10,
+            "interestPoint": 30,
+            "professionPoint": 0
+          },
+          {
+            "name": "ナビゲート",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 10,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "変装",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 0
+          }
+        ],
+        "additional": []
+      },
+      "battleSkills": {
+        "static": [
+          {
+            "name": "回避",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 5,
+            "interestPoint": 40,
+            "professionPoint": 0
+          },
+          {
+            "name": "キック",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 25,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "組み付き",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 25,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "こぶし（パンチ）",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 50,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "頭突き",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 10,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "投擲",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 25,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "マーシャルアーツ",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "拳銃",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 20,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "サブマシンガン",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 15,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "ショットガン",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 30,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "マシンガン",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 15,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "ライフル",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 25,
+            "interestPoint": 0,
+            "professionPoint": 0
+          }
+        ],
+        "additional": [
+          {
+            "name": "杖",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 25,
+            "interestPoint": 0,
+            "additionalName": "",
+            "professionPoint": 20,
+            "sumPoint": 45,
+            "id": "12"
+          }
+        ]
+      },
+      "searchSkills": {
+        "static": [
+          {
+            "name": "応急手当",
+            "isGrow": true,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 30,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "鍵開け",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "隠す",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 15,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "隠れる",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 10,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "聞き耳",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 16,
+            "defaultPoint": 25,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "忍び歩き",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 10,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "写真術",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 10,
+            "interestPoint": 5,
+            "professionPoint": 0
+          },
+          {
+            "name": "精神分析",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "追跡",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 10,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "登攀",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 40,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "図書館",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 25,
+            "interestPoint": 0,
+            "professionPoint": 40
+          },
+          {
+            "name": "目星",
+            "isGrow": true,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 25,
+            "interestPoint": 0,
+            "professionPoint": 50
+          }
+        ],
+        "additional": []
+      },
+      "knowledgeSkills": {
+        "static": [
+          {
+            "name": "医学",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 5,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "オカルト",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 5,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "化学",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "クトゥルフ神話",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 11,
+            "defaultPoint": 0,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "芸術",
+            "isGrow": true,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 5,
+            "interestPoint": 55,
+            "additionalName": "水彩画",
+            "professionPoint": 0
+          },
+          {
+            "name": "経理",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 10,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "考古学",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "コンピューター",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 51,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "心理学",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 5,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "人類学",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "生物学",
+            "isGrow": true,
+            "otherPoint": 0,
+            "growthPoint": 5,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 65
+          },
+          {
+            "name": "地質学",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "電子工学",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "天文学",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "博物学",
+            "isGrow": true,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 10,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "物理学",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "法律",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 5,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "薬学",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 1,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "歴史",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 20,
+            "interestPoint": 0,
+            "professionPoint": 0
+          }
+        ],
+        "additional": []
+      },
+      "negotiationSkills": {
+        "static": [
+          {
+            "name": "言いくるめ",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 5,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "信用",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 15,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "説得",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 15,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "値切り",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "defaultPoint": 5,
+            "interestPoint": 0,
+            "professionPoint": 0
+          },
+          {
+            "name": "母国語",
+            "isGrow": false,
+            "otherPoint": 0,
+            "growthPoint": 0,
+            "interestPoint": 0,
+            "additionalName": "日本語",
+            "professionPoint": 0
+          }
+        ],
+        "additional": []
+      },
+      "profile": {
+        "name": "遠沢 澄花",
+        "furi": "",
+        "age": "19",
+        "sex": "男",
+        "from": "日本",
+        "height": "",
+        "weight": "",
+        "profession": "ガーデナー",
+        "icons": [
+          {
+            "id": 0,
+            "url": "https://image.iaproject.app/example-6th",
+            "name": ""
+          }
+        ],
+        "externalProfiles": []
+      },
+      "battle": [
+        {
+          "id": 1,
+          "name": "仕込み杖",
+          "time": "1",
+          "range": "タッチ",
+          "damage": "1d6+db",
+          "detail": "",
+          "failure": "",
+          "endurance": "10",
+          "ammoAmount": "-",
+          "probability": "25"
+        }
+      ],
+      "money": {
+        "debtMoney": "0",
+        "pocketMoney": "0",
+        "belongings": [
+          {
+            "id": 1,
+            "name": "庭道具一式",
+            "price": "0",
+            "detail": "",
+            "quantity": "0",
+            "unitPrice": "0"
+          },
+          {
+            "id": 2,
+            "name": "くじらの水筒",
+            "price": "0",
+            "detail": "緑茶が入っている",
+            "quantity": "1",
+            "unitPrice": "0"
+          }
+        ]
+      },
+      "passedScenarios": [
+        {
+          "id": "s1",
+          "memo": "ノーマルエンド",
+          "name": "中庭の夢"
+        }
+      ],
+      "memo": "体が弱い。\n庭いじりが好き。"
+    }
+  }
+}

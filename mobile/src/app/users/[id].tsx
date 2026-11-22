@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SYSTEMS } from "@shared/data/systems";
+import { findUserByRef } from "@shared/lib/people";
 import { evaluateShareGate } from "@shared/lib/share-gate";
-import { fmtDateShort } from "@shared/lib/time";
+import { fmtDateShort, sessionStart } from "@shared/lib/time";
 import { ScreenShell } from "../../components/ScreenShell";
 import { SessionRow } from "../../components/SessionRow";
 import { Avatar, CharAvatar } from "../../components/identity";
@@ -35,7 +36,8 @@ export default function UserDetailScreen() {
   const [editingBio, setEditingBio] = useState(false);
   const [bioDraft, setBioDraft] = useState("");
 
-  const u = state.users[id ?? ""];
+  // URL の末尾はユーザー ID（handle）か、古い uid
+  const u = findUserByRef(state, id ?? "");
   if (!u) {
     return (
       <ScreenShell>
@@ -51,7 +53,7 @@ export default function UserDetailScreen() {
   const chars = Object.values(state.characters).filter((c) => c.ownerId === u.id);
   const visibleLogs = Object.values(state.logs)
     .filter((l) => (l.ownerId === u.id || Boolean(l.players[u.id])) && evaluateShareGate(l, state.me).visible)
-    .sort((a, b) => b.t0 - a.t0);
+    .sort((a, b) => sessionStart(b) - sessionStart(a));
 
   return (
     <ScreenShell>
@@ -59,6 +61,7 @@ export default function UserDetailScreen() {
         back={{ label: "戻る" }}
         lead={<Avatar u={u} size={68} />}
         title={u.name}
+        sub={u.handle ? <Text style={{ fontSize: 14, color: tokens.ink2 }}>@{u.handle}</Text> : undefined}
         actions={
           isMe ? (
             <Button

@@ -26,7 +26,12 @@ export const AUDIT_ROUTES = [
   "/scenarios/sc_kankyo",
   "/scenarios/new",
   "/users/u_sora",
+  "/users/sora",
   "/settings",
+  // Discord のチャンネルと卓をつなぐ（サンプルではログインを求める）
+  "/tables/discord?code=demo",
+  // 卓の招待（サンプルの夜祭班。src/data/seed.ts の DEMO_INVITE_TOKEN）
+  "/join/demoinvite0000000000000000000000yomatsuri",
 ] as const;
 
 /** 画面に出てはいけない文言（技術用語・自明な説明・成功の念押し・内部事情） */
@@ -66,10 +71,13 @@ export async function enterDemo(page: Page): Promise<void> {
   await page.getByRole("navigation", { name: "メイン" }).first().waitFor();
 }
 
-export async function auditPage(page: Page, opts: { dark?: boolean } = {}): Promise<AuditIssue[]> {
+export async function auditPage(
+  page: Page,
+  opts: { dark?: boolean; explanationBudget?: boolean } = {},
+): Promise<AuditIssue[]> {
   const banned = BANNED_VISIBLE_TEXT.map((b) => (typeof b === "string" ? { s: b } : { r: b.source }));
   const issues = await page.evaluate(
-    ({ banned, dark }) => {
+    ({ banned, dark, ...opts }) => {
       const out: { rule: string; detail: string }[] = [];
       const main = document.querySelector("main") ?? document.body;
       const inDialog = (el: Element) => Boolean(el.closest("[role=dialog]"));
@@ -147,7 +155,8 @@ export async function auditPage(page: Page, opts: { dark?: boolean } = {}): Prom
 
       // 6. 画面に出してはいけない文言（ログ本文・感想など利用者が書いた内容 [data-user-content] は除く）
       const clone = document.body.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll("[data-user-content], script, style").forEach((el) => el.remove());
+      // code は URL などの値をそのまま見せる所（購読リンクの末尾の .ics など）なので文言として数えない
+      clone.querySelectorAll("[data-user-content], code, script, style").forEach((el) => el.remove());
       const text = clone.textContent ?? "";
       for (const b of banned) {
         const hit = "s" in b ? text.includes(b.s!) : new RegExp(b.r!).test(text);
@@ -241,9 +250,197 @@ export async function auditPage(page: Page, opts: { dark?: boolean } = {}): Prom
           break;
         }
       }
+
+      // 文章として読ませる要素（利用者の書いた内容・規約などの読み物・開いて読むガイドは除く）
+      const PROSE_EXEMPT =
+        "[data-user-content], [data-prose], [data-guide], script, style, button, a, label, h1, h2, h3, h4, table";
+      // 文字を直接持つ要素から、インライン要素をたどって文のまとまり（ブロック）を得る。
+      // ブロックの文はそのブロックに直接属する文字だけで作る（中の見出しやボタンの文字は数えない）
+      const blockText = new Map<Element, string>();
+      // main の中に描かれたダイアログを二重に数えない（同じ文が 2 文に見える）
+      const roots = [
+        main,
+        ...[...document.querySelectorAll("[role=dialog]")].filter((d) => !main.contains(d)),
+      ];
+      for (const root of roots) {
+        const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        for (let n = tw.nextNode(); n; n = tw.nextNode()) {
+          let el = n.parentElement;
+          if (!n.textContent?.trim() || !el || el.closest(PROSE_EXEMPT)) continue;
+          while (el.parentElement && getComputedStyle(el).display.startsWith("inline")) el = el.parentElement;
+          if (el.closest(PROSE_EXEMPT) || !visible(el)) continue;
+          blockText.set(el, (blockText.get(el) ?? "") + n.textContent);
+        }
+      }
+      const textBlocks = [...blockText]
+        .map(([el, raw]) => ({ el, text: raw.replace(/\s+/g, " ").trim() }))
+        .filter((b) => b.text.length > 0);
+
+      // 14. 説明文で UI を補わない（P4）。説明は 1 段落 1 文・60 字まで。長い案内は開いて読む [data-guide] に入れる
+      if (opts.explanationBudget) {
+        for (const { el, text } of textBlocks) {
+          const sentences = text.split("。").filter((s) => s.trim()).length;
+          const prose = /[。、]/.test(text);
+          if (sentences > 1 || (prose && text.length > 60)) {
+            out.push({
+              rule: "explanation-budget",
+              detail: `${describe(el)} (${sentences}文 ${text.length}字)`,
+            });
+          }
+        }
+      }
+
+      // 15. 文体は敬体（P12）。「。」で終わる文は「です・ます」で終える。ボタンの一時表示に「済み」を使わない
+      const POLITE_END = /(?:ます|です|ません|ました|でした|ましょう|ください)[。！？]?$/;
+      for (const { el, text } of textBlocks) {
+        for (const s of text.split(/(?<=。)/)) {
+          const t = s.trim();
+          if (t.endsWith("。") && !POLITE_END.test(t.replace(/（[^）]*）。$/, "。"))) {
+            out.push({ rule: "polite-form", detail: `${describe(el)} 「${t.slice(-12)}」` });
+            break;
+          }
+        }
+      }
+      for (const el of [...document.querySelectorAll("button")].filter(visible)) {
+        if (/(?:コピー|送信|保存|追加|登録)済み$/.test((el.textContent ?? "").trim())) {
+          out.push({ rule: "polite-form", detail: describe(el) });
+        }
+      }
+
+      // 16. 操作の中のアイコンの線は、描画後の太さで 1.75px 以上（P13。細いプラスが 2 回指摘された。1.53px でも細いと言われた）。
+      // stroke-width は viewBox の単位なので、描画の大きさとの比で実際の太さに直す
+      for (const svg of document.querySelectorAll<SVGSVGElement>(
+        "button svg, a svg, [role=tab] svg, [role=option] svg",
+      )) {
+        // ブランドマーク（LogoMark など data-brand）は UI のアイコンではないので測らない
+        if (!visible(svg) || svg.closest("[data-user-content], [data-brand]")) continue;
+        const stroked = [svg, ...svg.querySelectorAll("path, line, circle, rect, polyline")].find(
+          (el) => getComputedStyle(el).stroke !== "none",
+        );
+        if (!stroked) continue;
+        const cs = getComputedStyle(stroked);
+        const vb = svg.viewBox.baseVal;
+        const scale = vb && vb.width ? svg.getBoundingClientRect().width / vb.width : 1;
+        const vectorFixed = cs.getPropertyValue("vector-effect") === "non-scaling-stroke";
+        const px = parseFloat(cs.strokeWidth) * (vectorFixed ? 1 : scale);
+        if (Number.isFinite(px) && px < 1.75) {
+          out.push({
+            rule: "icon-stroke",
+            detail: `${describe(svg.closest("button, a, [role]")!)} ${px.toFixed(2)}px`,
+          });
+          break;
+        }
+      }
+
+      // 17. 文字の入力位置（キャレット）に見える細い色付きの縦棒を置かない（/scenarios「カーソルっぽいの出てるの紛らわしい」）。
+      // 現在地の印は面の色と文字の太さで示す。灰色の区切り線は対象外（彩度のある色だけ）
+      for (const el of document.querySelectorAll<HTMLElement>("body *")) {
+        if (
+          el.childElementCount > 0 ||
+          (el.textContent ?? "").trim() !== "" ||
+          el.closest("[data-user-content]")
+        ) {
+          continue;
+        }
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.width > 4 || r.height < 10 || r.height > 32 || !visible(el)) continue;
+        const m = getComputedStyle(el)
+          .backgroundColor.match(/[\d.]+/g)
+          ?.map(Number);
+        if (!m || (m[3] ?? 1) < 0.5) continue;
+        if (Math.max(m[0]!, m[1]!, m[2]!) - Math.min(m[0]!, m[1]!, m[2]!) < 60) continue;
+        out.push({
+          rule: "caret-like-bar",
+          detail: `${describe(el.parentElement ?? el)} ${r.width}×${r.height}px`,
+        });
+        break;
+      }
+
+      // 18. 本文の列にそろえる（P13: 「卓譜へようこそ」の注意書きの幅が下の設定と合っていなかった）。
+      // main の直下に並ぶ塊（画面の本文と、枠が差し込む注意書きなど）は、左端と幅が同じでなければならない
+      const blocks = [...main.children].filter(
+        (el) => visible(el) && getComputedStyle(el).position !== "fixed" && !inDialog(el),
+      );
+      if (blocks.length > 1) {
+        const [first, ...rest] = blocks.map((el) => ({ el, r: el.getBoundingClientRect() }));
+        const off = rest.find(
+          (b) => Math.abs(b.r.left - first!.r.left) > 1 || Math.abs(b.r.width - first!.r.width) > 1,
+        );
+        if (off) {
+          out.push({
+            rule: "column-align",
+            detail: `${describe(first!.el)} ${Math.round(first!.r.width)}px / ${describe(off.el)} ${Math.round(off.r.width)}px`,
+          });
+        }
+      }
+      // 19. 隣り合うボタンの見かけの大きさをそろえる（P13: 塗りの「共有」の隣で、枠の薄い「編集」が小さく見えた）。
+      // 同じ行に並ぶボタンは描画の高さが同じで、塗りのないボタンも枠の縁が地から見分けられる（1.3:1 以上）こと
+      const pageBg = (el: Element): number[] => {
+        for (let p = el.parentElement; p; p = p.parentElement) {
+          const c = rgb(getComputedStyle(p).backgroundColor);
+          if (c[3] > 0.9) return c;
+        }
+        return rgb(getComputedStyle(document.body).backgroundColor);
+      };
+      const blend = (fg: number[], bg: number[]) =>
+        fg.slice(0, 3).map((v, i) => v * fg[3]! + bg[i]! * (1 - fg[3]!));
+      const groups = new Set<Element>();
+      for (const btn of document.querySelectorAll(".btn"))
+        if (btn.parentElement) groups.add(btn.parentElement);
+      parity: for (const g of groups) {
+        const btns = [...g.children].filter((el) => el.matches(".btn") && visible(el));
+        if (btns.length < 2) continue;
+        const rects = btns.map((b) => b.getBoundingClientRect());
+        for (let i = 1; i < btns.length; i++) {
+          if (Math.abs(rects[i]!.top - rects[0]!.top) > 2) continue;
+          if (Math.abs(rects[i]!.height - rects[0]!.height) > 1) {
+            out.push({
+              rule: "button-parity",
+              detail: `${describe(btns[0]!)} / ${describe(btns[i]!)} の高さ`,
+            });
+            break parity;
+          }
+        }
+        if (!btns.some((b) => b.matches(".btn-primary"))) continue;
+        for (const b of btns) {
+          if (b.matches(".btn-primary, .btn-quiet")) continue;
+          const cs = getComputedStyle(b);
+          const ground = pageBg(b);
+          const face = blend(rgb(cs.backgroundColor), ground);
+          const edge = blend(rgb(cs.borderTopColor), face);
+          const ratio = Math.max(contrast(face, ground), contrast(edge, ground));
+          if (ratio < 1.3) {
+            out.push({ rule: "button-parity", detail: `${describe(b)} の縁 ${ratio.toFixed(2)}:1` });
+            break parity;
+          }
+        }
+      }
+
+      // 20. 行のホバーの面は、行の見かけの範囲と一致させる（P13: キャラクターの歩みの行で、左の線と点を外して
+      // ホバーの面が欠けて見えた）。面（.surface）の中の角の無い行は面の左右の端まで届くこと。
+      // 四隅を丸めた行（目次の行など）はそれ自体が 1 つの面なので対象外
+      for (const row of main.querySelectorAll(".surface .row-interactive")) {
+        if (!visible(row) || inDialog(row)) continue;
+        const rs = getComputedStyle(row);
+        const radii = [
+          rs.borderTopLeftRadius,
+          rs.borderTopRightRadius,
+          rs.borderBottomLeftRadius,
+          rs.borderBottomRightRadius,
+        ];
+        if (radii.every((v) => parseFloat(v) > 0)) continue;
+        const surface = row.closest(".surface")!;
+        const s = surface.getBoundingClientRect();
+        const r = row.getBoundingClientRect();
+        const bw = parseFloat(getComputedStyle(surface).borderLeftWidth) || 0;
+        if (r.left - (s.left + bw) > 1.5 || s.right - bw - r.right > 1.5) {
+          out.push({ rule: "row-hover-bounds", detail: describe(row) });
+          break;
+        }
+      }
       return out;
     },
-    { banned, dark: Boolean(opts.dark) },
+    { banned, dark: Boolean(opts.dark), explanationBudget: opts.explanationBudget ?? true },
   );
   return issues;
 }

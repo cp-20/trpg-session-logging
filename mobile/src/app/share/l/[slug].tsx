@@ -9,7 +9,7 @@ import {
   type SharedLogData,
 } from "@shared/lib/cloud-state";
 import { evaluateShareGate, visibleShareMembers } from "@shared/lib/share-gate";
-import { fmtDates, fmtDur, jstTime, sessionPlayMinutes } from "@shared/lib/time";
+import { fmtDur, fmtSessionWhen, sessionPlayMinutes } from "@shared/lib/time";
 import type { Log, State } from "@shared/types";
 import { LogReader } from "../../../components/LogReader";
 import { ScreenFrame, ScreenShell } from "../../../components/ScreenShell";
@@ -246,10 +246,7 @@ function ShareLogReader({
             <MetaRow>
               <SysBadge sys={sys} />
               <Text style={{ fontSize: 13, color: tokens.ink, fontVariant: ["tabular-nums"] }}>
-                {fmtDates(log.dates)}
-                {log.dates.length > 1
-                  ? `（${log.dates.length}日間）`
-                  : ` ${jstTime(log.t0)}–${jstTime(log.t1)}`}
+                {fmtSessionWhen(log)}
               </Text>
               {playMin > 0 && (
                 <Text style={{ fontSize: 13, color: tokens.ink2, fontVariant: ["tabular-nums"] }}>

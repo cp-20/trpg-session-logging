@@ -2,6 +2,7 @@
  * 予定・日程調整の純粋な計算（カレンダーと卓の画面で共用）。React に依存しない。
  */
 import type { BusyRange, Prefs, State, TableEvent, TableEventCandidate } from "../types";
+import { sessionDays } from "./sittings";
 
 export const VALID_TIME = /^(?:[01]?\d|2\d|3[01]):[0-5]\d$/;
 export const VALID_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -103,6 +104,14 @@ export function canConfirmPoll(ev: TableEvent, state: Pick<State, "tables" | "me
   return tb?.ownerId === state.me;
 }
 
+/**
+ * 候補・題名を直せるのは、日程調整を作った人だけ。卓の日程調整は作った人の記録が定義の正で、
+ * ほかの人の記録にあるのは写し（src/lib/table-polls.ts）
+ */
+export function canEditPoll(ev: TableEvent, state: Pick<State, "me">): boolean {
+  return ev.createdBy === state.me;
+}
+
 /** 自分がまだ返事していない候補日の数 */
 export function unansweredCount(ev: TableEvent, me: string): number {
   return pollCandidates(ev).filter((c) => !c.responses[me]).length;
@@ -197,7 +206,8 @@ export function myScheduleView(
       .filter(
         (ev) =>
           !myLogs.some(
-            (l) => l.dates.includes(ev.date) && (!ev.tableId || !l.tableId || l.tableId === ev.tableId),
+            (l) =>
+              sessionDays(l).includes(ev.date) && (!ev.tableId || !l.tableId || l.tableId === ev.tableId),
           ),
       )
       .reverse(),
@@ -274,15 +284,11 @@ export type BusyCheck = (date: string, startTime: string, durationMin: number) =
 
 /**
  * 設定から「この候補の時間帯に自分の予定があるか」を返す関数を作る。
- * - 手で入れた日（busyDates）はその日まるごと予定あり
  * - Google の時間帯は、許可しているときだけ・オンにしたカレンダーの分だけ使う
  * - 終日の時間帯は countAllDay のときだけ数える（祝日・誕生日などの取りこぼしを避ける）
  */
-export function busyChecker(prefs: Pick<Prefs, "busyDates" | "googleBusy">): BusyCheck {
+export function busyChecker(prefs: Pick<Prefs, "googleBusy">): BusyCheck {
   const ranges: { start: number; end: number }[] = [];
-  for (const d of prefs.busyDates ?? []) {
-    if (VALID_DATE.test(d)) ranges.push({ start: jstMidnightMs(d), end: jstMidnightMs(d) + DAY_MS });
-  }
   const g = prefs.googleBusy;
   if (g) {
     const on = new Set(g.calendars.filter((c) => c.on).map((c) => c.id));
@@ -304,11 +310,8 @@ export function busyChecker(prefs: Pick<Prefs, "busyDates" | "googleBusy">): Bus
 }
 
 /** 照らし合わせに使える予定が 1 件でもあるか（「予定のない日をまとめて◯」の出し分け） */
-export function hasBusySource(prefs: Pick<Prefs, "busyDates" | "googleBusy">): boolean {
-  return (
-    (prefs.busyDates?.length ?? 0) > 0 ||
-    Boolean(prefs.googleBusy?.calendars.some((c) => c.on) && prefs.googleBusy.ranges.length > 0)
-  );
+export function hasBusySource(prefs: Pick<Prefs, "googleBusy">): boolean {
+  return Boolean(prefs.googleBusy?.calendars.some((c) => c.on) && prefs.googleBusy.ranges.length > 0);
 }
 
 /** 日程調整の長さ（分）。候補はすべて同じ長さで、開始だけが違う */

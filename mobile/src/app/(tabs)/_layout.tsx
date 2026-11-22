@@ -4,9 +4,9 @@ import {
   IconBooks,
   IconCalendar,
   IconHome,
-  IconIdBadge,
+  IconCharacter,
   IconListDetails,
-  IconUsersGroup,
+  IconTable,
 } from "../../components/icons";
 import { hapticSelection } from "../../native/haptics";
 import { useTheme } from "../../theme/ThemeProvider";
@@ -67,14 +67,14 @@ export default function TabsLayout() {
         name="tables"
         options={{
           title: "卓",
-          tabBarIcon: ({ color }) => <IconUsersGroup size={22} color={tabColor(color)} />,
+          tabBarIcon: ({ color }) => <IconTable size={22} color={tabColor(color)} />,
         }}
       />
       <Tabs.Screen
         name="characters"
         options={{
           title: "キャラ",
-          tabBarIcon: ({ color }) => <IconIdBadge size={22} color={tabColor(color)} />,
+          tabBarIcon: ({ color }) => <IconCharacter size={22} color={tabColor(color)} />,
         }}
       />
       <Tabs.Screen

@@ -1,3 +1,4 @@
+import { jstEpoch } from "./format";
 import { describe, expect, it } from "vitest";
 import type { State, TableEvent } from "../types";
 import {
@@ -14,6 +15,7 @@ import {
   pollDurationMinutes,
   slotRange,
   canConfirmPoll,
+  canEditPoll,
   computeEndTime,
   daysBetween,
   eventDurationMinutes,
@@ -51,6 +53,8 @@ const state = {
   users: { u_a: {}, u_b: {}, u_x: {} },
   tables: { t1: { id: "t1", ownerId: "u_b", memberIds: ["u_a", "u_b"] } },
 } as unknown as State;
+
+const at = (d: string) => ({ start: jstEpoch(d, "21:00"), end: jstEpoch(d, "23:00") });
 
 describe("日付と月", () => {
   it("月をまたいでゼロ埋めありでずらせる", () => {
@@ -182,6 +186,10 @@ describe("日程調整・RSVP・確定", () => {
     expect(canConfirmPoll(poll({ tableId: undefined }), state)).toBe(false);
     expect(canConfirmPoll(poll({ createdBy: "u_b", tableId: undefined }), state)).toBe(true);
   });
+  it("候補を直せるのは作った人だけ（卓の作成者は確定だけ）", () => {
+    expect(canEditPoll(poll({ createdBy: "u_a" }), { me: "u_a" })).toBe(true);
+    expect(canEditPoll(poll({ createdBy: "u_b" }), { me: "u_a" })).toBe(false);
+  });
   it("自分の未回答の候補日を数える", () => {
     expect(unansweredCount(poll(), "u_a")).toBe(1);
     expect(unansweredCount(poll(), "u_b")).toBe(2);
@@ -268,9 +276,10 @@ describe("自分に関係する予定", () => {
       other: { id: "other", name: "他卓", ownerId: "u_b", memberIds: ["u_b"], createdAt: "" },
     },
     logs: {
-      l1: { ownerId: "u_a", players: {}, dates: ["2026-11-12"], tableId: "t1" },
-      lOtherUser: { ownerId: "u_b", players: {}, dates: ["2026-11-10"], tableId: "t1" },
-      lNoTable: { ownerId: "u_a", players: {}, dates: ["2026-11-05"] },
+      // その日の 21:00〜23:00 に遊んだ
+      l1: { ownerId: "u_a", players: {}, sittings: [at("2026-11-12")], tableId: "t1" },
+      lOtherUser: { ownerId: "u_b", players: {}, sittings: [at("2026-11-10")], tableId: "t1" },
+      lNoTable: { ownerId: "u_a", players: {}, sittings: [at("2026-11-05")] },
     },
   } as unknown as Pick<State, "tables" | "events" | "logs" | "me">;
 
@@ -387,13 +396,9 @@ describe("自分の予定との照らし合わせ", () => {
     expect(holiday("2026-11-23", "21:00", 180)).toBe(false);
   });
 
-  it("手で入れた日はその日まるごと予定あり。何もなければ常に false", () => {
-    const check = busyChecker({ busyDates: ["2026-11-21", "bad"] });
-    expect(check("2026-11-21", "09:00", 60)).toBe(true);
-    expect(check("2026-11-22", "09:00", 60)).toBe(false);
+  it("Google の許可がなければ常に false", () => {
     expect(busyChecker({})("2026-11-21", "21:00", 180)).toBe(false);
     expect(hasBusySource({})).toBe(false);
-    expect(hasBusySource({ busyDates: ["2026-11-21"] })).toBe(true);
     expect(hasBusySource({ googleBusy: google([]) })).toBe(false);
     expect(
       hasBusySource({ googleBusy: google([{ start: "2026-11-21T00:00:00Z", end: "2026-11-21T01:00:00Z" }]) }),

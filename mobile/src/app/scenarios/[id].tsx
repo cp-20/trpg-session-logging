@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { SYSTEMS, SYSTEM_LIST } from "@shared/data/systems";
+import { SYSTEMS } from "@shared/data/systems";
+import { recentSystemIds, systemOptions } from "@shared/lib/system-options";
 import { evaluateShareGate } from "@shared/lib/share-gate";
-import { fmtDur, sessionPlayMinutes, uid } from "@shared/lib/time";
+import { fmtDur, sessionPlayMinutes, uid, sessionStart } from "@shared/lib/time";
 import type { Scenario } from "@shared/types";
 import { ScreenShell } from "../../components/ScreenShell";
 import { SessionRow } from "../../components/SessionRow";
@@ -11,6 +12,7 @@ import { IconCheck, IconExternal, IconEyeOff, IconPencil, IconPlus, IconSend } f
 import {
   BottomSheet,
   Button,
+  Combobox,
   DividerList,
   EmptyState,
   Field,
@@ -19,7 +21,6 @@ import {
   NotFound,
   PageHead,
   SectionTitle,
-  Select,
   Surface,
   SysBadge,
   TextField,
@@ -63,7 +64,7 @@ export default function ScenarioDetailScreen() {
   const sys = SYSTEMS[sc.systemId];
   const allLogs = Object.values(state.logs)
     .filter((l) => l.scenarioId === sc.id)
-    .sort((a, b) => b.t0 - a.t0);
+    .sort((a, b) => sessionStart(b) - sessionStart(a));
   const visibleLogs = allLogs.filter((l) => evaluateShareGate(l, state.me).visible);
   const hasParticipated = allLogs.some((l) => l.ownerId === state.me || Boolean(l.players[state.me]));
   const durations = visibleLogs
@@ -251,7 +252,7 @@ export default function ScenarioDetailScreen() {
 }
 
 function EditScenarioSheet({ sc, onClose }: { sc: Scenario; onClose: () => void }) {
-  const { update } = useMobileStore();
+  const { state, update } = useMobileStore();
   const [title, setTitle] = useState(sc.title);
   const [author, setAuthor] = useState(sc.author);
   const [systemId, setSystemId] = useState(sc.systemId);
@@ -302,11 +303,12 @@ function EditScenarioSheet({ sc, onClose }: { sc: Scenario; onClose: () => void 
         <TextField value={author} onChangeText={setAuthor} />
       </Field>
       <Field label="システム">
-        <Select
+        <Combobox
           ariaLabel="システム"
           value={systemId}
           onChange={setSystemId}
-          options={SYSTEM_LIST.map((s) => ({ value: s.id, label: s.name }))}
+          options={systemOptions()}
+          pinned={recentSystemIds(Object.values(state.logs))}
         />
       </Field>
       <Field label="配布ページ URL（任意）">

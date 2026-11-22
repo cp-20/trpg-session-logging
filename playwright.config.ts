@@ -2,6 +2,8 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
+  // Discord 連携は専用の設定（playwright.discord.config.ts、pnpm run test:e2e:discord）
+  testIgnore: "**/discord.spec.ts",
   fullyParallel: true,
   use: {
     // CI では本番ビルドを検証する。ローカルは起動中の開発サーバー（pnpm dev）を使う

@@ -234,44 +234,6 @@ export function parseCcfoliaHtmlEntriesFallback(html: string): FallbackHtmlEntry
   return entries;
 }
 
-export interface FallbackUdonariumCharData {
-  dataName: string;
-  dataType: string;
-  currentValue: string | null;
-  text: string;
-}
-
-export interface FallbackUdonariumCharacter {
-  leafData: FallbackUdonariumCharData[];
-  dicebot: string;
-  paletteText: string;
-}
-
-/** Udonarium character.xml を DOMParser なしで解析する */
-export function parseUdonariumCharacterFallback(xml: string): FallbackUdonariumCharacter | null {
-  const root = parseLightTree(xml, true);
-  const charEl = findAll(root, (el) => el.tag === "character")[0];
-  if (!charEl) return null;
-
-  const leafData: FallbackUdonariumCharData[] = [];
-  for (const el of findAll(charEl, (n) => n.tag === "data")) {
-    if (childElements(el, "data").length > 0) continue;
-    leafData.push({
-      dataName: (el.attrs.name ?? "").trim(),
-      dataType: (el.attrs.type ?? "").trim(),
-      currentValue: el.attrs.currentvalue !== undefined ? el.attrs.currentvalue : null,
-      text: nodeText(el).trim(),
-    });
-  }
-
-  const palette = findAll(charEl, (n) => n.tag === "chat-palette")[0];
-  return {
-    leafData,
-    dicebot: palette?.attrs.dicebot ?? "",
-    paletteText: palette ? nodeText(palette) : "",
-  };
-}
-
 export interface FallbackUdonariumChat {
   name: string;
   tab: string;

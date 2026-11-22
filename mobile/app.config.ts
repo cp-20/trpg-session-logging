@@ -24,7 +24,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     slug: "takufu",
     version: "0.3.0",
     orientation: "portrait",
-    scheme: "takufu",
+    /* Google ログインの戻り先（expo-auth-session は `<applicationId>:/oauthredirect` を使う）も受ける */
+    scheme: ["takufu", "app.takufu.mobile"],
     userInterfaceStyle: "automatic",
     icon: "./assets/icon.png",
     backgroundColor: "#f2ebe0",

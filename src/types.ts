@@ -1,5 +1,7 @@
 import type { CharacterSheet } from "./lib/sheet";
 import type { SessionMedia } from "./lib/session-media";
+import type { Sitting } from "./lib/sittings";
+export type { Sitting };
 export type Provider = "google" | "discord" | "x" | "booth" | "talto";
 export type AccountStatus = "linked" | "pending" | "none";
 
@@ -15,6 +17,11 @@ export interface LinkedAccount {
 
 export interface User {
   id: string;
+  /**
+   * ユーザー ID（@ の後ろ。src/lib/handle.ts）。プロフィールの URL と既定のアイコンの種。
+   * はじめのオンボーディングで決め、あとから変えない（P14）
+   */
+  handle?: string;
   name: string;
   color: string;
   accounts: LinkedAccount[];
@@ -32,6 +39,9 @@ export interface SystemStatDef {
   carry?: boolean;
 }
 
+/** セッションでの役割。GM = 進行役。ENEMY はエネミーが出てくるシステムだけで使う */
+export type RoleKey = "GM" | "PL" | "PC" | "NPC" | "ENEMY";
+
 export interface SystemDef {
   id: string;
   name: string;
@@ -40,11 +50,19 @@ export interface SystemDef {
   emoji: string;
   stats: SystemStatDef[];
   growthLabel: string;
-  growthNote: string;
   skills: string[];
+  /** BCDice のゲームシステム ID（BCDice が対応するものだけ） */
+  bcdiceId?: string;
+  /** 検索にだけ使う別名・読み */
+  keywords?: string[];
+  /**
+   * そのシステムでの役割の呼び方（CoC の「KP」など）。書かないものは一般語（GM / PL / PC / NPC）。
+   * ENEMY を書いたシステムだけ、発言者の役割に「エネミー」を出す
+   */
+  roles?: Partial<Record<RoleKey, string>>;
+  /** 能力値・技能を持たない、BCDice の一覧から作った汎用の定義 */
+  generic?: boolean;
 }
-
-export type Policy = "public" | "passed" | "members" | "unknown";
 
 export type ExternalSyncProvider =
   | "iachara"
@@ -53,6 +71,8 @@ export type ExternalSyncProvider =
   | "emoklore"
   | "charaeno"
   | "charash"
+  | "souko"
+  | "lhrpg"
   | "booth"
   | "talto";
 
@@ -73,7 +93,6 @@ export interface Scenario {
   systemId: string;
   source: "booth" | "talto" | "url" | "manual";
   sourceUrl?: string;
-  policy: Policy;
   emoji: string;
   bg: string;
   tags: string[];
@@ -95,7 +114,20 @@ export interface Table {
   ownerId: string;
   memberIds: string[];
   note?: string;
+  /** 卓の画像（data URL または URL）。ないときは卓 ID から生成した印を出す */
+  image?: string;
+  /** いま有効な招待リンク（卓ごとに 1 つ）。無効にしたら消す */
+  invite?: TableInvite;
   createdAt: string;
+}
+
+/** 卓の招待リンク。名前で人を探させず、リンクを受け取った人だけが加わる（P14） */
+export interface TableInvite {
+  /** 推測できない 32 文字以上のトークン（URL は /join/<token>） */
+  token: string;
+  createdAt: string;
+  /** 期限（ISO 8601）。ないときは無効にするまで使える */
+  expiresAt?: string;
 }
 
 export interface Roll {
@@ -106,7 +138,7 @@ export interface Roll {
   secret?: boolean;
 }
 
-export type MsgKind = "PC" | "NPC" | "KP" | "PL" | "GM" | "SYSTEM";
+export type MsgKind = "PC" | "NPC" | "ENEMY" | "KP" | "PL" | "GM" | "SYSTEM";
 export type MsgType = "text" | "note" | "roll";
 
 export interface Msg {
@@ -132,7 +164,12 @@ export interface LinkState {
   linked: boolean;
   hidden: boolean;
   characterIds: string[];
+  /** このセッションでの役割（進行役か遊び手か）。分からない古い記録にはない */
+  role?: SelfRole;
 }
+
+/** 参加者の役割。表示は roleLabel(systemId, role) でシステムの言葉にする（CoC なら KP） */
+export type SelfRole = "GM" | "PL";
 
 export type Scope = "members" | "passed" | "public";
 
@@ -156,11 +193,11 @@ export interface Log {
   channels: Channel[];
   players: Record<string, LinkState>;
   createdAt: string;
-  /** セッション実施日（複数可）。ログからタイムスタンプ経由で算出 or 手入力 */
-  dates: string[];
-  /** 開始・終了 epoch秒 */
-  t0: number;
-  t1: number;
+  /**
+   * 遊んだ時間帯（集まり）の並び。開始順で重ならない。ログに発言時刻があればそこから導き、なければ手で入れる。
+   * 日付・開始・終了・遊んだ時間はここから出す（src/lib/sittings.ts）
+   */
+  sittings: Sitting[];
   /** 共有リンク用スラッグ */
   slug: string;
   /** 取り込み元ファイル(誠実な表示用) */
@@ -182,14 +219,14 @@ export interface SessionStat {
   memo: string;
 }
 
+/** 成長 1 件。必ずどれかのセッションのあとのもの。date はそのセッションの日付の写し */
 export interface GrowthRecord {
   id: string;
   date: string;
-  logId?: string;
+  logId: string;
   skill: string;
   from: number;
   to: number;
-  note?: string;
 }
 
 export interface CharacterShare {
@@ -225,8 +262,6 @@ export interface Character {
 export interface Prefs {
   hideSelfOnShare: boolean;
   onboardingDone?: boolean;
-  /** 本人が手で入れた「予定のある日」（終日扱い） */
-  busyDates?: string[];
   /** カレンダー購読リンクのトークン（作成済みのときだけ） */
   calendarFeedToken?: string;
   /** Google カレンダーの空き時間の照らし合わせ。本人が設定で許可したときだけ存在する */

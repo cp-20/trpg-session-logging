@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "../lib/router";
 import { useForm, type FieldErrors, type UseFormRegister } from "react-hook-form";
 import {
@@ -19,16 +19,33 @@ import {
   NotFound,
   PageHead,
   SectionTitle,
+  Seg,
   SplitLayout,
+  TableMark,
+  CopyBox,
   cx,
   useVisibleCount,
 } from "../components/ui";
-import { Avatar, AvatarStack, PlayerPicker } from "../components/identity";
+import { Avatar, AvatarStack, ImageUploadField, UserName } from "../components/identity";
+import {
+  INVITE_EXPIRY_OPTIONS,
+  inviteExpiresAt,
+  inviteUrl,
+  isInviteOpen,
+  mergeTableJoins,
+  newInviteToken,
+  userHref,
+  type InviteExpiry,
+} from "../lib/people";
 import { unansweredCount } from "../lib/schedule";
-import { fmtDate, todayStr, uid } from "../lib/time";
+import { fmtDate, jstDate, todayStr, uid, sessionStart } from "../lib/time";
 import { useStore } from "../store";
 import type { Log, State, Table, TableEvent } from "../types";
 import { EventDetailModal, EventRow, PollDetailModal } from "./Calendar";
+import { TableDiscordPanel } from "../components/discord";
+
+/** `/卓譜 つなぐ` のリンク（/tables/discord?code=…）で、Discord のチャンネルと卓をつなぐ */
+export { DiscordChannelLink as TableDiscordLink } from "../components/discord";
 import { SessionRow } from "./Sessions";
 
 /** 卓詳細で検索欄を出すセッション数のしきい値 */
@@ -37,7 +54,7 @@ const SEARCH_THRESHOLD = 6;
 function tableSessions(state: State, tableId: string): Log[] {
   return Object.values(state.logs)
     .filter((l) => l.tableId === tableId)
-    .sort((a, b) => b.t0 - a.t0);
+    .sort((a, b) => sessionStart(b) - sessionStart(a));
 }
 
 function tableUpcoming(state: State, tableId: string, today: string): TableEvent[] {
@@ -79,7 +96,7 @@ export default function Tables() {
     for (const l of Object.values(state.logs)) {
       if (!l.tableId) continue;
       const prev = lastMap.get(l.tableId) ?? 0;
-      if (l.t0 > prev) lastMap.set(l.tableId, l.t0);
+      if (sessionStart(l) > prev) lastMap.set(l.tableId, sessionStart(l));
     }
     const mine = Object.values(state.tables).filter(
       (t) => t.memberIds.includes(state.me) || t.ownerId === state.me,
@@ -205,9 +222,8 @@ function TableMetaFields({
 }
 
 function NewTableModal({ onClose }: { onClose: () => void }) {
-  const { state, update } = useStore();
+  const { update } = useStore();
   const nav = useNavigate();
-  const [members, setMembers] = useState<string[]>([]);
   const {
     register,
     handleSubmit,
@@ -224,7 +240,8 @@ function NewTableModal({ onClose }: { onClose: () => void }) {
         id,
         name: values.name.trim(),
         ownerId: s.me,
-        memberIds: [s.me, ...members.filter((m) => m !== s.me)],
+        // ほかのメンバーは、卓を作ったあとの招待リンクで加わってもらう（名前で人を探させない。P14）
+        memberIds: [s.me],
         createdAt: new Date().toISOString(),
       };
     });
@@ -254,15 +271,6 @@ function NewTableModal({ onClose }: { onClose: () => void }) {
           namePlaceholder="例: 廃校部"
           includeNote={false}
         />
-        <Field label="メンバー">
-          <PlayerPicker
-            state={state}
-            selected={members}
-            onChange={setMembers}
-            fixedIds={[state.me]}
-            fixedLabel="自分"
-          />
-        </Field>
       </form>
     </Modal>
   );
@@ -303,11 +311,6 @@ export function TableDetail() {
   const shownList = shown.slice(0, visibleCount);
   const recordHref = `/upload?table=${table.id}`;
 
-  function addMember(uid2: string) {
-    update((s) => {
-      s.tables[table!.id]!.memberIds.push(uid2);
-    });
-  }
   function removeMember(uid2: string) {
     update((s) => {
       s.tables[table!.id]!.memberIds = s.tables[table!.id]!.memberIds.filter((m) => m !== uid2);
@@ -429,12 +432,9 @@ export function TableDetail() {
             if (!u) return null;
             return (
               <li key={m} className="flex items-center gap-3 px-4 py-2.5 sm:px-5">
-                <Link
-                  to={`/users/${u.id}`}
-                  className="flex min-w-0 flex-1 items-center gap-3 hover:underline"
-                >
+                <Link to={userHref(u)} className="group/member flex min-w-0 flex-1 items-center gap-3">
                   <Avatar u={u} size={32} />
-                  <span className="truncate font-semibold">{u.name}</span>
+                  <UserName u={u} className="flex min-w-0 items-baseline group-hover/member:underline" />
                 </Link>
                 {isOwner && m !== table.ownerId && (
                   <button
@@ -451,20 +451,8 @@ export function TableDetail() {
           })}
         </ul>
 
-        {isOwner && (
-          <div className="border-t border-base-300 px-4 py-4 sm:px-5">
-            <div className="eyebrow mb-2">メンバーを追加</div>
-            <PlayerPicker
-              state={state}
-              selected={[]}
-              onChange={(ids) => ids.forEach(addMember)}
-              exclude={table.memberIds}
-              placeholder="名前で検索"
-              quickLabel="ほかの卓で一緒に遊んだ人"
-              quickIds={suggestMembers(state, table.id)}
-            />
-          </div>
-        )}
+        {isOwner && <TableInvitePanel table={table} />}
+        <TableDiscordPanel table={table} />
       </div>
     </section>
   );
@@ -473,6 +461,7 @@ export function TableDetail() {
     <>
       <PageHead
         back={{ to: "/tables", label: "卓" }}
+        lead={<TableMark table={table} size={56} />}
         title={table.name}
         sub={
           <div className="flex flex-col gap-1.5">
@@ -541,25 +530,9 @@ function RsvpTally({ ev }: { ev: TableEvent }) {
   );
 }
 
-function suggestMembers(state: State, excludeTableId: string) {
-  const mine = state.tables[excludeTableId]?.memberIds ?? [];
-  const counts: Record<string, number> = {};
-  Object.values(state.tables)
-    .filter((t) => t.id !== excludeTableId)
-    .forEach((t) => {
-      const overlap = t.memberIds.filter((m) => mine.includes(m)).length;
-      if (overlap > 0) {
-        t.memberIds.filter((m) => !mine.includes(m)).forEach((m) => (counts[m] = (counts[m] ?? 0) + overlap));
-      }
-    });
-  return Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
-    .map(([id]) => id);
-}
-
 function EditTableModal({ table, onClose }: { table: Table; onClose: () => void }) {
   const { update } = useStore();
+  const [image, setImage] = useState(table.image ?? "");
   const {
     register,
     handleSubmit,
@@ -574,6 +547,7 @@ function EditTableModal({ table, onClose }: { table: Table; onClose: () => void 
       const t = s.tables[table.id]!;
       t.name = values.name.trim();
       t.note = values.note.trim() || undefined;
+      t.image = image || undefined;
     });
     onClose();
   }
@@ -594,6 +568,14 @@ function EditTableModal({ table, onClose }: { table: Table; onClose: () => void 
       }
     >
       <form onSubmit={handleSubmit(onSubmit)}>
+        <div className="mb-4">
+          <ImageUploadField
+            value={image}
+            onChange={setImage}
+            label="卓の画像を選ぶ"
+            preview={<TableMark table={{ id: table.id, image: image || undefined }} size={56} />}
+          />
+        </div>
         <TableMetaFields
           register={register}
           errors={errors}
@@ -601,5 +583,134 @@ function EditTableModal({ table, onClose }: { table: Table; onClose: () => void 
         />
       </form>
     </Modal>
+  );
+}
+
+/**
+ * 卓の招待リンク（作った人だけ）。名前で人を探して足す代わりに、リンクを渡した人に加わってもらう（P14）。
+ * 卓ごとに有効なリンクは 1 つ。ログインしているときは、加わった人をここで取り込む
+ */
+function TableInvitePanel({ table }: { table: Table }) {
+  const { state, update, authUser } = useStore();
+  const [expiry, setExpiry] = useState<InviteExpiry>("7d");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const invite = isInviteOpen(table.invite) ? table.invite : undefined;
+  const token = invite?.token;
+
+  // 招待から加わった人を、卓のメンバーに入れる
+  useEffect(() => {
+    if (!authUser || !token) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const cloud = await import("../lib/cloud-people");
+        const joined = await cloud.fetchTableJoins(token);
+        if (!alive || joined.length === 0) return;
+        let changed = false;
+        update((s) => {
+          changed = mergeTableJoins(s, table.id, joined);
+        });
+        if (changed) {
+          // 招待を開いた人に見せる顔ぶれも今に合わせる（失敗しても招待は使える）
+          void cloud
+            .refreshTableInviteMembers(token, table, {
+              ...state.users,
+              ...Object.fromEntries(joined.map((u) => [u.id, u])),
+            })
+            .catch(() => {});
+        }
+      } catch {
+        /* 次に開いたときにまた取り込む */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // 卓を開いたとき・リンクを替えたときだけ取り込む
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUser, token, table.id]);
+
+  async function create() {
+    setBusy(true);
+    setError(null);
+    try {
+      const cloud = authUser ? await import("../lib/cloud-people") : null;
+      const next = {
+        token: newInviteToken(),
+        createdAt: new Date().toISOString(),
+        expiresAt: inviteExpiresAt(expiry),
+      };
+      if (cloud) {
+        if (table.invite) await cloud.revokeTableInvite(table.invite.token).catch(() => {});
+        await cloud.publishTableInvite(next.token, table, state.users, state.me, next.expiresAt);
+      }
+      update((s) => {
+        s.tables[table.id]!.invite = next;
+      });
+    } catch {
+      setError("招待リンクを作れませんでした。通信状態を確認して、もう一度お試しください。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke() {
+    if (!invite) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (authUser) await (await import("../lib/cloud-people")).revokeTableInvite(invite.token);
+      update((s) => {
+        delete s.tables[table.id]!.invite;
+      });
+    } catch {
+      setError("招待リンクを無効にできませんでした。もう一度お試しください。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-base-300 px-4 py-4 sm:px-5" aria-label="メンバーを招待" role="group">
+      <div className="eyebrow mb-2">メンバーを招待</div>
+      {invite ? (
+        <>
+          <CopyBox text={inviteUrl(typeof location === "undefined" ? "" : location.origin, invite.token)} />
+          <p className="mt-2 text-sm text-ink2">
+            {invite.expiresAt
+              ? `${fmtDate(jstDate(Math.floor(Date.parse(invite.expiresAt) / 1000)))}まで有効`
+              : "無期限"}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button type="button" className="btn btn-sm" disabled={busy} onClick={create}>
+              作り直す
+            </button>
+            <button type="button" className="btn btn-quiet btn-sm" disabled={busy} onClick={revoke}>
+              無効にする
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Seg<InviteExpiry>
+            size="sm"
+            ariaLabel="招待リンクの期限"
+            value={expiry}
+            onChange={setExpiry}
+            options={INVITE_EXPIRY_OPTIONS.map((o) => ({ v: o.value, label: o.label }))}
+          />
+          <button type="button" className="btn btn-sm" disabled={busy} onClick={create}>
+            {busy && <span className="loading loading-spinner loading-xs" aria-hidden />}
+            招待リンクを作る
+          </button>
+        </div>
+      )}
+      {error && (
+        <p className="mt-2 text-sm text-error" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }

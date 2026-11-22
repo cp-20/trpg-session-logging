@@ -1,3 +1,5 @@
+import { BRAND_COLORS, markContent } from "../components/brand";
+
 /* ---------- X 卓報告カード ---------- */
 
 export interface ReportCardData {
@@ -36,18 +38,12 @@ export function buildReportCardSVG(d: ReportCardData): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="670" viewBox="0 0 600 335">
   <rect width="600" height="335" fill="#f2ebe0"/>
   <rect x="18" y="18" width="564" height="299" rx="14" fill="#fffdf9" stroke="#e2d7c5" stroke-width="1.5"/>
-  <rect x="18" y="18" width="564" height="5" rx="2.5" fill="#b84724"/>
-  <g transform="translate(40, 40)">
-    <path d="M2 5h16M2 9h16M2 13h16" stroke="#b84724" stroke-width="1.4" stroke-linecap="round" opacity="0.55" fill="none"/>
-    <circle cx="8" cy="12.5" r="2.2" fill="#b84724"/>
-    <path d="M10.2 12.5V4.8" stroke="#b84724" stroke-width="1.6" stroke-linecap="round"/>
-    <path d="M10.2 4.8l4.4 1.2" stroke="#b84724" stroke-width="1.6" stroke-linecap="round"/>
-    <circle cx="14.6" cy="8.8" r="1.8" fill="#b84724"/>
-  </g>
-  <text x="66" y="55" font-family="'Noto Sans JP', 'Hiragino Sans', sans-serif" font-weight="700" font-size="16" fill="#b84724">卓譜</text>
+  <rect x="18" y="18" width="564" height="5" rx="2.5" fill="${BRAND_COLORS.tile}"/>
+  <g transform="translate(40 37) scale(0.75)"><rect width="32" height="32" rx="7" fill="${BRAND_COLORS.tile}"/>${markContent(BRAND_COLORS.paper)}</g>
+  <text x="66" y="55" font-family="'Noto Sans JP', 'Hiragino Sans', sans-serif" font-weight="700" font-size="16" fill="${BRAND_COLORS.tile}">卓譜</text>
   <text x="560" y="54" text-anchor="end" font-family="'Noto Sans JP', 'Hiragino Sans', sans-serif" font-weight="600" font-size="12" fill="#68594c">#卓報告</text>
   <line x1="40" y1="72" x2="560" y2="72" stroke="#e2d7c5" stroke-width="1"/>
-  <text x="40" y="102" font-family="'Noto Sans JP', 'Hiragino Sans', sans-serif" font-weight="700" font-size="12" fill="#b84724">${esc(clip(d.systemName, 40))}</text>
+  <text x="40" y="102" font-family="'Noto Sans JP', 'Hiragino Sans', sans-serif" font-weight="700" font-size="12" fill="${BRAND_COLORS.tile}">${esc(clip(d.systemName, 40))}</text>
   ${lines.map((line, i) => `<text x="40" y="${138 + i * 36}" font-family="'Noto Sans JP', 'Hiragino Sans', sans-serif" font-weight="700" font-size="25" fill="#221c17">${esc(line)}</text>`).join("")}
   ${subTitle ? `<text x="40" y="${lines.length > 1 ? 204 : 172}" font-family="'Noto Sans JP', 'Hiragino Sans', sans-serif" font-weight="500" font-size="13" fill="#68594c">${esc(subTitle)}</text>` : ""}
   <text x="40" y="242" font-family="'Noto Sans JP', 'Hiragino Sans', sans-serif" font-weight="500" font-size="13" fill="#221c17">${esc(clip(d.dateLabel, 34))}  ·  ${d.playerCount}人でプレイ</text>

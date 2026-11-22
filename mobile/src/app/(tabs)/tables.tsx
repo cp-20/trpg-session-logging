@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
-import { fmtDate, todayStr, uid } from "@shared/lib/time";
+import { fmtDate, todayStr, uid, sessionStart } from "@shared/lib/time";
 import type { State, Table, TableEvent } from "@shared/types";
 import { ScreenShell } from "../../components/ScreenShell";
 import { AvatarStack, PlayerPicker } from "../../components/identity";
@@ -31,7 +31,7 @@ function tableUpcoming(state: State, tableId: string, today: string): TableEvent
 function tableLastPlayed(state: State, tableId: string): number {
   return Object.values(state.logs)
     .filter((l) => l.tableId === tableId)
-    .reduce((m, l) => Math.max(m, l.t0), 0);
+    .reduce((m, l) => Math.max(m, sessionStart(l)), 0);
 }
 
 export default function TablesScreen() {

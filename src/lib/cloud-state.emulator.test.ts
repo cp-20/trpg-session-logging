@@ -48,12 +48,22 @@ it.skipIf(process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATORS !== "true")(
     log.ownerId = first.uid;
     log.slug = `sdk-${crypto.randomUUID()}`;
     const scenario = Object.values(state.scenarios)[0];
-    scenario.policy = "public";
     log.scenarioId = scenario.id;
     log.scope = "members";
     log.players = { [second.uid]: { linked: true, hidden: true, characterIds: [] } };
     state.users[second.uid] = { ...profile, id: second.uid };
     await publishSharedLog(log, state);
+    // 共有範囲は選んだとおりに保存する（シナリオの有無・種類に依らない）
+    for (const scenarioId of [undefined, scenario.id]) {
+      for (const scope of ["members", "passed", "public"] as const) {
+        const other = structuredClone(log);
+        other.slug = `sdk-${crypto.randomUUID()}`;
+        other.scenarioId = scenarioId;
+        other.scope = scope;
+        await publishSharedLog(other, state);
+        expect(await getSharedLogAccess(other.slug)).toEqual({ scope });
+      }
+    }
     await signOut(auth);
     expect((await getSharedLogAccess(log.slug))?.scope).toBe("members");
     await expect(fetchSharedLog(log.slug)).rejects.toMatchObject({ code: "permission-denied" });

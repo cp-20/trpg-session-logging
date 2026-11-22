@@ -1,21 +1,25 @@
 import { useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { useRouter } from "expo-router";
-import * as Clipboard from "expo-clipboard";
-import { SYSTEMS, SYSTEM_LIST } from "@shared/data/systems";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { SYSTEMS, SYSTEM_LIST, carriedStats } from "@shared/data/systems";
+import { recentSystemIds, systemOptions } from "@shared/lib/system-options";
+import { toCharacterFields, type ParsedCharacter } from "@shared/lib/importers";
 import {
-  importCharacterFromText,
-  toCharacterFields,
-  type CharacterImportResult,
-} from "@shared/lib/importers";
+  SHEET_SITES,
+  bioFromMemo,
+  describeSheetUrl,
+  extractArchetypeFromMemo,
+} from "@shared/lib/external-sync";
+import { currentCarriedValue } from "@shared/lib/character-growth";
 import { fmtDateShort, todayStr, uid } from "@shared/lib/time";
-import type { Character } from "@shared/types";
+import type { Character, ExternalSyncConfig, ExternalSyncProvider } from "@shared/types";
 import { ScreenShell } from "../../components/ScreenShell";
 import { CharAvatar } from "../../components/identity";
-import { IconClipboard, IconFileText, IconPlus, IconSearch, IconUpload, IconX } from "../../components/icons";
+import { IconFileText, IconPlus, IconSearch, IconX } from "../../components/icons";
 import {
   BottomSheet,
   Button,
+  Combobox,
   DividerList,
   EmptyState,
   Field,
@@ -24,24 +28,18 @@ import {
   InteractiveRow,
   MetaRow,
   PageHead,
-  Select,
   Surface,
   SysBadge,
   TextField,
 } from "../../components/ui";
-import { pickAndImportCharacterFile } from "../../native/file-import";
 import { hapticSuccess } from "../../native/haptics";
 import { useMobileStore } from "../../store/mobile-store";
 import { useTheme } from "../../theme/ThemeProvider";
 import { DEFAULT_ENTITY_COLOR, RADII } from "../../theme/tokens";
 
+/** 卓をまたいで続く値（SAN など）の今の値。セッションの記録とキャラシのうち新しいほう */
 export function currentStat(c: Character, key: string): number | undefined {
-  const latest = [...c.sessions]
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .map((s) => s.delta[key]?.after)
-    .filter((n): n is number => n != null)
-    .at(-1);
-  return latest ?? c.stats[key];
+  return currentCarriedValue(c, key);
 }
 
 export function lastPlayed(c: Character): string | undefined {
@@ -54,7 +52,9 @@ export default function CharactersScreen() {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [sys, setSys] = useState("all");
-  const [importOpen, setImportOpen] = useState(false);
+  /* ホームでコピーしたキャラシの URL を開いたときは、その URL で取り込みを始める */
+  const { sheetUrl } = useLocalSearchParams<{ sheetUrl?: string }>();
+  const [importOpen, setImportOpen] = useState(Boolean(sheetUrl));
   const [manualOpen, setManualOpen] = useState(false);
 
   const myChars = useMemo(
@@ -80,14 +80,14 @@ export default function CharactersScreen() {
         icon={<IconFileText size={16} color={tokens.primaryContent} />}
         onPress={() => setImportOpen(true)}
       >
-        キャラシートを取り込む
+        キャラシから取り込む
       </Button>
       <Button
         variant="secondary"
         icon={<IconPlus size={16} color={tokens.ink} />}
         onPress={() => setManualOpen(true)}
       >
-        手入力
+        キャラシなしで作る
       </Button>
     </>
   );
@@ -98,8 +98,8 @@ export default function CharactersScreen() {
 
       {myChars.length === 0 ? (
         <Surface>
-          <EmptyState kind="first" title="キャラクターを登録しましょう" action={actions}>
-            CCFOLIA・いあきゃら・キャラクター保管所・Udonarium のデータから取り込めます。
+          <EmptyState kind="first" title="キャラシの URL から取り込めます" action={actions}>
+            {SHEET_SITES.map((x) => x.label).join("　")}
           </EmptyState>
         </Surface>
       ) : (
@@ -124,16 +124,13 @@ export default function CharactersScreen() {
                 )}
               </View>
               {usedSystems.size > 1 && (
-                <Select
+                <Combobox
                   ariaLabel="システムで絞り込む"
                   value={sys}
                   onChange={setSys}
                   options={[
                     { value: "all", label: "すべてのシステム" },
-                    ...SYSTEM_LIST.filter((x) => usedSystems.has(x.id)).map((x) => ({
-                      value: x.id,
-                      label: x.name,
-                    })),
+                    ...systemOptions(SYSTEM_LIST.filter((x) => usedSystems.has(x.id))),
                   ]}
                 />
               )}
@@ -164,7 +161,7 @@ export default function CharactersScreen() {
                 {list.map((c) => {
                   const sdef = SYSTEMS[c.systemId];
                   const last = lastPlayed(c);
-                  const stats = (sdef?.stats ?? []).filter((st) => currentStat(c, st.key) != null);
+                  const stats = carriedStats(sdef).filter((st) => currentStat(c, st.key) != null);
                   return (
                     <InteractiveRow
                       key={c.id}
@@ -218,76 +215,111 @@ export default function CharactersScreen() {
         </>
       )}
 
-      {importOpen && <ImportCharacterSheet onClose={() => setImportOpen(false)} />}
+      {importOpen && (
+        <ImportCharacterSheet initialUrl={sheetUrl ?? ""} onClose={() => setImportOpen(false)} />
+      )}
       {manualOpen && <NewCharacterSheet onClose={() => setManualOpen(false)} />}
     </ScreenShell>
   );
 }
 
-function ImportCharacterSheet({ onClose }: { onClose: () => void }) {
+type ExternalSheetResponse = {
+  ok: boolean;
+  kind?: string;
+  provider?: ExternalSyncProvider;
+  providerLabel?: string;
+  url?: string;
+  contentHash?: string;
+  fetchedAt?: string;
+  character?: ParsedCharacter;
+  error?: string;
+};
+
+/** キャラシの URL を卓譜のサーバー経由で読む（P6: URL から読める構造化データだけ） */
+async function requestExternalSheet(url: string): Promise<ExternalSheetResponse> {
+  const origin = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.lolipop-now.app";
+  try {
+    const res = await fetch(`${origin}/api/import/external`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const data = (await res.json()) as ExternalSheetResponse;
+    if (!res.ok || !data.ok || data.kind !== "character" || !data.character) {
+      return { ok: false, error: data.error ?? "キャラシを読み込めませんでした。" };
+    }
+    return data;
+  } catch {
+    return { ok: false, error: "キャラシのサイトと通信できませんでした。" };
+  }
+}
+
+/** キャラシの URL から取り込む。名前・能力値はキャラシのままなので入力欄にしない（P3） */
+function ImportCharacterSheet({ initialUrl, onClose }: { initialUrl: string; onClose: () => void }) {
   const { tokens } = useTheme();
   const { update } = useMobileStore();
   const router = useRouter();
-  const [pasted, setPasted] = useState("");
+  const [url, setUrl] = useState(initialUrl);
   const [parsing, setParsing] = useState(false);
-  const [preview, setPreview] = useState<Partial<Character> | null>(null);
-  const [sourceLabel, setSourceLabel] = useState("取り込み");
+  const [preview, setPreview] = useState<{
+    fields: Partial<Character>;
+    sync: ExternalSyncConfig;
+    label: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const site = describeSheetUrl(url);
 
-  function showParsed(result: CharacterImportResult | null) {
-    if (!result) {
-      setError(
-        "キャラクターを読み取れませんでした。CCFOLIA（JSON / ZIP）・いあきゃら（テキスト）・キャラクター保管所（JSON）・Udonarium（XML / ZIP）をお確かめください。",
-      );
+  async function load() {
+    if (site.state === "invalid") {
+      setError(site.message);
       return;
     }
-    setError(null);
-    setSourceLabel(result.sourceLabel);
-    setPreview(toCharacterFields(result.character, "general"));
-  }
-
-  async function pickFile() {
+    if (site.state !== "ok" || parsing) return;
     setParsing(true);
     setError(null);
-    try {
-      const res = await pickAndImportCharacterFile();
-      if (res) showParsed(res.result);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "ファイルを読み取れませんでした。");
-    } finally {
-      setParsing(false);
-    }
-  }
-
-  async function pasteFromClipboard() {
-    setError(null);
-    const clip = await Clipboard.getStringAsync().catch(() => "");
-    if (!clip.trim()) {
-      setError("クリップボードが空です。");
+    const data = await requestExternalSheet(site.url);
+    setParsing(false);
+    if (!data.ok || !data.character || !data.provider) {
+      setError(data.error ?? "キャラシを読み込めませんでした。");
       return;
     }
-    setPasted(clip);
-    showParsed(importCharacterFromText(clip));
+    const fields = toCharacterFields(data.character, "general");
+    const sheetUrl = data.url ?? site.url;
+    setPreview({
+      label: data.providerLabel ?? site.label,
+      fields: {
+        ...fields,
+        bio: bioFromMemo(data.character.memo),
+        archetype: extractArchetypeFromMemo(data.character.memo),
+        ...(fields.sheet ? { sheet: { ...fields.sheet, url: sheetUrl, fetchedAt: data.fetchedAt } } : {}),
+      },
+      sync: {
+        provider: data.provider,
+        url: sheetUrl,
+        lastSyncedAt: data.fetchedAt ?? new Date().toISOString(),
+        lastStatus: "ok",
+        contentHash: data.contentHash,
+        autoSync: true,
+      },
+    });
   }
 
   function save() {
-    if (!preview?.name?.trim()) {
-      setError("キャラクターの名前を入力してください。");
-      return;
-    }
+    if (!preview?.fields.name?.trim()) return;
+    const { fields, sync, label } = preview;
     const id = `ch_${uid()}`;
     update((state) => {
       state.characters[id] = {
         id,
         ownerId: state.me,
-        name: preview.name!.trim(),
-        systemId: preview.systemId ?? "general",
-        color: preview.color ?? DEFAULT_ENTITY_COLOR,
-        image: preview.image,
-        archetype: preview.archetype?.trim() ?? "",
-        bio: preview.bio?.trim() ?? "",
+        name: fields.name!.trim(),
+        systemId: fields.systemId ?? "general",
+        color: fields.color ?? DEFAULT_ENTITY_COLOR,
+        image: fields.image,
+        archetype: fields.archetype?.trim() ?? "",
+        bio: fields.bio?.trim() ?? "",
         tags: [],
-        stats: { ...preview.stats },
+        stats: { ...fields.stats },
         sessions: [],
         growth: [],
         share: {
@@ -298,7 +330,9 @@ function ImportCharacterSheet({ onClose }: { onClose: () => void }) {
           includeGrowth: true,
           includeSessions: true,
         },
-        import: { source: sourceLabel, importedAt: todayStr() },
+        import: { source: label, importedAt: todayStr() },
+        externalSync: sync,
+        ...(fields.sheet ? { sheet: fields.sheet } : {}),
       };
     });
     hapticSuccess();
@@ -309,7 +343,7 @@ function ImportCharacterSheet({ onClose }: { onClose: () => void }) {
   return (
     <BottomSheet
       visible
-      title="キャラシートを取り込む"
+      title="キャラシから取り込む"
       onClose={onClose}
       footer={
         preview ? (
@@ -326,78 +360,42 @@ function ImportCharacterSheet({ onClose }: { onClose: () => void }) {
             <Button variant="quiet" onPress={onClose}>
               キャンセル
             </Button>
-            <Button
-              variant="primary"
-              disabled={parsing || !pasted.trim()}
-              onPress={() => showParsed(importCharacterFromText(pasted))}
-            >
-              内容を確認
+            <Button variant="primary" disabled={parsing || !url.trim()} onPress={() => void load()}>
+              {parsing ? "読み込み中…" : "読み込む"}
             </Button>
           </>
         )
       }
     >
       {!preview ? (
-        <View style={{ gap: 12 }}>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            <Button
-              variant="secondary"
-              style={{ flex: 1 }}
-              disabled={parsing}
-              icon={<IconClipboard size={16} color={tokens.ink} />}
-              onPress={() => void pasteFromClipboard()}
-            >
-              クリップボードから読む
-            </Button>
-            <Button
-              variant="secondary"
-              style={{ flex: 1 }}
-              disabled={parsing}
-              icon={<IconUpload size={16} color={tokens.ink} />}
-              onPress={() => void pickFile()}
-            >
-              {parsing ? "読込中…" : "ファイルを選ぶ"}
-            </Button>
-          </View>
-          <Field label="キャラクターデータ（JSON / テキスト / XML）" noMargin>
+        <View style={{ gap: 8 }}>
+          <Field label="キャラシの URL" noMargin>
             <TextField
-              multiline
-              value={pasted}
+              value={url}
+              keyboardType="url"
+              autoCapitalize="none"
               onChangeText={(v) => {
-                setPasted(v);
+                setUrl(v);
                 setError(null);
               }}
-              placeholder="CCFOLIAのコマ出力、いあきゃらのテキスト出力などを貼り付け"
+              placeholder="https://charaeno.com/7th/…"
             />
           </Field>
+          <Text style={{ fontSize: 12, color: tokens.ink2 }}>
+            {site.state === "ok" ? site.label : SHEET_SITES.map((x) => x.label).join("　")}
+          </Text>
           <FieldError text={error} />
         </View>
       ) : (
-        <View style={{ gap: 10 }}>
-          <Text style={{ fontSize: 13, color: tokens.ink2 }}>
-            {sourceLabel}から読み取りました。登録前に内容を確認してください。
-          </Text>
-          <Field label="名前" noMargin>
-            <TextField
-              value={preview.name ?? ""}
-              onChangeText={(v) => setPreview((prev) => ({ ...prev, name: v }))}
-            />
-          </Field>
-          <Field label="システム">
-            <Select
-              ariaLabel="システム"
-              value={preview.systemId ?? "general"}
-              onChange={(v) => setPreview((prev) => ({ ...prev, systemId: v }))}
-              options={SYSTEM_LIST.map((s) => ({ value: s.id, label: s.name }))}
-            />
-          </Field>
-          <Field label="肩書・職業（任意）">
-            <TextField
-              value={preview.archetype ?? ""}
-              onChangeText={(v) => setPreview((prev) => ({ ...prev, archetype: v }))}
-            />
-          </Field>
-          <FieldError text={error} />
+        <View style={{ gap: 6 }}>
+          <Text style={{ fontSize: 17, fontWeight: "700", color: tokens.ink }}>{preview.fields.name}</Text>
+          <MetaRow>
+            {preview.fields.archetype ? (
+              <Text style={{ fontSize: 13, color: tokens.ink2 }}>{preview.fields.archetype}</Text>
+            ) : null}
+            <SysBadge sys={SYSTEMS[preview.fields.systemId ?? "general"]} />
+            <Text style={{ fontSize: 13, color: tokens.ink2 }}>{preview.label}</Text>
+          </MetaRow>
         </View>
       )}
     </BottomSheet>
@@ -405,7 +403,7 @@ function ImportCharacterSheet({ onClose }: { onClose: () => void }) {
 }
 
 function NewCharacterSheet({ onClose }: { onClose: () => void }) {
-  const { update } = useMobileStore();
+  const { state, update } = useMobileStore();
   const router = useRouter();
   const [name, setName] = useState("");
   const [archetype, setArchetype] = useState("");
@@ -475,11 +473,12 @@ function NewCharacterSheet({ onClose }: { onClose: () => void }) {
         <FieldError text={error} />
       </Field>
       <Field label="システム">
-        <Select
+        <Combobox
           ariaLabel="システム"
           value={systemId}
           onChange={setSystemId}
-          options={SYSTEM_LIST.map((s) => ({ value: s.id, label: s.name }))}
+          options={systemOptions()}
+          pinned={recentSystemIds(Object.values(state.logs))}
         />
       </Field>
       <Field label="職業・肩書（任意）">

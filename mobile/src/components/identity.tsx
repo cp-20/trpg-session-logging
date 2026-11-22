@@ -1,14 +1,24 @@
-import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useMemo } from "react";
+import { StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { SvgXml } from "react-native-svg";
-import type { Character, MsgKind, Provider, State, User } from "@shared/types";
+import type { Character, MsgKind, Provider, State, Table, User } from "@shared/types";
+import { identiconDataUri } from "@shared/lib/identicon";
+import { memberCandidates } from "@shared/lib/people";
 import { pickAvatarImageDataUrl } from "../native/file-import";
 import { hapticSelection } from "../native/haptics";
 import { useTheme } from "../theme/ThemeProvider";
 import { RADII } from "../theme/tokens";
-import { IconBrandX, IconDiscord, IconGoogle, IconSearch, IconUpload, IconUserPlus, IconX } from "./icons";
-import { Button, DividerList, IconButton, Select, TextField, type SelectOption } from "./ui";
+import { IconBrandX, IconDiscord, IconGoogle, IconUpload, IconX } from "./icons";
+import {
+  Button,
+  Combobox,
+  DividerList,
+  IconButton,
+  Select,
+  type ComboboxOption,
+  type SelectOption,
+} from "./ui";
 
 const boothIcon = require("../../assets/booth-icon.png");
 const taltoIcon = require("../../assets/talto-icon.png");
@@ -19,22 +29,6 @@ function hashName(name: string): number {
     hash = (hash * 31 + name.charCodeAt(i)) | 0;
   }
   return Math.abs(hash);
-}
-
-function fallbackUserEmblemDataUri(name: string, color: string, seedId = ""): string {
-  const idx = hashName(name) % 4;
-  const bgs = ["#f3e3d3", "#e5ece2", "#ebe2d5", "#f0deda"];
-  const bg = bgs[idx]!;
-  const glyph =
-    idx === 0
-      ? `<polygon points="50,20 76,35 76,65 50,80 24,65 24,35" fill="none" stroke="${color}" stroke-width="3.5" stroke-linejoin="round"/><polygon points="50,24 68,54 32,54" fill="${color}" fill-opacity="0.2" stroke="${color}" stroke-width="2.2" stroke-linejoin="round"/>`
-      : idx === 1
-        ? `<circle cx="50" cy="50" r="24" fill="none" stroke="${color}" stroke-width="2.5"/><polygon points="50,21 56,44 79,50 56,56 50,79 44,56 21,50 44,44" fill="${color}" fill-opacity="0.85"/><circle cx="50" cy="50" r="4" fill="${bg}"/>`
-        : idx === 2
-          ? `<path d="M50 22 L64 46 L56 70 L44 70 L36 46 Z" fill="${color}" fill-opacity="0.9"/><rect x="41" y="70" width="18" height="7" rx="2" fill="${color}"/>`
-          : `<rect x="28" y="34" width="44" height="34" rx="4" fill="none" stroke="${color}" stroke-width="3"/><line x1="50" y1="34" x2="50" y2="68" stroke="${color}" stroke-width="2.5"/>`;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" data-seed="${seedId}"><rect width="100" height="100" rx="50" fill="${bg}"/><circle cx="50" cy="50" r="44" fill="none" stroke="${color}" stroke-opacity="0.22" stroke-width="1.5"/>${glyph}</svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
 function fallbackPortraitDataUri(name: string, color: string, seedId = ""): string {
@@ -70,12 +64,19 @@ export const PRESET_NPC_ICONS: readonly { id: string; label: string; src: string
   },
 ];
 
-export function userAvatarSrc(u: User): string {
-  return u.image || fallbackUserEmblemDataUri(u.name, u.color || "#b84724", u.id);
+/** 人の顔。画像がなければ、変わらない ID から作った印（@shared/lib/identicon）。頭文字は使わない（P9） */
+export function userAvatarSrc(u: Pick<User, "id" | "handle" | "image">): string {
+  return u.image || identiconDataUri(u.handle ?? u.id, "user");
 }
 
-export function characterAvatarSrc(c: Character): string {
-  return c.image || fallbackPortraitDataUri(c.name, c.color || "#b84a27", c.id);
+/** キャラクターの顔。画像がなければキャラクター ID から作ったコマの絵 */
+export function characterAvatarSrc(c: Pick<Character, "id" | "image">): string {
+  return c.image || identiconDataUri(c.id, "character");
+}
+
+/** 卓の印。画像がなければ卓 ID から作った角印（和柄とダイスの目） */
+export function tableMarkSrc(t: Pick<Table, "id" | "image">): string {
+  return t.image || identiconDataUri(t.id, "table");
 }
 
 export function resolveSpeakerAvatarSrc(
@@ -90,21 +91,33 @@ export function resolveSpeakerAvatarSrc(
   if (matchedChar) return characterAvatarSrc(matchedChar);
   const matchedUser = Object.values(state.users).find((u) => u.name === sp);
   if (matchedUser) return userAvatarSrc(matchedUser);
-  if (kind === "KP" || kind === "GM") return fallbackUserEmblemDataUri(sp, "#6b5d50");
-  return fallbackPortraitDataUri(sp, "#856e5c");
+  if (kind === "KP" || kind === "GM") return identiconDataUri(sp, "user");
+  return identiconDataUri(sp, "character");
 }
 
-export function AvatarImage({ uri, size, label }: { uri: string; size: number; label?: string }) {
+export function AvatarImage({
+  uri,
+  size,
+  label,
+  shape = "circle",
+}: {
+  uri: string;
+  size: number;
+  label?: string;
+  shape?: "circle" | "square";
+}) {
   const { tokens } = useTheme();
   const isSvgUri = uri.startsWith("data:image/svg+xml;utf8,");
 
   return (
     <View
       accessibilityLabel={label}
+      accessibilityElementsHidden={!label}
+      importantForAccessibility={label ? "auto" : "no-hide-descendants"}
       style={{
         width: size,
         height: size,
-        borderRadius: size / 2,
+        borderRadius: shape === "circle" ? size / 2 : Math.max(4, Math.round(size * 0.19)),
         overflow: "hidden",
         borderWidth: 1,
         borderColor: tokens.border,
@@ -132,6 +145,11 @@ export function Avatar({ u, size = 32 }: { u: User; size?: number }) {
 
 export function CharAvatar({ c, size = 44 }: { c: Character; size?: number }) {
   return <AvatarImage uri={characterAvatarSrc(c)} size={size} label={c.name} />;
+}
+
+/** 卓の印（角の丸い四角。顔の代わりに卓を見分ける）。読み上げでは卓名が隣にあるので隠す */
+export function TableMark({ table, size = 20 }: { table: Pick<Table, "id" | "image">; size?: number }) {
+  return <AvatarImage uri={tableMarkSrc(table)} size={size} shape="square" />;
 }
 
 export function ProviderIcon({ provider, size = 20 }: { provider: Provider; size?: number }) {
@@ -235,15 +253,17 @@ export function AvatarStack({
   );
 }
 
-/* ---------- 参加者検索ピッカー ---------- */
+/* ---------- 参加者の選択 ----------
+ * 人を名前で検索させない（P14）。候補は自分の卓のメンバー（memberCandidates）か、呼び出し側が渡す quickIds だけ
+ */
 export function PlayerPicker({
   state,
   selected,
   onChange,
   quickIds,
-  quickLabel = "よく一緒に遊ぶメンバー",
+  quickLabel = "卓のメンバー",
   exclude,
-  placeholder = "ユーザー名で検索…",
+  tableId,
 }: {
   state: State;
   selected: string[];
@@ -251,33 +271,22 @@ export function PlayerPicker({
   quickIds?: string[];
   quickLabel?: string;
   exclude?: string[];
+  tableId?: string;
+  /** @deprecated 名前の検索はやめた（P14）。渡しても使わない */
   placeholder?: string;
 }) {
   const { tokens } = useTheme();
-  const [q, setQ] = useState("");
-  const all = Object.values(state.users).filter((u) => !exclude?.includes(u.id) && !selected.includes(u.id));
-  const results = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    return query ? all.filter((u) => u.name.toLowerCase().includes(query)).slice(0, 8) : [];
-  }, [q, all]);
-  const quick = (quickIds ?? []).filter(
-    (id) => state.users[id] && !selected.includes(id) && !exclude?.includes(id),
+  const quick = useMemo(
+    () =>
+      (quickIds ?? memberCandidates(state, tableId)).filter(
+        (id) => state.users[id] && !selected.includes(id) && !exclude?.includes(id),
+      ),
+    [quickIds, state, tableId, selected, exclude],
   );
 
   return (
     <View style={{ gap: 10 }}>
-      <View style={[styles.searchInputWrap, { backgroundColor: tokens.surface, borderColor: tokens.border }]}>
-        <IconSearch size={16} color={tokens.ink3} />
-        <TextField
-          value={q}
-          onChangeText={setQ}
-          placeholder={placeholder}
-          accessibilityLabel="参加者を検索"
-          style={{ flex: 1, borderWidth: 0, minHeight: 40, paddingHorizontal: 4 }}
-        />
-      </View>
-
-      {quick.length > 0 && !q && (
+      {quick.length > 0 && (
         <View>
           <Text style={[styles.quickLabel, { color: tokens.ink2 }]}>{quickLabel}</Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
@@ -287,8 +296,11 @@ export function PlayerPicker({
                 <Button
                   key={id}
                   size="sm"
-                  variant="quiet"
-                  onPress={() => onChange([...selected, id])}
+                  variant="secondary"
+                  onPress={() => {
+                    hapticSelection();
+                    onChange([...selected, id]);
+                  }}
                   icon={<Avatar u={u} size={20} />}
                 >
                   {u.name}
@@ -296,42 +308,6 @@ export function PlayerPicker({
               );
             })}
           </View>
-        </View>
-      )}
-
-      {q.trim() !== "" && (
-        <View style={[styles.resultBox, { backgroundColor: tokens.surface, borderColor: tokens.border }]}>
-          {results.length === 0 ? (
-            <Text style={{ padding: 12, fontSize: 14, color: tokens.ink2 }}>
-              該当するユーザーが見つかりません
-            </Text>
-          ) : (
-            <DividerList>
-              {results.map((u) => (
-                <Pressable
-                  key={u.id}
-                  onPress={() => {
-                    hapticSelection();
-                    onChange([...selected, u.id]);
-                    setQ("");
-                  }}
-                  style={({ pressed }) => [
-                    styles.pickerRow,
-                    pressed && { backgroundColor: tokens.surfaceHover },
-                  ]}
-                >
-                  <Avatar u={u} size={28} />
-                  <Text style={{ flex: 1, fontSize: 14, fontWeight: "700", color: tokens.ink }}>
-                    {u.name}
-                  </Text>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                    <IconUserPlus size={14} color={tokens.primary} />
-                    <Text style={{ fontSize: 13, fontWeight: "700", color: tokens.primary }}>追加</Text>
-                  </View>
-                </Pressable>
-              ))}
-            </DividerList>
-          )}
         </View>
       )}
 
@@ -388,7 +364,7 @@ export function SpeakerConfigList({
   onIconChange: (sp: string, iconSrc: string) => void;
 }) {
   const { tokens } = useTheme();
-  const baseIconOptions = useMemo<SelectOption<string>[]>(() => {
+  const baseIconOptions = useMemo<ComboboxOption<string>[]>(() => {
     return [
       { value: "", label: "自動（キャラ・PLに連動）" },
       ...Object.values(state.characters).map((c) => ({
@@ -413,7 +389,7 @@ export function SpeakerConfigList({
       {speakers.map(({ sp, kind }) => {
         const currentExplicit = speakerIcons[sp] ?? "";
         const previewSrc = resolveSpeakerAvatarSrc(sp, kind, speakerIcons, state);
-        const options =
+        const iconOptions =
           currentExplicit && !knownValues.has(currentExplicit)
             ? [...baseIconOptions, { value: currentExplicit, label: "端末から選んだ画像" }]
             : baseIconOptions;
@@ -435,12 +411,12 @@ export function SpeakerConfigList({
               />
             </View>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Select
+              <Combobox
                 size="sm"
                 ariaLabel={`${sp}のアイコン`}
                 value={currentExplicit}
                 onChange={(v) => onIconChange(sp, v)}
-                options={options}
+                options={iconOptions}
                 style={{ flex: 1 }}
               />
               <Button
@@ -473,14 +449,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     overflow: "hidden",
   },
-  searchInputWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderRadius: RADII.sm,
-    paddingHorizontal: 10,
-  },
   quickLabel: {
     fontSize: 12,
     fontWeight: "700",
@@ -490,13 +458,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: RADII.md,
     overflow: "hidden",
-  },
-  pickerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
   },
   selectedRow: {
     flexDirection: "row",

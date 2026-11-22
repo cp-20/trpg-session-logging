@@ -1,15 +1,21 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { SYSTEMS } from "@shared/data/systems";
-import { fmtDate, fmtDateShort, todayStr, uid } from "@shared/lib/time";
+import { SYSTEMS, carriedStats } from "@shared/data/systems";
+import { userHref } from "@shared/lib/people";
+import { carriedDeltas, currentSkillValue, sessionsNewestFirst } from "@shared/lib/character-growth";
+import { isSheetLinked } from "@shared/lib/external-sync";
+import { cleanTags, tagOptions } from "@shared/lib/tags";
+import { applyLinkedEdit, applyManualEdit } from "@shared/lib/character-edit";
+import { fmtDateShort, uid } from "@shared/lib/time";
 import type { Character, GrowthRecord, SessionStat } from "@shared/types";
 import { ScreenShell } from "../../components/ScreenShell";
 import { CharAvatar } from "../../components/identity";
-import { IconHistory, IconPencil, IconPlus, IconShare, IconTrendingUp } from "../../components/icons";
+import { IconPencil, IconPlus, IconShare, IconTrendingUp } from "../../components/icons";
 import {
   BottomSheet,
   Button,
+  Combobox,
   CopyBox,
   DividerList,
   EmptyState,
@@ -20,7 +26,7 @@ import {
   NotFound,
   PageHead,
   SectionTitle,
-  Select,
+  MultiCombobox,
   Surface,
   SysBadge,
   TextField,
@@ -56,11 +62,8 @@ export default function CharacterDetailScreen() {
   const isMine = c.ownerId === state.me;
   const owner = state.users[c.ownerId];
   const sessions = [...c.sessions].sort((a, b) => b.date.localeCompare(a.date));
-  const sessionLogIds = new Set(c.sessions.map((s) => s.logId));
-  const looseGrowth = c.growth
-    .filter((g) => !g.logId || !sessionLogIds.has(g.logId))
-    .sort((a, b) => b.date.localeCompare(a.date));
-  const firstDate = sessions.at(-1)?.date;
+  /* 成長を手で記録するのはキャラシのないキャラクターだけ（キャラシのあるものは同期で残る。P3） */
+  const canAddGrowth = isMine && !isSheetLinked(c) && sessions.length > 0;
 
   const coChars: Record<string, number> = {};
   c.sessions.forEach((s) => {
@@ -78,7 +81,7 @@ export default function CharacterDetailScreen() {
     .filter(([cid]) => Boolean(state.characters[cid]))
     .sort((a, b) => b[1] - a[1]);
 
-  const statCells = (sys?.stats ?? []).map((st) => ({
+  const statCells = carriedStats(sys).map((st) => ({
     label: st.label,
     val: currentStat(c, st.key),
     max: st.max,
@@ -117,7 +120,9 @@ export default function CharacterDetailScreen() {
             {c.archetype !== "" && <Text style={{ fontSize: 13, color: tokens.ink2 }}>{c.archetype}</Text>}
             <SysBadge sys={sys} />
             {!isMine && owner && (
-              <Pressable onPress={() => router.push(`/users/${c.ownerId}` as never)}>
+              <Pressable
+                onPress={() => router.push((owner ? userHref(owner) : `/users/${c.ownerId}`) as never)}
+              >
                 <Text style={{ fontSize: 13, fontWeight: "600", color: tokens.primary }}>
                   {owner.name}のキャラクター
                 </Text>
@@ -195,9 +200,8 @@ export default function CharacterDetailScreen() {
       <View style={{ gap: 24 }}>
         <View>
           <SectionTitle
-            sub={firstDate ? `${fmtDate(firstDate)}から` : undefined}
             right={
-              isMine ? (
+              canAddGrowth ? (
                 <Button
                   size="sm"
                   variant="secondary"
@@ -212,11 +216,9 @@ export default function CharacterDetailScreen() {
             これまでのセッション
           </SectionTitle>
 
-          {sessions.length === 0 && looseGrowth.length === 0 ? (
+          {sessions.length === 0 ? (
             <Surface>
-              <EmptyState kind="first" title="まだセッションに参加していません">
-                セッションを記録するときに、参加者としてこのキャラクターを選ぶとここに並びます。
-              </EmptyState>
+              <EmptyState kind="first" title="まだセッションに参加していません" />
             </Surface>
           ) : (
             <Surface>
@@ -236,7 +238,7 @@ export default function CharacterDetailScreen() {
                       </View>
                       <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
                         <Text style={{ fontSize: 15, fontWeight: "700", color: tokens.ink }}>{s.title}</Text>
-                        <ChangesRow s={s} sysStats={sys?.stats ?? []} growth={glist} />
+                        <ChangesRow s={s} systemId={c.systemId} growth={glist} />
                         {s.memo.trim() !== "" && (
                           <Text style={{ fontSize: 13, lineHeight: 19, color: tokens.ink2 }}>{s.memo}</Text>
                         )}
@@ -260,28 +262,6 @@ export default function CharacterDetailScreen() {
                     </View>
                   );
                 })}
-                {looseGrowth.length > 0 && (
-                  <View style={{ paddingHorizontal: 16, paddingVertical: 14, gap: 6 }}>
-                    <Text style={{ fontSize: 12, fontWeight: "700", color: tokens.ink2 }}>
-                      {`セッション外の${sys?.growthLabel ?? "成長"}`}
-                    </Text>
-                    {looseGrowth.map((g) => (
-                      <View key={g.id} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                        <Text
-                          style={{
-                            fontSize: 13,
-                            color: tokens.ink2,
-                            width: 52,
-                            fontVariant: ["tabular-nums"],
-                          }}
-                        >
-                          {fmtDateShort(g.date)}
-                        </Text>
-                        <GrowthLine g={g} />
-                      </View>
-                    ))}
-                  </View>
-                )}
               </DividerList>
             </Surface>
           )}
@@ -322,7 +302,7 @@ export default function CharacterDetailScreen() {
 
       {editOpen && <EditCharSheet c={c} onClose={() => setEditOpen(false)} />}
       {shareOpen && <ShareCharSheet c={c} onClose={() => setShareOpen(false)} />}
-      {growthOpen && <AddGrowthSheet c={c} onClose={() => setGrowthOpen(false)} />}
+      {growthOpen && canAddGrowth && <AddGrowthSheet c={c} onClose={() => setGrowthOpen(false)} />}
     </ScreenShell>
   );
 }
@@ -336,25 +316,13 @@ function GrowthLine({ g }: { g: GrowthRecord }) {
       <Text style={{ fontSize: 13, color: tokens.ink2, fontVariant: ["tabular-nums"] }}>
         {g.from}→<Text style={{ fontWeight: "700", color: tokens.success }}>{g.to}</Text>
       </Text>
-      {g.note && <Text style={{ fontSize: 12, color: tokens.ink3 }}>{g.note}</Text>}
     </View>
   );
 }
 
-function ChangesRow({
-  s,
-  sysStats,
-  growth,
-}: {
-  s: SessionStat;
-  sysStats: { key: string; label: string }[];
-  growth: GrowthRecord[];
-}) {
+function ChangesRow({ s, systemId, growth }: { s: SessionStat; systemId: string; growth: GrowthRecord[] }) {
   const { tokens } = useTheme();
-  const deltas = Object.entries(s.delta).flatMap(([k, d]) => {
-    const def = sysStats.find((x) => x.key === k);
-    return def ? [{ k, label: def.label, ...d, diff: d.after - d.before }] : [];
-  });
+  const deltas = carriedDeltas(systemId, s.delta).map((d) => ({ ...d, k: d.key, diff: d.after - d.before }));
   if (deltas.length === 0 && growth.length === 0) return null;
 
   return (
@@ -377,38 +345,51 @@ function ChangesRow({
 
 function EditCharSheet({ c, onClose }: { c: Character; onClose: () => void }) {
   const { tokens } = useTheme();
-  const { update } = useMobileStore();
+  const { state, update } = useMobileStore();
   const sys = SYSTEMS[c.systemId];
   const [name, setName] = useState(c.name);
   const [archetype, setArchetype] = useState(c.archetype);
   const [bio, setBio] = useState(c.bio);
-  const [tags, setTags] = useState(c.tags.join(", "));
+  const [tags, setTags] = useState<string[]>(c.tags);
+  const tagSuggestions = useMemo(
+    () => tagOptions(Object.values(state.characters).filter((x) => x.ownerId === state.me)),
+    [state.characters, state.me],
+  );
+  /* キャラシと結び付いたキャラクターは名前・職業・能力値をキャラシが持つので直させない（P3） */
+  const linked = isSheetLinked(c);
+  const carried = carriedStats(sys);
   const [stats, setStats] = useState<Record<string, string>>(() =>
-    Object.fromEntries((sys?.stats ?? []).map((st) => [st.key, String(c.stats[st.key] ?? "")])),
+    Object.fromEntries(carried.map((st) => [st.key, String(c.stats[st.key] ?? "")])),
   );
   const [error, setError] = useState<string | null>(null);
 
   function save() {
-    if (!name.trim()) {
+    if (!linked && !name.trim()) {
       setError("名前を入力してください");
       return;
     }
+    const owned = {
+      bio,
+      tags: cleanTags(tags),
+      sheetUrl: c.externalSync?.url ?? "",
+    };
     update((s) => {
       const ch = s.characters[c.id];
       if (!ch) return;
-      ch.name = name.trim();
-      ch.archetype = archetype.trim();
-      ch.bio = bio.trim();
-      ch.tags = tags
-        .split(/[,、]/)
-        .map((t) => t.trim())
-        .filter(Boolean);
-      const nextStats = { ...ch.stats };
-      for (const st of sys?.stats ?? []) {
-        const n = Number(stats[st.key]);
-        if (stats[st.key]?.trim() && Number.isFinite(n)) nextStats[st.key] = n;
-      }
-      ch.stats = nextStats;
+      if (linked) applyLinkedEdit(ch, owned);
+      else
+        applyManualEdit(
+          ch,
+          {
+            ...owned,
+            name,
+            archetype,
+            stats: Object.fromEntries(
+              carried.filter((st) => stats[st.key]?.trim()).map((st) => [st.key, Number(stats[st.key])]),
+            ),
+          },
+          carried.map((st) => st.key),
+        );
     });
     hapticSuccess();
     onClose();
@@ -430,21 +411,31 @@ function EditCharSheet({ c, onClose }: { c: Character; onClose: () => void }) {
         </>
       }
     >
-      <Field label="名前" noMargin>
-        <TextField value={name} onChangeText={setName} />
-        <FieldError text={error} />
-      </Field>
-      <Field label="職業など">
-        <TextField value={archetype} onChangeText={setArchetype} />
-      </Field>
-      <Field label="タグ（カンマ区切り）">
-        <TextField value={tags} onChangeText={setTags} />
+      {!linked && (
+        <>
+          <Field label="名前" noMargin>
+            <TextField value={name} onChangeText={setName} />
+            <FieldError text={error} />
+          </Field>
+          <Field label="職業など">
+            <TextField value={archetype} onChangeText={setArchetype} />
+          </Field>
+        </>
+      )}
+      <Field label="タグ">
+        <MultiCombobox
+          ariaLabel="タグ"
+          values={tags}
+          onChange={setTags}
+          options={tagSuggestions}
+          placeholder="タグを探すか、新しく追加"
+        />
       </Field>
       <Field label="ひとこと紹介">
         <TextField multiline value={bio} onChangeText={setBio} />
       </Field>
-      {(sys?.stats ?? []).map((st) => (
-        <Field key={st.key} label={`${st.label}${st.max ? `（最大${st.max}）` : ""}`}>
+      {(linked ? [] : carried).map((st) => (
+        <Field key={st.key} label={st.label}>
           <TextField
             keyboardType="numeric"
             value={stats[st.key] ?? ""}
@@ -553,42 +544,48 @@ function ShareCharSheet({ c, onClose }: { c: Character; onClose: () => void }) {
   );
 }
 
+/** キャラシのないキャラクターの成長。尋ねるのはセッション・技能・新しい値だけ（前の値は分かれば埋め、日付はセッションの日付。P2） */
 function AddGrowthSheet({ c, onClose }: { c: Character; onClose: () => void }) {
   const { tokens } = useTheme();
   const { update } = useMobileStore();
   const sys = SYSTEMS[c.systemId];
-  const recent = [...c.sessions].sort((a, b) => b.date.localeCompare(a.date));
+  const recent = sessionsNewestFirst(c);
+  // 前に記録した技能（新しい順）を先頭に出す。システムの技能表にないものは「追加」で足せる
+  const recentSkills = [...new Set([...c.growth].reverse().map((g) => g.skill))].slice(0, 5);
+  const [extraSkills, setExtraSkills] = useState<string[]>([]);
+  const skillOptions = [...new Set([...(sys?.skills ?? []), ...recentSkills, ...extraSkills])].map(
+    (name) => ({ value: name, label: name }),
+  );
 
   const [logId, setLogId] = useState(recent[0]?.logId ?? "");
-  const [skill, setSkill] = useState(sys?.skills[0] ?? "__custom__");
-  const [custom, setCustom] = useState("");
-  const [gFrom, setGFrom] = useState("0");
-  const [gTo, setGTo] = useState("0");
-  const [gDate, setGDate] = useState(recent[0]?.date ?? todayStr());
-  const [gNote, setGNote] = useState("");
+  const [skill, setSkill] = useState(recentSkills[0] ?? "");
+  const [gFrom, setGFrom] = useState("");
+  const [gTo, setGTo] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const skillName = skill.trim();
+  const known = skillName ? currentSkillValue(c, skillName) : undefined;
 
   function save() {
-    const skillName = skill === "__custom__" ? custom.trim() : skill;
+    const session = recent.find((r) => r.logId === logId);
+    if (!session) return;
     if (!skillName) {
-      setError("技能名を入力してください");
+      setError("技能を選んでください");
       return;
     }
-    const fromVal = Number(gFrom);
+    const fromVal = known ?? Number(gFrom);
     const toVal = Number(gTo);
-    if (!Number.isFinite(fromVal) || !Number.isFinite(toVal) || toVal <= fromVal) {
-      setError("前の値より大きい数値を入力してください");
+    if (gTo.trim() === "" || !Number.isFinite(fromVal) || !Number.isFinite(toVal) || toVal <= fromVal) {
+      setError(`${Number.isFinite(fromVal) ? fromVal : "前の値"} より大きい値にしてください`);
       return;
     }
     update((s) => {
       s.characters[c.id]?.growth.push({
         id: `g_${uid()}`,
-        date: gDate || todayStr(),
-        logId: logId || undefined,
+        logId: session.logId,
+        date: session.date,
         skill: skillName,
         from: fromVal,
         to: toVal,
-        note: gNote.trim() || undefined,
       });
     });
     hapticSuccess();
@@ -611,62 +608,57 @@ function AddGrowthSheet({ c, onClose }: { c: Character; onClose: () => void }) {
         </>
       }
     >
-      {sys?.growthNote && (
-        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6, marginBottom: 12 }}>
-          <IconHistory size={16} color={tokens.ink2} />
-          <Text style={{ flex: 1, fontSize: 13, color: tokens.ink2 }}>{sys.growthNote}</Text>
-        </View>
-      )}
-      {recent.length > 0 && (
-        <Field label="どのセッションのあとか" noMargin>
-          <Select
-            ariaLabel="どのセッションのあとか"
-            value={logId}
-            onChange={(v) => {
-              setLogId(v);
-              const hit = recent.find((r) => r.logId === v);
-              if (hit) setGDate(hit.date);
-            }}
-            options={[
-              ...recent.map((r) => ({ value: r.logId, label: `${fmtDateShort(r.date)} ${r.title}` })),
-              { value: "", label: "セッションに紐付けない" },
-            ]}
-          />
-        </Field>
-      )}
-      <Field label="技能 / 能力">
-        <Select
-          ariaLabel="技能 / 能力"
-          value={skill}
-          onChange={setSkill}
-          options={[
-            ...(sys?.skills ?? []).map((s) => ({ value: s, label: s })),
-            { value: "__custom__", label: "自由入力…" },
-          ]}
+      <Field label="セッション" noMargin>
+        <Combobox
+          ariaLabel="セッション"
+          value={logId}
+          onChange={setLogId}
+          options={recent.map((r) => ({ value: r.logId, label: `${fmtDateShort(r.date)} ${r.title}` }))}
         />
       </Field>
-      {skill === "__custom__" && (
-        <Field label="技能名（自由入力）">
-          <TextField value={custom} onChangeText={setCustom} placeholder="例: 銃構築" />
-        </Field>
-      )}
-      <View style={{ flexDirection: "row", gap: 10 }}>
-        <View style={{ flex: 1 }}>
-          <Field label="前の値">
-            <TextField keyboardType="numeric" value={gFrom} onChangeText={setGFrom} />
-          </Field>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Field label="新しい値">
-            <TextField keyboardType="numeric" value={gTo} onChangeText={setGTo} />
-          </Field>
-        </View>
-      </View>
-      <Field label="日付">
-        <TextField value={gDate} onChangeText={setGDate} placeholder="YYYY-MM-DD" />
+      <Field label="技能">
+        <Combobox
+          ariaLabel="技能"
+          value={skill}
+          onChange={(v) => {
+            setSkill(v);
+            setError(null);
+          }}
+          placeholder="技能を探す"
+          options={skillOptions}
+          pinned={recentSkills}
+          pinnedLabel="前に記録した技能"
+          onCreate={(name) => {
+            setExtraSkills((xs) => [...xs, name]);
+            setSkill(name);
+            setError(null);
+          }}
+        />
       </Field>
-      <Field label="補足（任意）">
-        <TextField value={gNote} onChangeText={setGNote} placeholder="例: クリティカルの余韻で" />
+      <Field label="値">
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          {known != null ? (
+            <Text style={{ fontSize: 15, color: tokens.ink2, fontVariant: ["tabular-nums"] }}>{known}</Text>
+          ) : (
+            <View style={{ flex: 1 }}>
+              <TextField
+                keyboardType="numeric"
+                value={gFrom}
+                onChangeText={setGFrom}
+                accessibilityLabel="前の値"
+              />
+            </View>
+          )}
+          <Text style={{ color: tokens.ink2 }}>→</Text>
+          <View style={{ flex: 1 }}>
+            <TextField
+              keyboardType="numeric"
+              value={gTo}
+              onChangeText={setGTo}
+              accessibilityLabel="新しい値"
+            />
+          </View>
+        </View>
       </Field>
       <FieldError text={error} />
     </BottomSheet>

@@ -15,11 +15,10 @@ test("実ログファイルを解析して保存し、共有ビューでも全�
   await page
     .locator('input[type="file"]')
     .setInputFiles(path.join(process.cwd(), "e2e/fixtures/ccfolia-sample.json"));
-  // Step2 へ直行（読み取り完了サマリー・実データの発言・シークレット行 + メタ編集が見える）
-  await expect(page.getByText(/読み取り完了/)).toBeVisible({ timeout: 15_000 });
+  // 内容の確認へ直行（選んだファイル・実データの発言・シークレット行 + メタ編集が見える）
+  await expect(page.getByText("ccfolia-sample.json")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("教室の黒板、まだ新しい。")).toBeVisible();
   await expect(page.getByText("【シークレット】黒板に文字を書いたのは")).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "参加者を検索" })).toBeVisible();
   await page.getByLabel("タイトル", { exact: true }).fill("CCFOLIA 実ファイル取り込み");
   await page.getByRole("button", { name: "記録する", exact: true }).click({ force: true });
   await expect(page.getByRole("heading", { name: "セッションを記録しました", exact: true })).toBeVisible();
@@ -36,7 +35,7 @@ test("実ログファイルを解析して保存し、共有ビューでも全�
   const slug = await slugHandle.jsonValue();
 
   // 自分のビュー: 実内容・取込元・シークレット表示
-  await page.getByRole("button", { name: "セッションを開く" }).click({ force: true });
+  await page.getByRole("link", { name: "セッションを開く" }).click({ force: true });
   await page.getByRole("tab", { name: /ログ/ }).click({ force: true });
   await expect(page).toHaveURL(/tab=log/);
   await expect(page.getByText("取り込んだファイル: ccfolia-sample.json")).toBeVisible();

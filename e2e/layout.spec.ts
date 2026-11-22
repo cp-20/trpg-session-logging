@@ -52,13 +52,20 @@ test("モバイルでは下部タブ、デスクトップではサイドバー�
   await expect(page.getByRole("link", { name: "セッションを記録" })).toBeVisible();
 });
 
-test("Select の選択肢はホバーで面の色だけが変わり、枠や影を出さない", async ({ page }) => {
+test("Combobox の候補はホバーで面の色だけが変わり、枠や影を出さない", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await enterDemo(page);
+  // 成長を手で記録するのはキャラシのないキャラクターだけ（P3）
+  await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem("takufu-state-v4") ?? "{}");
+    delete state.characters.ch_towa.externalSync;
+    delete state.characters.ch_towa.sheet;
+    localStorage.setItem("takufu-state-v4", JSON.stringify(state));
+  });
   await page.goto("/characters/ch_towa");
   await page.getByRole("button", { name: /成長ロールを記録/ }).click();
-  await page.getByRole("dialog").locator("button[aria-haspopup=listbox]").first().click();
-  const option = page.getByRole("option").nth(1).locator("button");
+  await page.getByRole("dialog").getByRole("combobox", { name: "技能" }).click();
+  const option = page.getByRole("option").nth(1);
   await option.hover();
   const style = await option.evaluate((el) => {
     const cs = getComputedStyle(el);
@@ -85,39 +92,39 @@ test("キャラクターのカードはホバーしても影を落とさない",
   expect(await card.evaluate((el) => getComputedStyle(el).boxShadow)).toBe("none");
 });
 
-test("日付入力はマウスでは卓譜の暦で選べ、タッチ端末ではブラウザ標準の入力のまま", async ({ browser }) => {
-  const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const page = await desktop.newPage();
-  await enterDemo(page);
-  await page.goto("/characters/ch_towa");
-  await page.getByRole("button", { name: /成長ロールを記録/ }).click();
-  const dialog = page.getByRole("dialog", { name: "成長ロールを記録" });
-  const input = dialog.locator('input[type="date"]');
-  await dialog.getByRole("button", { name: "カレンダーから選ぶ" }).click();
-  const picker = page.getByRole("dialog", { name: "日付を選ぶ" });
-  await expect(picker).toBeVisible();
-  // 暦の中はキーボードで動かせる。Escape では暦だけが閉じる
-  const before = await input.inputValue();
-  await page.keyboard.press("ArrowRight");
-  await page.keyboard.press("Enter");
-  await expect(picker).toBeHidden();
-  expect(await input.inputValue()).not.toBe(before);
-  await dialog.getByRole("button", { name: "カレンダーから選ぶ" }).click();
-  await page.keyboard.press("Escape");
-  await expect(picker).toBeHidden();
-  await expect(dialog).toBeVisible();
-  await desktop.close();
-
-  const touch = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    hasTouch: true,
-    isMobile: true,
-  });
-  const mobile = await touch.newPage();
-  await enterDemo(mobile);
-  await mobile.goto("/characters/ch_towa");
-  await mobile.getByRole("button", { name: /成長ロールを記録/ }).click();
-  await expect(mobile.getByRole("dialog").locator('input[type="date"]')).toBeVisible();
-  await expect(mobile.getByRole("button", { name: "カレンダーから選ぶ" })).toHaveCount(0);
-  await touch.close();
+test("日付入力は YYYY/MM/DD で見せて打て、暦からも選べる（端末の言語設定に左右されない）", async ({
+  browser,
+}) => {
+  for (const device of [
+    { viewport: { width: 1440, height: 900 } },
+    { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, locale: "en-US" },
+  ]) {
+    const ctx = await browser.newContext(device);
+    const page = await ctx.newPage();
+    await enterDemo(page);
+    // 成長の記録は日付を尋ねなくなった（セッションの日付。P2）ので、予定の追加で確かめる
+    await page.goto("/calendar");
+    await page.getByRole("button", { name: "予定を追加" }).first().click();
+    const dialog = page.getByRole("dialog", { name: "予定を追加" });
+    const input = dialog.locator('input[placeholder="YYYY/MM/DD"]');
+    await expect(input).toHaveValue(/^\d{4}\/\d{2}\/\d{2}$/);
+    await dialog.getByRole("button", { name: "カレンダーから選ぶ" }).click();
+    const picker = page.getByRole("dialog", { name: "日付を選ぶ" });
+    await expect(picker).toBeVisible();
+    // 暦の中はキーボードで動かせる。Escape では暦だけが閉じる
+    const before = await input.inputValue();
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Enter");
+    await expect(picker).toBeHidden();
+    expect(await input.inputValue()).not.toBe(before);
+    await dialog.getByRole("button", { name: "カレンダーから選ぶ" }).click();
+    await page.keyboard.press("Escape");
+    await expect(picker).toBeHidden();
+    await expect(dialog).toBeVisible();
+    // 区切りの違う書き方も受け、欄を離れると YYYY/MM/DD にそろう
+    await input.fill("2026-10-17");
+    await input.blur();
+    await expect(input).toHaveValue("2026/10/17");
+    await ctx.close();
+  }
 });

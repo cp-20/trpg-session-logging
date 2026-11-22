@@ -19,6 +19,7 @@ import {
 import { getFirestore, type Firestore } from "firebase/firestore";
 import { configureCloudRuntime } from "@shared/lib/cloud-state";
 import type { User } from "@shared/types";
+import { userFacingError } from "@shared/lib/user-error";
 
 interface ExtraFirebaseConfig {
   apiKey?: string;
@@ -191,7 +192,6 @@ export function mobileAuthErrorMessage(error: unknown): string {
     "auth/unauthorized-domain": "このURLではまだサインインを利用できません。",
   };
   return (
-    (code && messages[code]) ||
-    (error instanceof Error && !code ? error.message : "サインインできませんでした。もう一度お試しください。")
+    (code && messages[code]) || userFacingError(error, "サインインできませんでした。もう一度お試しください。")
   );
 }

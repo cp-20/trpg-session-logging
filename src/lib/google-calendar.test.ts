@@ -24,6 +24,7 @@ vi.mock("./auth", () => ({
 const {
   GOOGLE_CALENDAR_SCOPES,
   fetchGoogleBusyRanges,
+  googleApiErrorMessage,
   listGoogleCalendars,
   parseCalendarList,
   parseFreeBusy,
@@ -98,7 +99,42 @@ describe("parseCalendarList / listGoogleCalendars", () => {
     expect(url.searchParams.get("minAccessRole")).toBe("freeBusyReader");
 
     fetchMock.mockResolvedValueOnce(new Response("x", { status: 403 }));
-    await expect(listGoogleCalendars("tok")).rejects.toThrow("一覧を取得できませんでした");
+    await expect(listGoogleCalendars("tok")).rejects.toThrow("もう一度お試しください");
+  });
+});
+
+describe("googleApiErrorMessage", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  // 2026-11-22 の不具合: プロジェクトで Calendar API が無効で、一覧の取得が 403 になっていた
+  it("API が無効なら卓譜側の問題と伝え、利用者に再試行させ続けない", () => {
+    const body = {
+      error: {
+        code: 403,
+        status: "PERMISSION_DENIED",
+        message: "Google Calendar API has not been used in project 1 before or it is disabled.",
+        errors: [{ reason: "accessNotConfigured" }],
+        details: [{ reason: "SERVICE_DISABLED" }],
+      },
+    };
+    expect(googleApiErrorMessage(403, body)).toContain("卓譜側の設定");
+  });
+  it("カレンダーの項目を外して許可したときは、チェックを入れ直すよう伝える", () => {
+    const body = {
+      error: { status: "PERMISSION_DENIED", details: [{ reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT" }] },
+    };
+    expect(googleApiErrorMessage(403, body)).toContain("チェックを入れて");
+    expect(
+      googleApiErrorMessage(403, { error: { errors: [{ reason: "insufficientPermissions" }] } }),
+    ).toContain("チェックを入れて");
+  });
+  it("期限切れ・混雑・不明を区別し、どれも敬体で次の行動を示す", () => {
+    expect(googleApiErrorMessage(401, null)).toContain("許可が切れました");
+    expect(googleApiErrorMessage(503, "x")).toContain("混み合っています");
+    for (const m of [googleApiErrorMessage(400, {}), googleApiErrorMessage(503, null)]) {
+      expect(m).toMatch(/ください。$/);
+    }
   });
 });
 
@@ -153,6 +189,6 @@ describe("parseFreeBusy / fetchGoogleBusyRanges", () => {
 
     expect(await fetchGoogleBusyRanges("tok", [], now)).toEqual([]);
     fetchMock.mockResolvedValueOnce(new Response("err", { status: 500 }));
-    await expect(fetchGoogleBusyRanges("tok", ["a"], now)).rejects.toThrow("予定を取得できませんでした");
+    await expect(fetchGoogleBusyRanges("tok", ["a"], now)).rejects.toThrow("混み合っています");
   });
 });

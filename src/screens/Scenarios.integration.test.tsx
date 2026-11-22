@@ -1,5 +1,5 @@
 import { createDemoState, getTestNav, renderWithStore } from "../test/integration-harness";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Scenarios, { ScenarioDetail, ScenarioNew } from "./Scenarios";
@@ -45,7 +45,13 @@ describe("Scenarios + BOOTH URL 自動入力 + 構造化修正申請 結合テ�
 
     await waitFor(() => expect(screen.getByDisplayValue("夜汽車は霧の中")).toBeInTheDocument());
     expect(screen.getByDisplayValue("星灯堂")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("クローズド, 鉄道")).toBeInTheDocument();
+    // キーワードは入力欄の中の札（MultiCombobox）として入る
+    const keywords = screen.getByRole("list", { name: "選んだキーワード" });
+    expect(
+      within(keywords)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual(["クローズド", "鉄道"]);
 
     await user.click(screen.getByRole("button", { name: "追加する" }));
     await waitFor(() => expect(getTestNav().pathname).toMatch(/^\/scenarios\/sc_/));

@@ -2,11 +2,13 @@ import { useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SYSTEMS, SYSTEM_LIST } from "@shared/data/systems";
+import { systemOptions } from "@shared/lib/system-options";
 import { evaluateShareGate } from "@shared/lib/share-gate";
 import { ScreenShell } from "../../components/ScreenShell";
 import { IconCheck, IconPlus, IconSearch, IconX } from "../../components/icons";
 import {
   Button,
+  Combobox,
   DividerList,
   EmptyState,
   IconButton,
@@ -14,7 +16,6 @@ import {
   MetaRow,
   PageHead,
   Seg,
-  Select,
   Surface,
   SysBadge,
   TextField,
@@ -22,6 +23,7 @@ import {
 import { useMobileStore } from "../../store/mobile-store";
 import { useTheme } from "../../theme/ThemeProvider";
 import { RADII } from "../../theme/tokens";
+import { sessionStart } from "@shared/lib/sittings";
 
 type PlayedFilter = "all" | "played" | "unplayed";
 
@@ -39,7 +41,7 @@ export default function ScenariosScreen() {
       const logs = Object.values(state.logs).filter((l) => l.scenarioId === s.id);
       const visible = logs.filter((l) => evaluateShareGate(l, viewer).visible);
       const mine = logs.filter((l) => l.ownerId === state.me || Boolean(l.players[state.me]));
-      const last = visible.reduce((m, l) => Math.max(m, l.t0), 0);
+      const last = visible.reduce((m, l) => Math.max(m, sessionStart(l)), 0);
       return { s, mine, last };
     });
   }, [state.scenarios, state.logs, state.entered, state.me]);
@@ -103,7 +105,7 @@ export default function ScenariosScreen() {
             ]}
           />
           {usedSystems.size > 1 && (
-            <Select
+            <Combobox
               size="sm"
               ariaLabel="システムで絞り込み"
               value={sys}
@@ -111,10 +113,7 @@ export default function ScenariosScreen() {
               style={{ minWidth: 160, flex: 1 }}
               options={[
                 { value: "all", label: "すべてのシステム" },
-                ...SYSTEM_LIST.filter((x) => usedSystems.has(x.id)).map((x) => ({
-                  value: x.id,
-                  label: x.name,
-                })),
+                ...systemOptions(SYSTEM_LIST.filter((x) => usedSystems.has(x.id))),
               ]}
             />
           )}

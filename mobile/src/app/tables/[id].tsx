@@ -2,12 +2,12 @@ import { useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { unansweredCount } from "@shared/lib/schedule";
-import { todayStr } from "@shared/lib/time";
+import { todayStr, sessionStart } from "@shared/lib/time";
 import type { TableEvent } from "@shared/types";
 import { EventDetailSheet, EventRow } from "../../components/EventComponents";
 import { ScreenShell } from "../../components/ScreenShell";
 import { SessionRow } from "../../components/SessionRow";
-import { Avatar, AvatarStack, PlayerPicker } from "../../components/identity";
+import { Avatar, AvatarStack, PlayerPicker, TableMark } from "../../components/identity";
 import {
   IconCalendarTime,
   IconChevronRight,
@@ -55,7 +55,7 @@ export default function TableDetailScreen() {
       table
         ? Object.values(state.logs)
             .filter((l) => l.tableId === table.id)
-            .sort((a, b) => b.t0 - a.t0)
+            .sort((a, b) => sessionStart(b) - sessionStart(a))
         : [],
     [state.logs, table],
   );
@@ -96,6 +96,7 @@ export default function TableDetailScreen() {
     <ScreenShell>
       <PageHead
         back={{ label: "卓" }}
+        lead={<TableMark table={table} size={56} />}
         title={table.name}
         sub={
           <View style={{ gap: 6 }}>

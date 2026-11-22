@@ -1,7 +1,10 @@
 import type { State, User, Table, Character, Scenario, Log, Channel, Provider, TableEvent } from "../types";
 import generated from "./generated.json";
-import { jstTime, jstDate, sessionMinutes, fmtDur, uid } from "../lib/time";
+import { sessionStart, uid } from "../lib/time";
 import { DEMO_SHEETS } from "./demo-sheets";
+import taltoRows from "./talto-scenarios.json";
+import { SYSTEMS } from "./systems";
+import { taltoRowToScenario } from "../lib/talto-scenarios";
 
 /** generated.json の logs はオブジェクト（Record）なので正しく扱う */
 const g = generated as unknown as {
@@ -13,13 +16,29 @@ const g = generated as unknown as {
   events?: Record<string, TableEvent>;
 };
 
+/** サンプルの招待リンクのトークン（e2e のデザイン検査でも開く） */
+export const DEMO_INVITE_TOKEN = "demoinvite0000000000000000000000yomatsuri";
+
 export function seedState(): State {
   const users: Record<string, User> = {};
-  g.users.forEach((u) => (users[u.id] = u));
+  // サンプルの人はみな ID（handle）を持つ。ID は uid の u_ を外したもの
+  g.users.forEach((u) => (users[u.id] = { ...u, handle: u.handle ?? u.id.replace(/^u_/, "") }));
   const tables: Record<string, Table> = {};
   g.tables.forEach((t) => (tables[t.id] = t));
+  // 招待リンクの見本: 自分（みかん）が入っていない夜祭班への招待。/join/<token> で開ける
+  if (tables.t_yomatsuri) {
+    tables.t_yomatsuri = {
+      ...tables.t_yomatsuri,
+      invite: { token: DEMO_INVITE_TOKEN, createdAt: "2026-11-20T12:00:00Z" },
+    };
+  }
   const scenarios: Record<string, Scenario> = {};
   g.scenarios.forEach((s) => (scenarios[s.id] = s));
+  // 一覧の量を実際に近づけるため、TALTO の公開シナリオ（scripts/fetch-talto-scenarios.ts）を足す。手書きの見本は上書きしない
+  taltoRows.forEach((row) => {
+    const sc = taltoRowToScenario(row, SYSTEMS);
+    scenarios[sc.id] ??= sc;
+  });
   const characters: Record<string, Character> = {};
   Object.values(g.characters).forEach((c) => {
     /* 共有は既定でオフ。キャラシから取り込んだサンプルは、そのサイトの JSON から作る */
@@ -46,7 +65,7 @@ export function seedState(): State {
         parts: [{ url: "https://www.youtube.com/watch?v=takufuDemo2", label: "Part2（休憩後）" }],
         spoiler: true,
         scope: "members",
-        startedAt: s02.t0,
+        startedAt: sessionStart(s02),
         chapters: [
           { at: 0, label: "導入・自己紹介" },
           { at: 1520, label: "漁村に到着" },
@@ -128,23 +147,5 @@ export const SAMPLE_LOG: Channel[] = JSON.parse(JSON.stringify(sampleSource.chan
 export const SAMPLE_SPEAKER_ICONS: Record<string, string> = JSON.parse(
   JSON.stringify(sampleSource.speakerIcons ?? {}),
 );
-
-function summarizeSample() {
-  const all = SAMPLE_LOG.flatMap((c) => c.msgs);
-  return {
-    file: "shokuidokoro_log.json",
-    msgs: all.length,
-    rolls: all.filter((m) => m.type === "roll").length,
-    notes: all.filter((m) => m.type === "note").length,
-    secretLines: SAMPLE_LOG.filter((c) => c.secret).reduce((a, c) => a + c.msgs.length, 0),
-    channels: SAMPLE_LOG.map((c) => `${c.name}${c.secret ? "(シークレット)" : ""}`),
-    speakers: [...new Set(all.map((m) => m.sp))].slice(0, 6),
-    duration: fmtDur(sessionMinutes(all[0].ts, all[all.length - 1].ts)),
-    dates: [...new Set(all.map((m) => jstDate(m.ts)))],
-    start: jstTime(all[0].ts),
-    end: jstTime(all[all.length - 1].ts),
-  };
-}
-export const SAMPLE_SUMMARY = summarizeSample();
 
 export type { Provider };

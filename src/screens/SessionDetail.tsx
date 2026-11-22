@@ -1,9 +1,9 @@
 import { useEffect, useEffectEvent, useMemo, useState } from "react";
+import { carriedDeltas } from "../lib/character-growth";
 import { Link, useNavigate, useParams, useSearchParam } from "../lib/router";
 import { useStore } from "../store";
 import {
   CopyBox,
-  DateList,
   EmptyState,
   Field,
   FieldError,
@@ -13,29 +13,24 @@ import {
   NotFound,
   PageHead,
   SCOPE_META,
+  ScopePicker,
   StatChange,
   SectionTitle,
-  Seg,
-  Select,
+  Combobox,
   SplitLayout,
+  SittingsInput,
   SysBadge,
-  TimeRange,
   Toggle,
   cx,
 } from "../components/ui";
-import { Avatar, CharAvatar, SpeakerConfigGrid } from "../components/identity";
+import { Avatar, CharAvatar, PlayerPicker, SpeakerConfigGrid } from "../components/identity";
 import { LogReaderBar, SessionTimeline, TimelineFilter, RecordingLinkContext } from "../components/timeline";
 import { SessionMediaSection, recordingLinksAt } from "../components/media";
 import { SYSTEMS } from "../data/systems";
-import {
-  buildSessionRange,
-  fmtDates,
-  fmtDur,
-  jstTime,
-  sessionClock,
-  sessionPlayMinutes,
-  uid,
-} from "../lib/time";
+import { roleLabel } from "../lib/roles";
+import { userHref } from "../lib/people";
+import { fmtDates, fmtDur, fmtSessionWhen, sessionDays, sessionPlayMinutes, uid } from "../lib/time";
+import { sittingToFields, sittingsFromFields, type SittingFields } from "../lib/sittings";
 import type { Character, Log, MsgKind, Scope } from "../types";
 import {
   IconBooks,
@@ -48,14 +43,12 @@ import {
   IconLink,
   IconLock,
   IconPencil,
-  IconPlus,
-  IconSearch,
   IconShare,
   IconTrash,
   IconUnlink,
   IconUpload,
   IconUserPlus,
-  IconUsersGroup,
+  IconTable,
   IconX,
 } from "../components/icons";
 import { buildReportCardSVG, svgDataUrl, downloadReportPNG, xIntentUrl } from "../external";
@@ -174,10 +167,7 @@ export default function SessionDetail() {
             <div className="meta text-ink">
               <span className="inline-flex items-center gap-1.5 tabular-nums">
                 <IconCalendarTime width={15} height={15} className="shrink-0 text-ink2" aria-hidden />
-                {fmtDates(log.dates)}
-                {log.dates.length > 1
-                  ? `（${log.dates.length}日間）`
-                  : ` ${jstTime(log.t0)}–${jstTime(log.t1)}`}
+                {fmtSessionWhen(log)}
               </span>
               {playMin > 0 && <span className="tabular-nums text-ink2">{fmtDur(playMin)}</span>}
             </div>
@@ -197,7 +187,7 @@ export default function SessionDetail() {
                   to={`/tables/${tb.id}`}
                   className="inline-flex items-center gap-1 transition-colors hover:text-primary"
                 >
-                  <IconUsersGroup width={14} height={14} className="shrink-0" aria-hidden />
+                  <IconTable width={14} height={14} className="shrink-0" aria-hidden />
                   {tb.name}
                 </Link>
               )}
@@ -395,6 +385,7 @@ export default function SessionDetail() {
                         </button>
                       </div>
                       <SpeakerConfigGrid
+                        systemId={log.systemId}
                         speakers={speakers}
                         speakerIcons={log.speakerIcons ?? {}}
                         state={state}
@@ -579,10 +570,12 @@ function ImpressionsSection({ log, isParticipant }: { log: Log; isParticipant: b
     const author = state.users[authorId]!;
     return (
       <div className="flex min-w-0 items-center gap-2">
-        <Link to={`/users/${author.id}`} className="truncate text-sm font-bold hover:text-primary">
+        <Link to={userHref(author)} className="truncate text-sm font-bold hover:text-primary">
           {author.name}
         </Link>
-        {authorId === log.ownerId && <span className="text-xs text-ink3">GM</span>}
+        {authorId === log.ownerId && (
+          <span className="text-xs text-ink3">{roleLabel(log.systemId, "GM")}</span>
+        )}
       </div>
     );
   };
@@ -712,7 +705,6 @@ function ImpressionsSection({ log, isParticipant }: { log: Log; isParticipant: b
 function MembersTab({ log }: { log: Log }) {
   const { state, update, authUser } = useStore();
   const [editingMembers, setEditingMembers] = useState(false);
-  const [q, setQ] = useState("");
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
@@ -736,10 +728,6 @@ function MembersTab({ log }: { log: Log }) {
     return map;
   }, [state.characters, log.systemId]);
   const ownerChars = kpChars.get(log.ownerId) ?? [];
-
-  const candidates = Object.values(state.users)
-    .filter((u) => !ids.includes(u.id))
-    .filter((u) => !q.trim() || u.name.includes(q.trim()));
 
   function addParticipant(uid2: string) {
     update((s) => {
@@ -766,13 +754,12 @@ function MembersTab({ log }: { log: Log }) {
 
   const isKpView = log.ownerId === state.me;
   const canEditAny = isKpView || Boolean(log.players[state.me]);
-  const sys = SYSTEMS[log.systemId];
 
+  // 増減は続く値（carry）だけ。HP・MP・幸運のように卓ごとに戻る値は出さない（P3）
   const deltaText = (delta: Record<string, { before: number; after: number }>) =>
-    Object.entries(delta).map(([k, d]) => {
-      const label = sys?.stats.find((x) => x.key === k)?.label ?? k.toUpperCase();
-      return <StatChange key={k} label={label} before={d.before} after={d.after} />;
-    });
+    carriedDeltas(log.systemId, delta).map((d) => (
+      <StatChange key={d.key} label={d.label} before={d.before} after={d.after} />
+    ));
 
   return (
     <section aria-label="参加者">
@@ -834,20 +821,20 @@ function MembersTab({ log }: { log: Log }) {
                       {kpChar.name}
                     </Link>
                   ) : (
-                    <Link to={`/users/${kpUser.id}`} className="font-bold hover:text-primary">
+                    <Link to={userHref(kpUser)} className="font-bold hover:text-primary">
                       {kpUser.name}
                     </Link>
                   )}
-                  <span className="text-xs font-semibold text-primary">GM</span>
+                  <span className="text-xs font-semibold text-primary">{roleLabel(log.systemId, "GM")}</span>
                   {kpLink?.hidden && <span className="text-xs text-ink3">共有ページでは非表示</span>}
                 </div>
-                {kpSessRec && (
+                {kpSessRec && carriedDeltas(log.systemId, kpSessRec.delta).length > 0 && (
                   <div className="meta mt-0.5 text-xs text-base-content">{deltaText(kpSessRec.delta)}</div>
                 )}
               </div>
               {kpChar && (
                 <Link
-                  to={`/users/${kpUser.id}`}
+                  to={userHref(kpUser)}
                   className="flex shrink-0 items-center gap-1.5 text-sm text-ink2 hover:text-base-content"
                 >
                   <Avatar u={kpUser} size={20} />
@@ -858,7 +845,7 @@ function MembersTab({ log }: { log: Log }) {
             {editingMembers && isKpView && kpLink && (
               <div className="mt-3 flex flex-wrap items-center gap-2 sm:pl-14">
                 <>
-                  <Select
+                  <Combobox
                     size="sm"
                     ariaLabel={`${kpUser.name}のキャラクター`}
                     className="w-56 max-w-full"
@@ -869,7 +856,7 @@ function MembersTab({ log }: { log: Log }) {
                       });
                     }}
                     options={[
-                      { value: "", label: "キャラクターなし（GMのみ）" },
+                      { value: "", label: `キャラクターなし（${roleLabel(log.systemId, "GM")}のみ）` },
                       ...ownerChars.map((c) => ({ value: c.id, label: c.name })),
                     ]}
                   />
@@ -917,7 +904,7 @@ function MembersTab({ log }: { log: Log }) {
                         {char.name}
                       </Link>
                     ) : (
-                      <Link to={`/users/${user.id}`} className="font-bold hover:text-primary">
+                      <Link to={userHref(user)} className="font-bold hover:text-primary">
                         {user.name}
                       </Link>
                     )}
@@ -929,13 +916,13 @@ function MembersTab({ log }: { log: Log }) {
                     )}
                     {p.hidden && <span className="text-xs text-ink3">共有ページでは非表示</span>}
                   </div>
-                  {sessRec && Object.keys(sessRec.delta).length > 0 && (
+                  {sessRec && carriedDeltas(log.systemId, sessRec.delta).length > 0 && (
                     <div className="meta mt-0.5 text-xs text-base-content">{deltaText(sessRec.delta)}</div>
                   )}
                 </div>
                 {char && (
                   <Link
-                    to={`/users/${user.id}`}
+                    to={userHref(user)}
                     className="flex shrink-0 items-center gap-1.5 text-sm text-ink2 hover:text-base-content"
                   >
                     <Avatar u={user} size={20} />
@@ -949,7 +936,7 @@ function MembersTab({ log }: { log: Log }) {
                 <div className="mt-3 flex flex-wrap items-center gap-2 sm:pl-14">
                   <>
                     {p.linked ? (
-                      <Select
+                      <Combobox
                         size="sm"
                         ariaLabel={`${user.name}のキャラクター`}
                         className="w-56 max-w-full"
@@ -1025,54 +1012,19 @@ function MembersTab({ log }: { log: Log }) {
           (isKpView ? (
             <div className="space-y-3 bg-base-200/40 px-4 py-4 sm:px-5">
               <h3 className="text-sm font-bold">参加者を追加</h3>
-              {log.tableId &&
-                state.tables[log.tableId]?.memberIds.some((member) => !ids.includes(member)) && (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="mr-1 text-xs text-ink2">{state.tables[log.tableId].name}のメンバー</span>
-                    {state.tables[log.tableId].memberIds
-                      .filter((m) => !ids.includes(m) && state.users[m])
-                      .map((m) => (
-                        <button key={m} className="btn btn-sm" onClick={() => addParticipant(m)}>
-                          <Avatar u={state.users[m]} size={18} />
-                          {state.users[m].name}
-                          <IconPlus width={14} height={14} className="opacity-60" />
-                        </button>
-                      ))}
-                  </div>
-                )}
-              <div className="relative">
-                <label className="input input-sm flex items-center gap-2">
-                  <IconSearch width={15} height={15} className="shrink-0 opacity-50" aria-hidden />
-                  <input
-                    className="min-w-0 grow"
-                    aria-label="参加者を検索"
-                    placeholder="ユーザー名で検索"
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                  />
-                </label>
-                {q && (
-                  <div className="list mt-1 max-h-48 overflow-y-auto rounded-lg border border-base-300 bg-base-100">
-                    {candidates.slice(0, 6).map((u) => (
-                      <button
-                        key={u.id}
-                        className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-base-200/60"
-                        onClick={() => {
-                          addParticipant(u.id);
-                          setQ("");
-                        }}
-                      >
-                        <Avatar u={u} size={24} />
-                        <span className="grow text-sm font-semibold">{u.name}</span>
-                        <span className="text-xs text-ink2">追加</span>
-                      </button>
-                    ))}
-                    {candidates.length === 0 && (
-                      <div className="px-3 py-2 text-sm text-ink2">見つかりません</div>
-                    )}
-                  </div>
-                )}
-              </div>
+              {/* 名前で人を探させない（P14）。候補は卓のメンバー。卓にいない人は下の招待リンクで */}
+              <PlayerPicker
+                state={state}
+                selected={[]}
+                onChange={(added) => added.forEach(addParticipant)}
+                exclude={ids}
+                tableId={log.tableId}
+                quickLabel={
+                  log.tableId && state.tables[log.tableId]
+                    ? `${state.tables[log.tableId]!.name}のメンバー`
+                    : "卓のメンバー"
+                }
+              />
               <div className="flex flex-wrap items-center gap-2 pt-1">
                 <span className="grow text-sm text-ink2">
                   卓譜にまだいない人には、招待リンクを送ってください。
@@ -1228,32 +1180,22 @@ function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
   const [title, setTitle] = useState(log.title);
   const [tableId, setTableId] = useState(log.tableId ?? "");
   const [scenarioId, setScenarioId] = useState(log.scenarioId ?? "");
-  const [dates, setDates] = useState<string[]>([...log.dates]);
-  const [startTime, setStartTime] = useState(sessionClock(log.t0, log.dates[0]));
-  const [endTime, setEndTime] = useState(sessionClock(log.t1, log.dates[log.dates.length - 1]));
-  const [error, setError] = useState<string | null>(null);
+  const [sittings, setSittings] = useState<SittingFields[]>(() => log.sittings.map(sittingToFields));
+  const [error, setError] = useState<{ index: number; text: string } | null>(null);
 
   function save() {
-    if (dates.some((date) => !/^\d{4}-\d{2}-\d{2}$/.test(date)) || new Set(dates).size !== dates.length) {
-      setError("実施日を重複しない日付で入力してください。");
+    const parsed = sittingsFromFields(sittings);
+    if (!parsed.ok) {
+      setError({ index: parsed.index, text: parsed.error });
       return;
     }
-    const sortedDates = [...dates].sort();
-    const range = buildSessionRange({ dates: sortedDates, startTime, endTime });
-    if (!range.ok) {
-      setError(range.error ?? "入力を確認してください");
-      return;
-    }
-    const { t0, t1 } = range;
     update((s) => {
       const l = s.logs[log.id];
       l.title = title.trim() || l.title;
       l.tableId = tableId || undefined;
       l.scenarioId = scenarioId || undefined;
       if (scenarioId && s.scenarios[scenarioId]) l.systemId = s.scenarios[scenarioId].systemId;
-      l.dates = sortedDates;
-      l.t0 = t0;
-      l.t1 = t1;
+      l.sittings = parsed.sittings;
     });
     onClose();
   }
@@ -1279,7 +1221,7 @@ function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
       </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
         <Field label="卓">
-          <Select
+          <Combobox
             className="w-full"
             ariaLabel="卓"
             value={tableId}
@@ -1291,28 +1233,26 @@ function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
           />
         </Field>
         <Field label="シナリオ">
-          <Select
+          <Combobox
             className="w-full"
             ariaLabel="シナリオ"
             value={scenarioId}
             onChange={setScenarioId}
             options={[
               { value: "", label: "選択しない" },
-              ...Object.values(state.scenarios).map((s) => ({ value: s.id, label: s.title })),
+              ...Object.values(state.scenarios).map((s) => ({
+                value: s.id,
+                label: s.title,
+                keywords: [s.author],
+              })),
             ]}
           />
         </Field>
       </div>
-      <Field label="実施日">
-        <DateList dates={dates} setDates={setDates} />
+      <Field label="遊んだ日時">
+        <SittingsInput rows={sittings} onChange={setSittings} invalidIndex={error?.index} />
       </Field>
-      <div className="mt-4">
-        <span className="text-sm font-semibold text-base-content/90">時刻（初日の開始〜最終日の終了）</span>
-        <div className="mt-1.5">
-          <TimeRange start={startTime} end={endTime} setStart={setStartTime} setEnd={setEndTime} />
-        </div>
-      </div>
-      <FieldError text={error} />
+      <FieldError text={error?.text} />
     </Modal>
   );
 }
@@ -1330,12 +1270,12 @@ export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => voi
       scenarioTitle: sc?.title,
       scenarioEmoji: sc?.emoji,
       title: log.title,
-      dateLabel: fmtDates(log.dates),
+      dateLabel: fmtDates(sessionDays(log)),
       systemName: SYSTEMS[log.systemId]?.name ?? "汎用・その他",
       playerCount: Object.keys(log.players).length,
       shareUrl,
     }),
-    [sc?.title, sc?.emoji, log.title, log.dates, log.systemId, log.players, shareUrl],
+    [sc?.title, sc?.emoji, log, shareUrl],
   );
   const cardSvg = useMemo(() => buildReportCardSVG(cardData), [cardData]);
 
@@ -1371,7 +1311,7 @@ export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => voi
             }}
           >
             {copiedLink ? <IconCheck width={16} height={16} /> : <IconLink width={16} height={16} />}
-            {copiedLink ? "コピーした" : "リンクをコピー"}
+            {copiedLink ? "コピーしました" : "リンクをコピー"}
           </button>
           <a className="btn btn-primary" href={xIntentUrl(cardData)} target="_blank" rel="noreferrer">
             <IconExternal width={14} height={14} /> Xで投稿
@@ -1407,10 +1347,6 @@ function ShareModal({
   const shareUrl = `${location.origin}/share/l/${log.slug}`;
 
   const isOwner = log.ownerId === state.me;
-  const options: { v: Scope; label: string }[] = (["members", "passed", "public"] as const).map((v) => ({
-    v,
-    label: SCOPE_META[v].label,
-  }));
 
   function setScope(v: Scope) {
     if (!isOwner) return;
@@ -1423,9 +1359,8 @@ function ShareModal({
     <Modal title="共有" onClose={onClose}>
       <h3 className="text-sm font-bold">読める人</h3>
       <div className="mt-2">
-        <Seg ariaLabel="読める人" value={log.scope} options={options} onChange={setScope} />
+        <ScopePicker ariaLabel="読める人" value={log.scope} onChange={setScope} />
       </div>
-      <p className="mt-2 text-sm text-ink2">{SCOPE_META[log.scope].hint}</p>
       {log.channels.some((c) => c.secret) && (
         <p className="mt-1 text-sm text-ink2">シークレットタブも、読める人にはそのまま表示されます。</p>
       )}

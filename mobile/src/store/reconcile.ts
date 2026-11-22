@@ -224,19 +224,7 @@ function mergeCharacter(
 }
 
 function mergePrefs(b: Prefs | undefined, l: Prefs, r: Prefs, recordConflict: (tag: string) => void): Prefs {
-  const merged = mergeScalarFields(b, l, r, new Set(["busyDates"]), (field) =>
-    recordConflict(`prefs.${field}`),
-  );
-  const bBusy = new Set(b?.busyDates ?? []);
-  const lBusy = new Set(l.busyDates ?? []);
-  const rBusy = new Set(r.busyDates ?? []);
-  const union = new Set([...rBusy, ...lBusy]);
-  const nextBusy = [...union]
-    .filter((d) => (!bBusy.has(d) ? lBusy.has(d) || rBusy.has(d) : lBusy.has(d) && rBusy.has(d)))
-    .sort();
-  if (nextBusy.length > 0) merged.busyDates = nextBusy;
-  else delete merged.busyDates;
-  return merged;
+  return mergeScalarFields(b, l, r, new Set(), (field) => recordConflict(`prefs.${field}`));
 }
 
 /**

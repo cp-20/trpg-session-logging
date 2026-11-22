@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BRAND_COLORS } from "../components/brand";
 import { buildReportCardSVG, reportTweetText, xIntentUrl, svgDataUrl } from "./index";
 
 describe("buildReportCardSVG", () => {
@@ -23,7 +24,7 @@ describe("buildReportCardSVG", () => {
     expect(svg).toContain("#fffdf9");
     expect(svg).toContain("#e2d7c5");
     expect(svg).toContain("#221c17");
-    expect(svg).toContain("#b84724");
+    expect(svg).toContain(BRAND_COLORS.tile);
   });
   it("エスケープされる(不正なタイトルでも壊れない)", () => {
     const svg = buildReportCardSVG({

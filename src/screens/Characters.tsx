@@ -9,22 +9,20 @@ import {
   LoadMore,
   Modal,
   PageHead,
-  Select,
+  Combobox,
+  MultiCombobox,
   SysBadge,
   cx,
   useVisibleCount,
 } from "../components/ui";
 import { CharAvatar } from "../components/identity";
 import { SheetView } from "../components/sheet";
-import { SYSTEMS, SYSTEM_LIST, carriedStats } from "../data/systems";
+import { SYSTEMS, SYSTEM_LIST } from "../data/systems";
 import { fmtDateShort, uid, todayStr } from "../lib/time";
-import {
-  importCharactersFromFiles,
-  importCharactersFromText,
-  toCharacterFields,
-  type CharacterImportResult,
-  type ParsedCharacter,
-} from "../lib/importers";
+import { recentSystemIds, systemOptions } from "../lib/system-options";
+import { cleanTags, tagOptions } from "../lib/tags";
+import { toCharacterFields, type ParsedCharacter } from "../lib/importers";
+import { carriedValues, currentCarriedValue } from "../lib/character-growth";
 import {
   EXTERNAL_PROVIDER_LABELS,
   SHEET_SITES,
@@ -33,39 +31,21 @@ import {
   extractArchetypeFromMemo,
 } from "../lib/external-sync";
 import type { Character, ExternalSyncConfig, ExternalSyncProvider } from "../types";
-import { IconLink, IconPlus, IconSearch, IconUpload } from "../components/icons";
+import { IconLink, IconPlus, IconSearch } from "../components/icons";
 
-const charMetaCache = new WeakMap<Character, { latestByKey: Map<string, number>; lastDate?: string }>();
+const lastPlayedCache = new WeakMap<Character, string | undefined>();
 
-function getCharMeta(c: Character) {
-  let hit = charMetaCache.get(c);
-  if (hit) return hit;
-  const latestByKey = new Map<string, { date: string; val: number }>();
-  let lastDate: string | undefined;
-  for (const s of c.sessions) {
-    if (!lastDate || s.date > lastDate) lastDate = s.date;
-    for (const [k, d] of Object.entries(s.delta)) {
-      if (d.after == null) continue;
-      const prev = latestByKey.get(k);
-      if (!prev || s.date >= prev.date) {
-        latestByKey.set(k, { date: s.date, val: d.after });
-      }
-    }
-  }
-  const valMap = new Map<string, number>();
-  for (const [k, v] of latestByKey) valMap.set(k, v.val);
-  hit = { latestByKey: valMap, lastDate };
-  charMetaCache.set(c, hit);
-  return hit;
-}
-
-/** セッション記録での最新値を優先し、なければキャラシートの値を返す */
+/** 卓をまたいで続く値（SAN など）の今の値。セッションの記録とキャラシのうち新しいほう */
 export function currentStat(c: Character, key: string): number | undefined {
-  return getCharMeta(c).latestByKey.get(key) ?? c.stats[key];
+  return currentCarriedValue(c, key);
 }
 
 export function lastPlayed(c: Character): string | undefined {
-  return getCharMeta(c).lastDate;
+  if (lastPlayedCache.has(c)) return lastPlayedCache.get(c);
+  let last: string | undefined;
+  for (const s of c.sessions) if (!last || s.date > last) last = s.date;
+  lastPlayedCache.set(c, last);
+  return last;
 }
 
 export type ExternalSheetResponse = {
@@ -102,8 +82,8 @@ export async function requestExternalSheet(url: string): Promise<ExternalSheetRe
 export const CharacterCard = memo(function CharacterCard({ c }: { c: Character }) {
   const sys = SYSTEMS[c.systemId];
   const last = lastPlayed(c);
-  /* カードには卓をまたいで続く値（SAN など）だけを出す。HP・MP は毎回戻るので出さない */
-  const stats = carriedStats(sys).filter((st) => currentStat(c, st.key) != null);
+  /* カードには卓をまたいで続く値（SAN など）だけを出す。続かない値（HP・幸運・共鳴など）は出さない */
+  const stats = carriedValues(c);
   return (
     <Link to={`/characters/${c.id}`} className="card-interactive overflow-hidden p-0">
       <div className="flex items-start gap-4 p-4">
@@ -117,7 +97,7 @@ export const CharacterCard = memo(function CharacterCard({ c }: { c: Character }
           <div className="meta mt-1 text-xs tabular-nums">
             {stats.map((st) => (
               <span key={st.key}>
-                {st.label} <b className="text-base-content">{currentStat(c, st.key)}</b>
+                {st.label} <b className="text-base-content">{st.value}</b>
               </span>
             ))}
             <span>{last ? `${fmtDateShort(last)} に遊んだ` : "まだ遊んでいない"}</span>
@@ -129,7 +109,19 @@ export const CharacterCard = memo(function CharacterCard({ c }: { c: Character }
 });
 
 const CHAR_PAGE_SIZE = 24;
-const SITE_NAMES = SHEET_SITES.map((s) => s.label).join("・");
+
+/** 読み込めるキャラシサイト。説明文ではなく名前の並びで見せる */
+function SheetSites({ className }: { className?: string }) {
+  return (
+    <ul aria-label="対応しているキャラシサイト" className={cx("meta justify-center", className)}>
+      {SHEET_SITES.map((site) => (
+        <li key={site.label} className="whitespace-nowrap">
+          {site.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export default function Characters() {
   const { state } = useStore();
@@ -170,8 +162,8 @@ export default function Characters() {
 
       {myChars.length === 0 ? (
         <div className="surface">
-          <EmptyState kind="first" title="キャラクターを登録しましょう" action={addButton}>
-            キャラシの URL を貼ると、能力値と技能をそのまま取り込みます。{SITE_NAMES}・いあきゃらに対応。
+          <EmptyState kind="first" title="キャラシの URL から取り込めます" action={addButton}>
+            <SheetSites />
           </EmptyState>
         </div>
       ) : (
@@ -190,17 +182,14 @@ export default function Characters() {
                 />
               </label>
               {usedSystems.size > 1 && (
-                <Select
+                <Combobox
                   ariaLabel="システムで絞り込む"
                   value={sys}
                   onChange={setSys}
                   className="sm:w-60"
                   options={[
                     { value: "all", label: "すべてのシステム" },
-                    ...SYSTEM_LIST.filter((x) => usedSystems.has(x.id)).map((x) => ({
-                      value: x.id,
-                      label: x.name,
-                    })),
+                    ...systemOptions(SYSTEM_LIST.filter((x) => usedSystems.has(x.id))),
                   ]}
                 />
               )}
@@ -255,32 +244,24 @@ export default function Characters() {
   );
 }
 
-/* ================= キャラクター取り込み ================= */
-type BatchPreviewItem = {
-  key: string;
-  selected: boolean;
-  sourceLabel: string;
-  fields: Partial<Character>;
-};
+/* ================= キャラクター取り込み（キャラシの URL だけ。P6） ================= */
 
 /** 取り込み結果を卓譜のキャラクター項目にする（紹介文には職業などの行を入れない） */
-function toPreviewCharacter(res: CharacterImportResult, sheetUrl?: string): Partial<Character> {
-  const fields = toCharacterFields(res.character, "general");
+function toPreviewCharacter(character: ParsedCharacter, sheetUrl: string): Partial<Character> {
+  const fields = toCharacterFields(character, "general");
   const sheet = fields.sheet ?? undefined;
   return {
     ...fields,
-    bio: bioFromMemo(res.character.memo),
-    archetype: extractArchetypeFromMemo(res.character.memo),
-    ...(sheet
-      ? { sheet: { ...sheet, ...(sheetUrl ? { url: sheetUrl } : {}), fetchedAt: new Date().toISOString() } }
-      : {}),
+    bio: bioFromMemo(character.memo),
+    archetype: extractArchetypeFromMemo(character.memo),
+    ...(sheet ? { sheet: { ...sheet, url: sheetUrl, fetchedAt: new Date().toISOString() } } : {}),
   };
 }
 
 function createCharacterRecord(
   fields: Partial<Character>,
   srcLabel: string,
-  externalSync: ExternalSyncConfig | null,
+  externalSync: ExternalSyncConfig,
 ): { id: string; char: Character } {
   const id = "ch_" + uid();
   const sysId = fields.systemId ?? "general";
@@ -308,7 +289,7 @@ function createCharacterRecord(
         includeSessions: true,
       },
       import: { source: srcLabel, importedAt: todayStr() },
-      ...(externalSync ? { externalSync } : {}),
+      externalSync,
       ...(fields.sheet ? { sheet: fields.sheet } : {}),
     },
   };
@@ -317,61 +298,22 @@ function createCharacterRecord(
 function ImportWizard({ onClose, onManual }: { onClose: () => void; onManual: () => void }) {
   const { update } = useStore();
   const nav = useNavigate();
-  const [mode, setMode] = useState<"url" | "file">("url");
   const [sheetUrl, setSheetUrl] = useState("");
   const [tried, setTried] = useState(false);
-  const [pasted, setPasted] = useState("");
-  const [fileName, setFileName] = useState<string | null>(null);
   const [parsing, setParsing] = useState(false);
   const [preview, setPreview] = useState<Partial<Character> | null>(null);
   const [systemKnown, setSystemKnown] = useState(true);
   const [pendingSync, setPendingSync] = useState<ExternalSyncConfig | null>(null);
-  const [batch, setBatch] = useState<BatchPreviewItem[] | null>(null);
-  const [sourceLabel, setSourceLabel] = useState<string>("取り込み");
+  const [sourceLabel, setSourceLabel] = useState<string>("キャラシ");
   const [error, setError] = useState<string | null>(null);
-  const [dragging, setDragging] = useState(false);
 
   const site = describeSheetUrl(sheetUrl);
   const looksComplete = /^https?:\/\/[^/\s]+\.[^/\s]+\/\S/.test(sheetUrl.trim());
   const showUrlError = site.state === "invalid" && (tried || looksComplete);
 
-  function showParsedList(results: CharacterImportResult[], pasteUrl?: string) {
-    if (results.length === 0) {
-      setError(
-        "キャラクターを読み取れませんでした。キャラシサイトの「ココフォリア駒出力」や書き出したファイルをお試しください。",
-      );
-      return;
-    }
-    setError(null);
-    setPendingSync(null);
-    if (results.length === 1) {
-      const only = results[0]!;
-      setBatch(null);
-      setSourceLabel(only.sourceLabel);
-      setSystemKnown(Boolean(only.character.systemId));
-      setPreview(toPreviewCharacter(only, pasteUrl));
-      return;
-    }
-    setPreview(null);
-    setBatch(
-      results.map((r, i) => ({
-        key: `imp-${i}`,
-        selected: true,
-        sourceLabel: r.sourceLabel,
-        fields: toPreviewCharacter(r),
-      })),
-    );
-  }
-
   async function fetchFromUrl() {
     setTried(true);
-    if (parsing) return;
-    if (site.state === "paste") {
-      showParsedList(importCharactersFromText(pasted).slice(0, 1), site.url);
-      if (pasted.trim()) setSourceLabel(site.label);
-      return;
-    }
-    if (site.state !== "ok") return;
+    if (parsing || site.state !== "ok") return;
     setParsing(true);
     setError(null);
     const data = await requestExternalSheet(site.url);
@@ -381,13 +323,13 @@ function ImportWizard({ onClose, onManual }: { onClose: () => void; onManual: ()
       return;
     }
     const label = data.providerLabel ?? EXTERNAL_PROVIDER_LABELS[data.provider];
+    const url = data.url ?? site.url;
     setSourceLabel(label);
-    setBatch(null);
     setSystemKnown(Boolean(data.character.systemId));
-    setPreview(toPreviewCharacter({ character: data.character, sourceLabel: label }, data.url ?? site.url));
+    setPreview(toPreviewCharacter(data.character, url));
     setPendingSync({
       provider: data.provider,
-      url: data.url ?? site.url,
+      url,
       lastSyncedAt: data.fetchedAt ?? new Date().toISOString(),
       lastStatus: "ok",
       contentHash: data.contentHash,
@@ -395,27 +337,8 @@ function ImportWizard({ onClose, onManual }: { onClose: () => void; onManual: ()
     });
   }
 
-  async function readFiles(files: FileList | File[] | null | undefined) {
-    const arr = files ? Array.from(files) : [];
-    if (arr.length === 0) return;
-    const totalSize = arr.reduce((sum, f) => sum + f.size, 0);
-    if (totalSize > 25 * 1024 * 1024) {
-      setError("合計 25MB 以下のファイルを選んでください。");
-      return;
-    }
-    setParsing(true);
-    setError(null);
-    try {
-      showParsedList(await importCharactersFromFiles(arr));
-    } catch {
-      setError("ファイルを読み取れませんでした。書き出し直したファイルでお試しください。");
-    } finally {
-      setParsing(false);
-    }
-  }
-
-  function saveSingle() {
-    if (!preview?.name?.trim()) {
+  function save() {
+    if (!preview?.name?.trim() || !pendingSync) {
       setError("キャラクターの名前を読み取れませんでした。");
       return;
     }
@@ -428,53 +351,19 @@ function ImportWizard({ onClose, onManual }: { onClose: () => void; onManual: ()
     nav({ to: `/characters/${id}` });
   }
 
-  function saveBatch() {
-    if (!batch) return;
-    const targets = batch.filter((b) => b.selected && b.fields.name?.trim());
-    if (targets.length === 0) {
-      setError("取り込むキャラクターを 1 件以上選んでください。");
-      return;
-    }
-    update((state) => {
-      for (const item of targets) {
-        const { id, char } = createCharacterRecord(item.fields, item.sourceLabel, null);
-        char.ownerId = state.me;
-        state.characters[id] = char;
-      }
-    });
-    onClose();
-  }
-
   function back() {
     setPreview(null);
-    setBatch(null);
     setPendingSync(null);
     setError(null);
   }
-
-  const urlPrimaryDisabled = parsing || (site.state === "paste" ? !pasted.trim() : !sheetUrl.trim());
 
   const foot = preview ? (
     <>
       <button type="button" className="btn btn-quiet" onClick={back}>
         戻る
       </button>
-      <button type="button" className="btn btn-primary" onClick={saveSingle}>
+      <button type="button" className="btn btn-primary" onClick={save}>
         取り込む
-      </button>
-    </>
-  ) : batch ? (
-    <>
-      <button type="button" className="btn btn-quiet" onClick={back}>
-        戻る
-      </button>
-      <button
-        type="button"
-        className="btn btn-primary"
-        disabled={batch.filter((b) => b.selected).length === 0}
-        onClick={saveBatch}
-      >
-        {batch.filter((b) => b.selected).length}件を取り込む
       </button>
     </>
   ) : (
@@ -482,25 +371,14 @@ function ImportWizard({ onClose, onManual }: { onClose: () => void; onManual: ()
       <button type="button" className="btn btn-quiet" onClick={onClose}>
         キャンセル
       </button>
-      {mode === "url" ? (
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={urlPrimaryDisabled}
-          onClick={fetchFromUrl}
-        >
-          {parsing ? "読み込み中…" : "読み込む"}
-        </button>
-      ) : (
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={parsing || !pasted.trim()}
-          onClick={() => showParsedList(importCharactersFromText(pasted))}
-        >
-          内容を確認
-        </button>
-      )}
+      <button
+        type="button"
+        className="btn btn-primary"
+        disabled={parsing || !sheetUrl.trim()}
+        onClick={fetchFromUrl}
+      >
+        {parsing ? "読み込み中…" : "読み込む"}
+      </button>
     </>
   );
 
@@ -513,39 +391,7 @@ function ImportWizard({ onClose, onManual }: { onClose: () => void; onManual: ()
           systemKnown={systemKnown}
           onSystem={(v) => setPreview({ ...preview, systemId: v })}
         />
-      ) : batch ? (
-        <div>
-          <p className="mb-3 text-sm text-ink2">
-            {batch.length}件のキャラクターを読み取りました。取り込むものを選んでください。
-          </p>
-          <ul className="list rounded-box border border-base-300">
-            {batch.map((item) => (
-              <li key={item.key} className="flex items-center gap-3 px-3.5 py-2.5 text-sm">
-                <input
-                  type="checkbox"
-                  className="checkbox checkbox-primary checkbox-sm"
-                  aria-label={`${item.fields.name ?? "キャラクター"}を取り込む`}
-                  checked={item.selected}
-                  onChange={(e) =>
-                    setBatch((prev) =>
-                      prev
-                        ? prev.map((x) => (x.key === item.key ? { ...x, selected: e.target.checked } : x))
-                        : null,
-                    )
-                  }
-                />
-                <div className="min-w-0 flex-1">
-                  <b className="block truncate">{item.fields.name}</b>
-                  <span className="meta text-xs">
-                    <SysBadge sys={SYSTEMS[item.fields.systemId ?? "general"]} />
-                    <span>{item.sourceLabel}</span>
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : mode === "url" ? (
+      ) : (
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -589,119 +435,18 @@ function ImportWizard({ onClose, onManual }: { onClose: () => void; onManual: ()
             ) : site.state === "ok" ? (
               <p className="text-ink2">
                 <b className="font-medium text-base-content">{site.label}</b>
-                のキャラシとして読み込みます
               </p>
-            ) : site.state === "paste" ? (
-              <p className="leading-relaxed">{site.message}</p>
             ) : (
-              <p className="text-ink2">{SITE_NAMES} の URL に対応</p>
+              <SheetSites className="!justify-start" />
             )}
           </div>
 
-          {site.state === "paste" && (
-            <div>
-              <Field label="ココフォリア駒出力">
-                <textarea
-                  className="textarea textarea-bordered w-full font-mono text-sm"
-                  rows={5}
-                  value={pasted}
-                  onChange={(event) => {
-                    setPasted(event.target.value);
-                    setError(null);
-                  }}
-                  placeholder='{"kind":"character","data":{…}}'
-                />
-              </Field>
-            </div>
-          )}
-
-          <div className="mt-6 flex flex-wrap items-center gap-x-1 gap-y-2 border-t border-base-300 pt-4 text-sm">
-            <span className="mr-2 text-ink2">URL がないときは</span>
+          <div className="mt-6 border-t border-base-300 pt-4">
             <button type="button" className="btn btn-quiet btn-sm" onClick={onManual}>
-              <IconPlus width={16} height={16} /> 手入力で作る
-            </button>
-            <button
-              type="button"
-              className="btn btn-quiet btn-sm"
-              onClick={() => {
-                setMode("file");
-                setError(null);
-              }}
-            >
-              <IconUpload width={16} height={16} /> ファイル・コマから読む
+              <IconPlus width={16} height={16} /> キャラシなしで作る
             </button>
           </div>
         </form>
-      ) : (
-        <>
-          <label
-            htmlFor="character-file"
-            className={cx("drop block cursor-pointer !py-8", dragging && "hot", parsing && "opacity-60")}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragging(false);
-              const files = event.dataTransfer.files;
-              if (files.length === 1) setFileName(files[0]!.name);
-              else if (files.length > 1) setFileName(`${files.length} 件のファイル`);
-              void readFiles(files);
-            }}
-          >
-            <IconUpload width={28} height={28} className="mx-auto text-ink2" aria-hidden />
-            <span className="mt-3 block font-bold">ファイルを選ぶ・ここにドロップ</span>
-            <span className="mt-1 block text-sm text-ink2">
-              {fileName ?? "キャラッシュ・ココフォリア・ユドナリウムなどから書き出したファイル（複数可）"}
-            </span>
-            <input
-              id="character-file"
-              type="file"
-              multiple
-              className="sr-only"
-              accept=".json,.txt,.xml,.zip"
-              disabled={parsing}
-              onChange={(event) => {
-                const files = event.target.files;
-                if (files && files.length === 1) setFileName(files[0]!.name);
-                else if (files && files.length > 1) setFileName(`${files.length} 件のファイル`);
-                void readFiles(files);
-                event.target.value = "";
-              }}
-            />
-          </label>
-          {parsing && (
-            <div className="mt-3">
-              <InlineNotice tone="pending" text="読み込み中…" />
-            </div>
-          )}
-          <Field label="またはコマ・キャラシの内容を貼り付け">
-            <textarea
-              className="textarea textarea-bordered w-full font-mono text-sm"
-              rows={5}
-              value={pasted}
-              onChange={(event) => {
-                setPasted(event.target.value);
-                setError(null);
-              }}
-              placeholder="ココフォリア駒出力、いあきゃら・エモクロアのテキスト出力など"
-            />
-          </Field>
-          <div className="mt-4">
-            <button
-              type="button"
-              className="btn btn-quiet btn-sm"
-              onClick={() => {
-                setMode("url");
-                setError(null);
-              }}
-            >
-              <IconLink width={16} height={16} /> URL から取り込む
-            </button>
-          </div>
-        </>
       )}
       {error && (
         <p role="alert" className="mt-3 text-sm text-error">
@@ -747,12 +492,12 @@ function ImportPreview({
       </div>
       {!systemKnown && (
         <Field label="システム">
-          <Select
+          <Combobox
             ariaLabel="システム"
             className="w-full"
             value={preview.systemId ?? "general"}
             onChange={onSystem}
-            options={SYSTEM_LIST.map((system) => ({ value: system.id, label: system.name }))}
+            options={systemOptions()}
           />
         </Field>
       )}
@@ -761,9 +506,6 @@ function ImportPreview({
           <SheetView sheet={preview.sheet} systemId={preview.systemId ?? "general"} compact />
         </div>
       ) : null}
-      <p className="mt-4 text-sm text-ink2">
-        名前・能力値・技能はキャラシの内容のまま入ります。直すときはキャラシ側で直して、キャラクターのページで更新してください。
-      </p>
     </>
   );
 }
@@ -774,11 +516,16 @@ interface NewCharFormValues {
   systemId: string;
   archetype: string;
   bio: string;
-  tags: string;
+  tags: string[];
 }
 
 function NewCharModal({ onClose }: { onClose: () => void }) {
-  const { update } = useStore();
+  const { state, update } = useStore();
+  const recentSystems = useMemo(() => recentSystemIds(Object.values(state.logs)), [state.logs]);
+  const tagSuggestions = useMemo(
+    () => tagOptions(Object.values(state.characters).filter((x) => x.ownerId === state.me)),
+    [state.characters, state.me],
+  );
   const nav = useNavigate();
   const {
     register,
@@ -792,7 +539,7 @@ function NewCharModal({ onClose }: { onClose: () => void }) {
       systemId: "coc7",
       archetype: "",
       bio: "",
-      tags: "",
+      tags: [],
     },
   });
 
@@ -809,10 +556,7 @@ function NewCharModal({ onClose }: { onClose: () => void }) {
         archetype:
           values.archetype.trim() || `${SYSTEMS[values.systemId]?.name ?? "汎用・その他"}のキャラクター`,
         bio: values.bio.trim(),
-        tags: values.tags
-          .split(/[,、]/)
-          .map((t) => t.trim())
-          .filter(Boolean),
+        tags: cleanTags(values.tags),
         stats,
         sessions: [],
         growth: [],
@@ -833,7 +577,7 @@ function NewCharModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal
-      title="手入力で作る"
+      title="キャラシなしで作る"
       onClose={onClose}
       foot={
         <>
@@ -874,12 +618,13 @@ function NewCharModal({ onClose }: { onClose: () => void }) {
                 name="systemId"
                 control={control}
                 render={({ field }) => (
-                  <Select
+                  <Combobox
                     ariaLabel="システム"
                     className="w-full"
                     value={field.value}
                     onChange={field.onChange}
-                    options={SYSTEM_LIST.map((s) => ({ value: s.id, label: s.name }))}
+                    options={systemOptions()}
+                    pinned={recentSystems}
                   />
                 )}
               />
@@ -894,8 +639,21 @@ function NewCharModal({ onClose }: { onClose: () => void }) {
         <Field label="ひとこと紹介">
           <textarea className="textarea textarea-bordered w-full text-sm" {...register("bio")} />
         </Field>
-        <Field label="タグ（カンマ区切り）">
-          <input className="input input-bordered w-full" placeholder="例: 継続, 学生" {...register("tags")} />
+        <Field label="タグ">
+          <Controller
+            name="tags"
+            control={control}
+            render={({ field }) => (
+              <MultiCombobox
+                ariaLabel="タグ"
+                className="w-full"
+                values={field.value}
+                onChange={field.onChange}
+                options={tagSuggestions}
+                placeholder="タグを探すか、新しく追加"
+              />
+            )}
+          />
         </Field>
       </form>
     </Modal>

@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { todayStr } from "@shared/lib/time";
+import { userHref } from "@shared/lib/people";
 import { ScreenShell } from "../components/ScreenShell";
+import { DiscordAccountRow } from "../components/DiscordAccountRow";
 import { Avatar, ProviderIcon } from "../components/identity";
 import { IconBell, IconDownload, IconFingerprint, IconRefresh, IconUpload } from "../components/icons";
 import {
@@ -29,6 +31,7 @@ import {
 import { shareJsonBackupFile } from "../native/native-share";
 import { useMobileStore } from "../store/mobile-store";
 import { useTheme, type ThemeMode } from "../theme/ThemeProvider";
+import { userFacingError } from "@shared/lib/user-error";
 
 export default function SettingsScreen() {
   const { tokens } = useTheme();
@@ -104,7 +107,7 @@ export default function SettingsScreen() {
       else exitDemo();
       router.replace("/sign-in");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "サインアウトできませんでした。");
+      setError(userFacingError(cause, "サインアウトできませんでした。"));
     } finally {
       setBusy(false);
     }
@@ -118,7 +121,7 @@ export default function SettingsScreen() {
       importData(imported);
       hapticSuccess();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "ファイルを読み込めませんでした。");
+      setError(userFacingError(cause, "ファイルを読み込めませんでした。"));
     }
   }
 
@@ -141,11 +144,7 @@ export default function SettingsScreen() {
                     {authUser ? me.email || google?.displayName : "サンプルデータでお試し中"}
                   </Text>
                 </View>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onPress={() => router.push(`/users/${state.me}` as never)}
-                >
+                <Button size="sm" variant="secondary" onPress={() => router.push(userHref(me) as never)}>
                   プロフィール
                 </Button>
               </View>
@@ -160,6 +159,8 @@ export default function SettingsScreen() {
                   </Button>
                 </SettingRow>
               )}
+
+              <DiscordAccountRow />
 
               <SettingRow
                 icon={<ProviderIcon provider="x" size={26} />}

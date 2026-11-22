@@ -18,7 +18,7 @@ void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function AppNavigator() {
   const { tokens, isDark } = useTheme();
-  const { state, authUser, authReady } = useMobileStore();
+  const { state, authUser, authReady, syncStatus } = useMobileStore();
   const segments = useSegments();
   const pathname = usePathname();
   const router = useRouter();
@@ -36,12 +36,22 @@ function AppNavigator() {
     const isPublicRoute = topSeg === "share" || topSeg === "invite" || topSeg === "sign-in";
     const entered = Boolean(authUser) || state.entered;
 
+    // ログインした人がまだユーザー ID を決めていなければ、はじめの設定に送る（P15）。
+    // 保存先の記録を読み終えてから確かめる（読む前の空の記録で送らない）
+    const needsWelcome =
+      Boolean(authUser) &&
+      state.me === authUser?.uid &&
+      syncStatus === "synced" &&
+      !state.users[state.me]?.handle;
+
     if (!entered && !isPublicRoute) {
       router.replace("/sign-in");
+    } else if (needsWelcome && (topSeg as string) !== "welcome" && !isPublicRoute) {
+      router.replace("/welcome" as never);
     } else if (entered && pathname === "/sign-in") {
       router.replace("/");
     }
-  }, [authReady, authUser, state.entered, segments, pathname, router]);
+  }, [authReady, authUser, state.entered, state.me, state.users, syncStatus, segments, pathname, router]);
 
   /* 確定予定・未記録リマインダー通知の更新 */
   useEffect(() => {
@@ -98,6 +108,7 @@ function AppNavigator() {
       >
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="sign-in" />
+        <Stack.Screen name="welcome" options={{ gestureEnabled: false }} />
         <Stack.Screen name="upload" />
         <Stack.Screen name="settings" />
         <Stack.Screen name="sessions/[id]" />

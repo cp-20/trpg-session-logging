@@ -57,7 +57,8 @@ export const RIGHTS_ORDER: readonly RightsHolderId[] = ["cthulhu", "sword-world"
 
 /**
  * システム ID ごとの権利者。権利表記が要らないシステムは null。
- * システムを足したら、ここに必ず決定を足す（単体テストで漏れを検出する）。
+ * 能力値・技能まで持つシステム（DETAILED_SYSTEM_IDS）を足したら、ここに必ず決定を足す（単体テストで漏れを検出する）。
+ * BCDice の一覧から作った汎用のシステムは、権利者の表示例を確かめたものだけを書く。書かないものは表記を出さない。
  */
 export const SYSTEM_RIGHTS: Record<string, RightsHolderId | null> = {
   coc7: "cthulhu",
@@ -66,6 +67,10 @@ export const SYSTEM_RIGHTS: Record<string, RightsHolderId | null> = {
   emoklore: "emoklore",
   madamis: null,
   general: null,
+  // 『クトゥルフ神話TRPG』シリーズの日本語版（KADOKAWA）
+  PulpCthulhu: "cthulhu",
+  // 表示例が「ソード・ワールド2.0/2.5」を対象にしている
+  "SwordWorld2.0": "sword-world",
 };
 
 /**
@@ -86,7 +91,7 @@ export function rightsNoticesFor(systemIds?: Iterable<string | undefined>): Righ
   if (!systemIds) return RIGHTS_ORDER.map((id) => RIGHTS_NOTICES[id]);
   const wanted = new Set<RightsHolderId>();
   for (const sid of systemIds) {
-    const holder = sid ? SYSTEM_RIGHTS[sid] : null;
+    const holder = sid ? (SYSTEM_RIGHTS[sid] ?? null) : null;
     if (holder) wanted.add(holder);
   }
   return RIGHTS_ORDER.filter((id) => wanted.has(id)).map((id) => RIGHTS_NOTICES[id]);

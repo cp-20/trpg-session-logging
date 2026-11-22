@@ -44,9 +44,7 @@ function makeLog(extra?: Partial<Log>): Log {
     hasLog: true,
     players: {},
     createdAt: "2026-11-17T00:00:00",
-    dates: ["2026-11-17"],
-    t0: 1,
-    t1: 4,
+    sittings: [{ start: 1, end: 4 }],
     slug: "l1",
     channels: [
       {

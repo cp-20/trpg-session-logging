@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { View } from "react-native";
 import { useRouter } from "expo-router";
-import { SYSTEMS, SYSTEM_LIST } from "@shared/data/systems";
+import { SYSTEMS } from "@shared/data/systems";
+import { recentSystemIds, systemOptions } from "@shared/lib/system-options";
 import { uid } from "@shared/lib/time";
 import type { Scenario } from "@shared/types";
 import { ScreenShell } from "../../components/ScreenShell";
-import { Button, Field, FieldError, PageHead, Select, Surface, TextField } from "../../components/ui";
+import { Button, Combobox, Field, FieldError, PageHead, Surface, TextField } from "../../components/ui";
 import { hapticSuccess } from "../../native/haptics";
 import { useMobileStore } from "../../store/mobile-store";
 import { DEFAULT_SCENARIO_BG } from "../../theme/tokens";
@@ -19,7 +20,7 @@ function sourceFromUrl(url: string): Scenario["source"] {
 }
 
 export default function NewScenarioScreen() {
-  const { update } = useMobileStore();
+  const { state, update } = useMobileStore();
   const router = useRouter();
 
   const [title, setTitle] = useState("");
@@ -43,7 +44,6 @@ export default function NewScenarioScreen() {
         systemId,
         source: sourceFromUrl(sourceUrl),
         sourceUrl: sourceUrl.trim() || undefined,
-        policy: "public",
         emoji: SYSTEMS[systemId]?.emoji ?? "汎用",
         bg: DEFAULT_SCENARIO_BG,
         tags: [],
@@ -76,11 +76,12 @@ export default function NewScenarioScreen() {
           <TextField value={author} onChangeText={setAuthor} />
         </Field>
         <Field label="システム">
-          <Select
+          <Combobox
             ariaLabel="システム"
             value={systemId}
             onChange={setSystemId}
-            options={SYSTEM_LIST.map((s) => ({ value: s.id, label: s.name }))}
+            options={systemOptions()}
+            pinned={recentSystemIds(Object.values(state.logs))}
           />
         </Field>
         <Field label="配布ページ URL（任意）">

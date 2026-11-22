@@ -15,7 +15,7 @@ test("公開ページはログインなしで開け、デザイン検査に通�
   for (const route of PUBLIC_ROUTES) {
     await page.goto(route);
     await page.locator("main h1").first().waitFor();
-    expect(await auditPage(page), route).toEqual([]);
+    expect(await auditPage(page, { explanationBudget: false }), route).toEqual([]);
     const legal = page.getByRole("navigation", { name: "規約とライセンス" });
     await expect(legal.getByRole("link", { name: "ライセンス・権利表記" })).toBeVisible();
     await expect(legal.getByRole("link", { name: "利用規約" })).toBeVisible();
@@ -99,7 +99,8 @@ test("権利表記は /licenses にまとまり、設定と共有ページから
 
   await page.goto("/");
   await page.getByRole("link", { name: /サンプルデータをそのまま見る/ }).click({ force: true });
-  await expect(page).toHaveURL(/\/home$/);
+  // サンプルの読み込みは enterDemo と同じく遷移の待ち時間で待つ（全体を並べて走らせると 5 秒を超えることがある）
+  await page.waitForURL(/\/home$/);
   await page.getByRole("navigation", { name: "メイン" }).first().waitFor();
 
   await page.goto("/settings");

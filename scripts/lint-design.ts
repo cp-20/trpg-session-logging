@@ -14,6 +14,10 @@ const SOURCE_EXT_RE = /\.(?:ts|tsx|css)$/;
 const RAW_SELECT_RE = /<select(?![A-Za-z0-9_-])/;
 const MICRO_FONT_RE = /text-\[(?:8|9|10|11|12|13|14|15|16)(?:\.\d+)?px\]/;
 const REMOVED_POLICY_RE = /\b(?:POLICY_LABEL|POLICY_HINT)\b/;
+// 「予定のある日」を手で入れる機能はやめた（2026-11-22）。照らし合わせは許可した Google カレンダーの時間帯だけ。
+// 古い保存データから消す移行（state-schema）だけが名前を使ってよい
+const REMOVED_MANUAL_BUSY_RE = /\bprefs\??\.busyDates\b|\bbusyDates\?\s*:/;
+const isBusyMigration = (rel: string) => /^src\/lib\/state-schema(?:\.test)?\.ts$/.test(rel);
 const MEANINGLESS_ICON_RE = /\b(?:IconSparkles|IconWand)\b/;
 const TOAST_CALL_RE = /\btoast\s*\(/;
 // 文字色の不透明度が 0.65 未満だと base-200 上で 4.5:1 を割る（2026-11-21 axe で発見）
@@ -65,6 +69,8 @@ const ADHOC_DELTA_RE = /`\+\$\{|["']\+["']\s*\+|["']\u2212["']\s*\+|`\u2212\$\{|
 const SIDE_STRIPE_RE = /(?:^|\s|")border-l-(?:[2-8]|\[\d+px\])(?=\s|"|$)/;
 // 自明な説明（〜できます。）を書かない
 const SELF_EVIDENT_RE = /できます。/;
+// 操作の一時表示も敬体（P12。「コピーした」→「コピーしました」、2026-11-21・11-22 に再発）
+const PLAIN_DONE_RE = /["'`>](?:コピー|保存|送信|追加|登録|作成|削除)した["'`<]/;
 // 共通部品と同じ役割の部品を画面側で作らない（ui.tsx / identity.tsx にあるものを使う）
 const RESERVED_PRIMITIVES = [
   "DateBlock",
@@ -75,8 +81,9 @@ const RESERVED_PRIMITIVES = [
   "SettingRow",
   "FormRow",
   "PanelHead",
-  "DateList",
-  "TimeRange",
+  "SittingsInput",
+  "ScopePicker",
+  "Seal",
   "Menu",
   "OverflowMenu",
   "HoverCard",
@@ -282,6 +289,14 @@ function checkSrcRules(violations: Violation[]): void {
           message: "Reference to removed POLICY_LABEL or POLICY_HINT is disallowed.",
         });
       }
+      if (!isBusyMigration(rel) && REMOVED_MANUAL_BUSY_RE.test(line)) {
+        violations.push({
+          file: rel,
+          line: lineNumber,
+          message:
+            "Manual busy days (prefs.busyDates) were removed; use the consented Google busy ranges (googleBusy).",
+        });
+      }
 
       if (isComponentOrPage && !isIconsFile && MEANINGLESS_ICON_RE.test(line)) {
         violations.push({
@@ -444,6 +459,13 @@ function checkSrcRules(violations: Violation[]): void {
             line: lineNumber,
             message:
               "Self-evident explanation (〜できます。) is disallowed; let the control speak for itself.",
+          });
+        }
+        if (PLAIN_DONE_RE.test(line)) {
+          violations.push({
+            file: rel,
+            line: lineNumber,
+            message: "Plain-form status text (〜した); use the polite form (〜しました) — P12.",
           });
         }
         if (!isPrimitiveFile && RESERVED_DEF_RE.test(line)) {
@@ -723,6 +745,14 @@ function checkMobileSrcRules(violations: Violation[]): void {
           message: "Reference to removed POLICY_LABEL or POLICY_HINT is disallowed.",
         });
       }
+      if (!isBusyMigration(rel) && REMOVED_MANUAL_BUSY_RE.test(line)) {
+        violations.push({
+          file: rel,
+          line: lineNumber,
+          message:
+            "Manual busy days (prefs.busyDates) were removed; use the consented Google busy ranges (googleBusy).",
+        });
+      }
 
       if (MASK_FILTER_RE.test(line) && !isTest) {
         violations.push({
@@ -815,6 +845,13 @@ function checkMobileSrcRules(violations: Violation[]): void {
             line: lineNumber,
             message:
               "Self-evident explanation (〜できます。) is disallowed; let the control speak for itself.",
+          });
+        }
+        if (isComponentOrScreen && PLAIN_DONE_RE.test(line)) {
+          violations.push({
+            file: rel,
+            line: lineNumber,
+            message: "Plain-form status text (〜した); use the polite form (〜しました) — P12.",
           });
         }
 
@@ -928,6 +965,381 @@ function checkPublicPagesStayLight(violations: Violation[]): void {
   }
 }
 
+/** ファイル全体の文字位置から行番号を出す（複数行にまたがる正規表現の検査用） */
+function lineAt(text: string, index: number): number {
+  return text.slice(0, index).split("\n").length;
+}
+
+function uiSourceFiles(): string[] {
+  return ["src/screens", "src/components", "src/app", "mobile/src/app", "mobile/src/components"].flatMap(
+    (d) => walkFiles(path.join(ROOT_DIR, d)).filter((f) => /\.tsx?$/.test(f) && !/\.(?:test|spec)\./.test(f)),
+  );
+}
+
+// 多い・増えうる選択肢（システム・技能・シナリオ・人・キャラクター・卓）。これを Select の options に使わない（P7）
+const GROWING_OPTIONS_RE =
+  /SYSTEM_LIST|\bSYSTEMS\b|systemOptions|\bskills?\b|[sS]cenario|[uU]sers\b|userList|\bpeople\b|\bmembers\b|[cC]hars\b|[cC]haracters\b|charList|[lL]inkOptions|[iI]conOptions|[tT]ables\b|[tT]ableOptions|sysOptions|\brecent\b/;
+
+/**
+ * lint:combobox-for-growing-options
+ * 多い・増えうる選択肢を Select（決まった少数のための部品）で選ばせない。Combobox / MultiCombobox を使う
+ */
+function checkComboboxForGrowingOptions(violations: Violation[]): void {
+  for (const filePath of uiSourceFiles()) {
+    const rel = toRel(filePath);
+    const text = fs.readFileSync(filePath, "utf8");
+    for (const m of text.matchAll(/<Select\b/g)) {
+      const start = m.index ?? 0;
+      const end = text.indexOf("/>", start);
+      const tag = text.slice(start, end < 0 ? undefined : end);
+      const opts = /\boptions=\{([\s\S]*)$/.exec(tag)?.[1] ?? "";
+      if (GROWING_OPTIONS_RE.test(opts)) {
+        violations.push({
+          file: rel,
+          line: lineAt(text, start),
+          message:
+            "combobox-for-growing-options: options derive from a growing list (systems/skills/scenarios/users/characters/tables); use <Combobox> (or <MultiCombobox>) instead of <Select>.",
+        });
+      }
+    }
+  }
+}
+
+// 複数の値をカンマ・読点区切りの文字で受けさせる文言
+const COMMA_COPY_RE = /カンマ|コンマ|[「『][,，、][」』]\s*(?:で|区切)|[,，、]\s*区切り|読点(?:か|で|区切)/;
+// フォームの値をカンマ・読点で分ける（values.tags.split(/[,、]/) など。改行をまたいでも拾う）
+const COMMA_SPLIT_RE =
+  /\b(?:values|getValues\([^)]*\)|watch\([^)]*\)|field\.value|form\.\w+)(?:\??\.\w+)*\s*\??\.split\(\s*(?:["'`][,，、]["'`]|\/\[?[^/\]\n]*[,，、][^/\n]*\/)/g;
+
+/**
+ * lint:comma-separated-input
+ * 複数の値（タグ・キーワード）をカンマ区切りの文字入力で受けない。MultiCombobox を使う
+ */
+function checkCommaSeparatedInput(violations: Violation[]): void {
+  for (const filePath of uiSourceFiles()) {
+    const rel = toRel(filePath);
+    if (rel.startsWith("src/app/api/")) continue;
+    const text = fs.readFileSync(filePath, "utf8");
+    text.split(/\r?\n/).forEach((line, i) => {
+      if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return;
+      if (COMMA_COPY_RE.test(line)) {
+        violations.push({
+          file: rel,
+          line: i + 1,
+          message:
+            "comma-separated-input: UI copy asks for comma-separated values; use <MultiCombobox> (tokens) instead of a text field.",
+        });
+      }
+    });
+    for (const m of text.matchAll(COMMA_SPLIT_RE)) {
+      violations.push({
+        file: rel,
+        line: lineAt(text, m.index ?? 0),
+        message:
+          "comma-separated-input: a form value is split on commas; keep multiple values as string[] and edit them with <MultiCombobox>.",
+      });
+    }
+  }
+}
+
+// 頭文字の文字アイコン（name[0]・charAt(0)・slice(0, 1)・Array.from(name)[0] など）
+const LETTER_AVATAR_RES = [
+  // 複数形（fileNames[0] など配列の先頭）は名前の頭文字ではないので除く
+  /\b\w*[nN]ame(?!s\b)\w*(?:\??\.trim\(\))?\??\.(?:charAt\(0\)|slice\(0,\s*1\)|substring\(0,\s*1\)|at\(0\))/,
+  /\b\w*[nN]ame(?!s\b)\w*(?:\.trim\(\))?\[0\]/,
+  /Array\.from\(\s*[\w.?]*[nN]ame[\w.?()]*\)\??\[0\]/,
+  /\[\.\.\.[^\]]*[nN]ame[^\]]*\]\??\[0\]/,
+];
+
+/**
+ * lint:letter-avatar
+ * 人・卓・キャラを頭文字で示さない（P9）。画像がなければ src/lib/identicon.ts の生成画像を使う
+ */
+function checkLetterAvatar(violations: Violation[]): void {
+  const files = [
+    ...walkFiles(path.join(ROOT_DIR, "src/components")),
+    ...walkFiles(path.join(ROOT_DIR, "src/screens")),
+    ...walkFiles(path.join(ROOT_DIR, "mobile/src/components")),
+    ...walkFiles(path.join(ROOT_DIR, "mobile/src/app")),
+  ].filter((f) => f.endsWith(".tsx") && !/\.(?:test|spec)\./.test(f));
+  for (const filePath of files) {
+    const rel = toRel(filePath);
+    fs.readFileSync(filePath, "utf8")
+      .split(/\r?\n/)
+      .forEach((line, i) => {
+        if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return;
+        if (LETTER_AVATAR_RES.some((re) => re.test(line))) {
+          violations.push({
+            file: rel,
+            line: i + 1,
+            message:
+              "letter-avatar: initial-letter avatars are disallowed; fall back to identiconDataUri(id, kind) from src/lib/identicon.ts.",
+          });
+        }
+      });
+  }
+}
+
+// 遊んだ時間帯は Log.sittings（開始・終了の日時の並び）で持つ（P1）。古い持ち方と 30 時間制の時刻を書かない
+const LEGACY_SCHEDULE_FIELD_RE = /(?<!\.)\.(?:dates|t0|t1)\b/;
+const LEGACY_SCHEDULE_API_RE =
+  /\b(?:buildSessionRange|sessionClock|remapChannelTimestamps|deriveSessionFromMessages|DateList|TimeRange)\b/;
+// 24:00〜33:59 のような 30 時間制の時刻（「1:30:00」のような経過時間は除く）と、その書き方の案内
+const THIRTY_HOUR_CLOCK_RE = /(?<![\d:])(?:2[4-9]|3[0-3])[:：][0-5]\d(?![:\d])|日付をまたぐときは/;
+
+function scheduleSourceFiles(): string[] {
+  return ["src", "mobile/src"].flatMap((d) =>
+    walkFiles(path.join(ROOT_DIR, d)).filter(
+      (f) => /\.tsx?$/.test(f) && !/\.(?:test|spec)\./.test(f) && !f.endsWith("/lib/sittings.ts"),
+    ),
+  );
+}
+
+/**
+ * lint:unnatural-model（P1）
+ * データの形が不自然だと UI も不自然になる。遊んだ時間帯は「実施日の一覧 + 初日の開始 + 最終日の終了（25:30）」ではなく
+ * 集まりの並び（Log.sittings: 開始・終了の日時）で持ち、入力は日付と時刻（終了が翌日なら「翌」）で受ける
+ */
+function checkUnnaturalModel(violations: Violation[]): void {
+  for (const filePath of scheduleSourceFiles()) {
+    const rel = toRel(filePath);
+    const isUi = /^(?:src\/(?:screens|components|app)|mobile\/src\/(?:app|components))\//.test(rel);
+    fs.readFileSync(filePath, "utf8")
+      .split(/\r?\n/)
+      .forEach((line, i) => {
+        if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return;
+        if (LEGACY_SCHEDULE_FIELD_RE.test(line) || LEGACY_SCHEDULE_API_RE.test(line)) {
+          violations.push({
+            file: rel,
+            line: i + 1,
+            message:
+              "unnatural-model: a session's time is Log.sittings (start/end datetimes). Use sessionStart / sessionDays / fmtSessionWhen / SittingsInput from src/lib/sittings.ts instead of dates / t0 / t1.",
+          });
+        }
+        if (isUi && THIRTY_HOUR_CLOCK_RE.test(line)) {
+          violations.push({
+            file: rel,
+            line: i + 1,
+            message:
+              "unnatural-model: do not ask for 30-hour clock times (25:30). Take a date and HH:MM times; an end before the start ends the next day (SittingsInput shows 「翌」).",
+          });
+        }
+      });
+  }
+}
+
+// 取り込みをやめた形式（P6）を、取り込める形式として画面に書く・その読み取りを戻す
+const DROPPED_IMPORT_COPY_RE =
+  /Discord[^"'`]{0,12}(?:JSON|テキスト|ログ)|[・、]テキスト(?:のログ|ログ)|テキストログ|どどんとふ|Tekey|通過履歴を(?:まとめて)?取り込|CSV[・／/]TSV|Markdown\s*表/;
+const DROPPED_IMPORT_CODE_RE =
+  /\b(?:parseDiscordLog\w*|parsePlainTextLog|parseGenericHtmlLog|parsePlayHistory|commitPlayHistoryImport|historyRowEpochs)\b|lib\/history-import/;
+
+/**
+ * lint:dropped-import（P6）
+ * ログの取り込みは機械が確実に読める形式（CCFOLIA・Udonarium）だけ。Discord・テキストログ・どどんとふ・通過履歴の表は読まない
+ */
+function checkDroppedImport(violations: Violation[]): void {
+  const files = ["src", "mobile/src"].flatMap((d) =>
+    walkFiles(path.join(ROOT_DIR, d)).filter((f) => /\.tsx?$/.test(f) && !/\.(?:test|spec)\./.test(f)),
+  );
+  for (const filePath of files) {
+    const rel = toRel(filePath);
+    const isUi = /^(?:src\/(?:screens|components|app)|mobile\/src\/(?:app|components))\//.test(rel);
+    fs.readFileSync(filePath, "utf8")
+      .split(/\r?\n/)
+      .forEach((line, i) => {
+        if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return;
+        if (isUi && DROPPED_IMPORT_COPY_RE.test(line)) {
+          violations.push({
+            file: rel,
+            line: i + 1,
+            message:
+              "dropped-import: Discord / plain-text / どどんとふ logs and history tables are not imported (P6). List only CCFOLIA and Udonarium (SUPPORTED_LOG_FORMATS_LABEL).",
+          });
+        }
+        if (DROPPED_IMPORT_CODE_RE.test(line)) {
+          violations.push({
+            file: rel,
+            line: i + 1,
+            message:
+              "dropped-import: free-form log / history-table parsers were removed (P6); do not bring them back.",
+          });
+        }
+      });
+  }
+}
+
+/**
+ * lint:dropped-character-import（P6・P3）
+ * キャラクターはキャラシの URL からだけ取り込む。コマ出力・ファイル・テキストの貼り付けからは読まない
+ * （「ファイル・コマから読む」は機能ごとやめた。いあきゃらも閲覧 URL から API の JSON を読む parseIacharaSheet だけにし、
+ *  駒出力・テキストを読む parseIacharaText / parseIacharaResponse は戻さない）
+ */
+const DROPPED_CHARACTER_COPY_RE = /駒出力|ファイル・コマ|コマ・キャラシ|コマから読む|コマ出力を貼り付け/;
+const DROPPED_CHARACTER_CODE_RE =
+  /\b(?:importCharactersFromFiles|importCharactersFromText|importCharacterFromFile|importCharacterFromText|parseIacharaText|parseIacharaResponse|parseCcfoliaCharacter\w*|parseUdonariumCharacter\w*|sheetFromCcfolia|pickAndImportCharacterFile)\b/;
+
+function checkDroppedCharacterImport(violations: Violation[]): void {
+  const files = ["src", "mobile/src"].flatMap((d) =>
+    walkFiles(path.join(ROOT_DIR, d)).filter((f) => /\.tsx?$/.test(f) && !/\.(?:test|spec)\./.test(f)),
+  );
+  for (const filePath of files) {
+    const rel = toRel(filePath);
+    fs.readFileSync(filePath, "utf8")
+      .split(/\r?\n/)
+      .forEach((line, i) => {
+        if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return;
+        if (DROPPED_CHARACTER_COPY_RE.test(line) || DROPPED_CHARACTER_CODE_RE.test(line)) {
+          violations.push({
+            file: rel,
+            line: i + 1,
+            message:
+              "dropped-character-import: characters come only from a character-sheet URL (P6). Do not bring back file / koma (ココフォリア駒出力) / pasted-text import.",
+          });
+        }
+      });
+  }
+}
+
+/**
+ * lint:people-safety（P14・P15）
+ * - 人を名前で検索させない（「ユーザー名で検索」・利用者の名前での絞り込み）。卓へは招待リンクで招く
+ * - ユーザー ID（handle）を書き換える処理は、はじめの設定（Entry.tsx・アプリの welcome.tsx）と取り込み（lib/people.ts）・サンプルだけ
+ * - 常設の「卓譜へようこそ」の注意書き（OnboardingBanner）を戻さない。初めての人は /welcome で設定する
+ */
+const PEOPLE_SEARCH_RES = [
+  /ユーザー名で検索|名前で検索|参加者を検索|該当するユーザー/,
+  /\b(?:u|user|person|member)\.name(?:\.toLowerCase\(\))?\.includes\(/,
+];
+const WELCOME_NOTICE_RE = /卓譜へようこそ|OnboardingBanner|OnboardingNotice/;
+const HANDLE_WRITE_RE = /\.handle\s*=(?!=)/;
+const HANDLE_WRITERS = new Set([
+  "src/screens/Entry.tsx",
+  "mobile/src/app/welcome.tsx",
+  "src/lib/people.ts",
+  "src/data/seed.ts",
+]);
+
+function checkPeopleSafety(violations: Violation[]): void {
+  const files = [
+    ...["src/screens", "src/components", "src/app", "src/lib", "src/data"].flatMap((d) =>
+      walkFiles(path.join(ROOT_DIR, d)),
+    ),
+    ...walkFiles(path.join(ROOT_DIR, "mobile/src")),
+  ].filter((f) => /\.tsx?$/.test(f) && !/\.(?:test|spec)\./.test(f));
+  for (const filePath of files) {
+    const rel = toRel(filePath);
+    fs.readFileSync(filePath, "utf8")
+      .split(/\r?\n/)
+      .forEach((line, i) => {
+        if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return;
+        if (PEOPLE_SEARCH_RES.some((re) => re.test(line))) {
+          violations.push({
+            file: rel,
+            line: i + 1,
+            message:
+              "people-safety: do not let people search users by name (P14); add members through table invite links and pick participants from table members (memberCandidates).",
+          });
+        }
+        if (WELCOME_NOTICE_RE.test(line)) {
+          violations.push({
+            file: rel,
+            line: i + 1,
+            message:
+              "people-safety: no standing welcome notice (P15); first-time setup lives in the /welcome onboarding (Welcome in src/screens/Entry.tsx).",
+          });
+        }
+        if (HANDLE_WRITE_RE.test(line) && !HANDLE_WRITERS.has(rel)) {
+          violations.push({
+            file: rel,
+            line: i + 1,
+            message:
+              "people-safety: user IDs (handle) are immutable once set (P14); only the onboarding (Entry.tsx, mobile welcome.tsx) and lib/people.ts may write them.",
+          });
+        }
+      });
+  }
+}
+
+/**
+ * lint:raw-delta
+ * セッションの増減（SessionStat.delta）をそのまま並べない。卓をまたいで続かない値（HP・MP・幸運・共鳴）が混ざる（P3）。
+ * src/lib/character-growth.ts の carriedDeltas を通す
+ */
+function checkRawDelta(violations: Violation[]): void {
+  for (const filePath of uiSourceFiles()) {
+    const rel = toRel(filePath);
+    const text = fs.readFileSync(filePath, "utf8");
+    for (const m of text.matchAll(/Object\.(?:entries|keys|values)\(\s*[\w.?]*\.delta\b/g)) {
+      violations.push({
+        file: rel,
+        line: lineAt(text, m.index ?? 0),
+        message:
+          "raw-delta: show session stat changes through carriedDeltas() so non-carried values (HP/MP/luck) never appear.",
+      });
+    }
+  }
+}
+
+/**
+ * lint:raw-error-message
+ * 捕まえた例外の message を画面に出さない。Firebase の内部の文（"false for 'create' @ L73"）が漏れる（P5）。
+ * src/lib/user-error.ts の userFacingError(error, fallback) を通し、詳しいことは console に残す
+ */
+const RAW_ERROR_MESSAGE_RE =
+  /(?<![\w.?])(?:e|err|error|cause|reason)\.message\b|\binstanceof Error \?|\bString\((?:e|err|error|cause)\)/;
+function checkRawErrorMessage(violations: Violation[]): void {
+  const files = [
+    ...["src/screens", "src/components", "src/app"].flatMap((d) => walkFiles(path.join(ROOT_DIR, d))),
+    path.join(ROOT_DIR, "src/store.tsx"),
+    path.join(ROOT_DIR, "src/workspace.tsx"),
+    path.join(ROOT_DIR, "src/lib/auth.ts"),
+    ...walkFiles(path.join(ROOT_DIR, "mobile/src")),
+  ].filter(
+    (f) => /\.tsx?$/.test(f) && !/\.(?:test|spec)\./.test(f) && !f.includes(`${path.sep}api${path.sep}`),
+  );
+  for (const filePath of files) {
+    const rel = toRel(filePath);
+    fs.readFileSync(filePath, "utf8")
+      .split(/\r?\n/)
+      .forEach((line, i) => {
+        if (/^\s*(?:\/\/|\*|\/\*)/.test(line) || /console\.(?:error|warn|log)/.test(line)) return;
+        if (RAW_ERROR_MESSAGE_RE.test(line)) {
+          violations.push({
+            file: rel,
+            line: i + 1,
+            message:
+              "raw-error-message: never show a caught error's message (Firebase internals leak, P5); use userFacingError(error, fallback) from src/lib/user-error.ts and log details with console.error.",
+          });
+        }
+      });
+  }
+}
+
+/**
+ * lint:scope-picker
+ * 共有範囲は ScopePicker だけで選ばせる。シナリオの方針で保存できない範囲（firestore.rules validShare）を
+ * 選べてしまう選択肢を、画面ごとに作らない（P3・P16）
+ */
+const ADHOC_SCOPE_OPTIONS_RE = /\[\s*"members",\s*"passed",\s*"public"\s*\]|\bv:\s*"passed"/;
+function checkScopePicker(violations: Violation[]): void {
+  for (const filePath of uiSourceFiles()) {
+    const rel = toRel(filePath);
+    if (rel === "src/components/ui.tsx" || rel === "mobile/src/components/ui.tsx") continue;
+    fs.readFileSync(filePath, "utf8")
+      .split(/\r?\n/)
+      .forEach((line, i) => {
+        if (ADHOC_SCOPE_OPTIONS_RE.test(line)) {
+          violations.push({
+            file: rel,
+            line: i + 1,
+            message: "scope-picker: choose share scope only with ScopePicker (lib/share-scope).",
+          });
+        }
+      });
+  }
+}
+
 const violations: Violation[] = [];
 checkNoJsFiles(violations);
 checkNoRawSelect(violations);
@@ -937,6 +1349,16 @@ checkButtonHoverAndTimelineRules(violations);
 checkPagesCohesion(violations);
 checkSelectedStateAndContact(violations);
 checkPublicPagesStayLight(violations);
+checkComboboxForGrowingOptions(violations);
+checkCommaSeparatedInput(violations);
+checkLetterAvatar(violations);
+checkUnnaturalModel(violations);
+checkDroppedImport(violations);
+checkDroppedCharacterImport(violations);
+checkPeopleSafety(violations);
+checkRawDelta(violations);
+checkRawErrorMessage(violations);
+checkScopePicker(violations);
 
 if (violations.length > 0) {
   for (const v of violations) {

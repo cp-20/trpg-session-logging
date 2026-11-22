@@ -2,14 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { Channel, Character, Log, State, User } from "../types";
 import {
   buildDraft,
+  carryDraftEdits,
   compactName,
   isGenericRoleName,
   matchSpeakerToState,
-  remapChannelTimestamps,
   speakerHints,
   stripSpeakerDecorations,
 } from "./speaker-match";
-import { jstEpoch } from "./format";
 
 const user = (id: string, name: string): User => ({ id, name, color: "#888", accounts: [] });
 const char = (id: string, ownerId: string, name: string, extra: Partial<Character> = {}): Character => ({
@@ -162,12 +161,11 @@ describe("buildDraft", () => {
 
   it("卓のメンバーを手がかりに発言者を紐付け、参加者とアイコンを埋める", () => {
     const d = buildDraft({
-      fileName: "log.json",
+      fileNames: ["log.json"],
       channels,
       attachLog: null,
       presetTable: "t1",
       presetScenario: "",
-      manual: null,
       state: world(),
       avatars,
     });
@@ -191,7 +189,6 @@ describe("buildDraft", () => {
       author: "A",
       systemId: "emoklore",
       source: "manual",
-      policy: "public",
       emoji: "🎲",
       bg: "#fff",
       tags: [],
@@ -214,9 +211,7 @@ describe("buildDraft", () => {
         u_b: { linked: true, hidden: false, characterIds: ["c2"] },
       },
       createdAt: "2026-01-01",
-      dates: ["2026-01-01"],
-      t0: 100,
-      t1: 200,
+      sittings: [{ start: 100, end: 200 }],
       slug: "s1",
     };
     const zeroTsChannels: Channel[] = [
@@ -235,12 +230,11 @@ describe("buildDraft", () => {
       },
     ];
     const attached = buildDraft({
-      fileName: "a.html",
+      fileNames: ["a.html"],
       channels: zeroTsChannels,
       attachLog,
       presetTable: "",
       presetScenario: "",
-      manual: null,
       state: w,
       avatars,
     });
@@ -248,7 +242,8 @@ describe("buildDraft", () => {
     expect(attached.scope).toBe("public");
     expect(attached.scenarioId).toBe("sc1");
     expect(attached.tableId).toBe("t1");
-    expect(attached.derived).toBeNull();
+    // ログに時刻がなければ添付先の時間帯を使う
+    expect(attached.sittings).toEqual([{ start: 100, end: 200 }]);
     expect(attached.kinds["GM:みかん"]).toBe("GM");
     expect(attached.kinds["KP:そら"]).toBe("KP");
     // 既存の attachLog.speakerIcons を上書きしない
@@ -271,23 +266,22 @@ describe("buildDraft", () => {
       createdAt: "2026-01-01",
     };
     const presetOnly = buildDraft({
-      fileName: null,
+      fileNames: [],
       channels: [],
       attachLog: null,
       presetTable: "",
       presetScenario: "sc1",
-      manual: { dates: ["2026-10-10"], start: "21:00", end: "23:00" },
       state: w,
       avatars,
     });
     expect(presetOnly.meta).toEqual({ title: "潮騒", systemId: "emoklore" });
-    expect(presetOnly.derived).toBeNull();
+    expect(presetOnly.sittings).toEqual([]);
     expect(presetOnly.guess).toBeNull();
 
     const emptyPlayersAttach: Log = { ...attachLog, systemId: "general", players: {} };
     delete (emptyPlayersAttach as Partial<Log>).systemId;
     const tableFallback = buildDraft({
-      fileName: "b.json",
+      fileNames: ["b.json"],
       channels: [
         {
           id: "c",
@@ -303,120 +297,105 @@ describe("buildDraft", () => {
       attachLog: null,
       presetTable: "t2",
       presetScenario: "",
-      manual: null,
       state: w,
       avatars,
     });
     expect(tableFallback.meta.systemId).toBe("coc6");
     expect(tableFallback.kinds["進行"]).toBe("SYSTEM");
     expect(tableFallback.players).toEqual([{ userId: "u_a", characterIds: [] }]);
-    expect(tableFallback.derived).toMatchObject({ t0: 10, t1: 30 });
+    expect(tableFallback.sittings).toEqual([{ start: 10, end: 30 }]);
   });
 });
 
-describe("remapChannelTimestamps", () => {
-  const channels: Channel[] = [
+describe("carryDraftEdits: ログを足しても決めたことを残す", () => {
+  it("タイトル・卓・参加者・共有範囲・残っている発言者の設定を引き継ぎ、時間帯は導き直す", () => {
+    const base = {
+      fileNames: ["1.json"],
+      channels: [],
+      kinds: { A: "PC" as const, B: "NPC" as const },
+      speakerIcons: { A: "a.png", B: "b.png" },
+      speakerLinks: { A: { userId: "u1", characterId: "c1" } },
+      meta: { title: "決めた題", systemId: "coc7" },
+      guess: null,
+      scope: "public" as const,
+      tableId: "t1",
+      scenarioId: "sc1",
+      newScenario: null,
+      players: [{ userId: "u1", characterIds: ["c1"] }],
+      self: { played: true, role: "GM" as const, characterIds: [] },
+      sittings: [{ start: 1, end: 2 }],
+    };
+    const fresh = {
+      ...base,
+      fileNames: ["1.json", "2.json"],
+      kinds: { A: "NPC" as const, C: "PC" as const },
+      speakerIcons: { C: "c.png" },
+      speakerLinks: {},
+      meta: { title: "", systemId: "general" },
+      scope: "members" as const,
+      tableId: "",
+      scenarioId: "",
+      players: [{ userId: "u2", characterIds: [] }],
+      sittings: [
+        { start: 1, end: 2 },
+        { start: 9, end: 10 },
+      ],
+    };
+    const out = carryDraftEdits(base, fresh);
+    expect(out.fileNames).toEqual(["1.json", "2.json"]);
+    expect(out.kinds).toEqual({ A: "PC", C: "PC" });
+    expect(out.speakerIcons).toEqual({ A: "a.png", C: "c.png" });
+    expect(out.speakerLinks).toEqual({ A: { userId: "u1", characterId: "c1" } });
+    expect(out.meta).toEqual({ title: "決めた題", systemId: "coc7" });
+    expect([out.scope, out.tableId, out.scenarioId]).toEqual(["public", "t1", "sc1"]);
+    expect(out.players.map((p) => p.userId)).toEqual(["u1", "u2"]);
+    expect(out.sittings).toHaveLength(2);
+    expect(out.self).toEqual(base.self);
+    expect(carryDraftEdits(base, { ...fresh, sittings: [] }).sittings).toEqual(base.sittings);
+  });
+});
+
+describe("buildDraft: 記録する本人", () => {
+  const w = {
+    me: "u_me",
+    users: { u_me: user("u_me", "みかん"), u_b: user("u_b", "そら") },
+    characters: {
+      c_me: { ...({} as Character), id: "c_me", ownerId: "u_me", name: "遠沢澄花", systemId: "coc7" },
+    },
+    tables: {},
+    scenarios: {},
+  } as unknown as State;
+  const avatars = { character: () => "c.png", user: () => "u.png" };
+  const chan = (msgs: { sp: string; kind: Channel["msgs"][number]["kind"] }[]): Channel[] => [
     {
-      id: "a",
+      id: "main",
       name: "メイン",
       secret: false,
-      msgs: [0, 10, 20, 30].map((t, i) => ({
-        id: String(i),
-        ts: t,
-        sp: "x",
-        kind: "PC" as const,
-        type: "text" as const,
-        text: "",
-      })),
+      msgs: msgs.map((m, i) => ({ id: String(i), ts: 100 + i, type: "text" as const, text: "x", ...m })),
     },
   ];
+  const build = (channels: Channel[]) =>
+    buildDraft({
+      fileNames: [],
+      channels,
+      attachLog: null,
+      presetTable: "",
+      presetScenario: "",
+      state: w,
+      avatars,
+    });
 
-  it("1 日なら新しい範囲に比率を保って写し、順序を崩さない", () => {
-    const t0 = jstEpoch("2026-10-10", "20:00");
-    const t1 = jstEpoch("2026-10-10", "23:00");
-    const out = remapChannelTimestamps(channels, ["2026-10-10"], t0, t1).flatMap((c) =>
-      c.msgs.map((m) => m.ts),
-    );
-    expect(out[0]).toBe(t0);
-    expect(out.at(-1)).toBe(t1);
-    expect([...out].sort((a, b) => a - b)).toEqual(out);
+  it("本人は既定で参加者。ログに手がかりがなければ PL", () => {
+    expect(build([]).self).toEqual({ played: true, role: "PL", characterIds: [] });
   });
-
-  it("複数日なら最初の日と最後の日に発言を割り振る", () => {
-    const t0 = jstEpoch("2026-10-10", "21:00");
-    const t1 = jstEpoch("2026-10-11", "23:00");
-    const out = remapChannelTimestamps(channels, ["2026-10-10", "2026-10-11"], t0, t1).flatMap((c) =>
-      c.msgs.map((m) => m.ts),
-    );
-    expect(out[0]).toBe(t0);
-    expect(out.at(-1)).toBe(t1);
-    expect(out[1]! < jstEpoch("2026-10-11", "00:00") + 6 * 3600).toBe(true);
-    expect(out[2]! >= jstEpoch("2026-10-11", "06:00")).toBe(true);
+  it("本人のキャラの発言があれば PL で、そのキャラを付ける", () => {
+    expect(build(chan([{ sp: "遠沢澄花", kind: "PC" }])).self).toEqual({
+      played: true,
+      role: "PL",
+      characterIds: ["c_me"],
+    });
   });
-
-  it("元のチャンネルを書き換えない", () => {
-    remapChannelTimestamps(channels, ["2026-10-10"], 100, 200);
-    expect(channels[0]!.msgs[0]!.ts).toBe(0);
-  });
-
-  it("空チャンネル・1メッセージ・同値ts群・3日以上の中間日バケットを正しく写す", () => {
-    const empty: Channel[] = [{ id: "e", name: "空", secret: false, msgs: [] }];
-    expect(remapChannelTimestamps(empty, ["2026-10-10"], 100, 200)).toBe(empty);
-
-    const single: Channel[] = [
-      {
-        id: "a",
-        name: "メイン",
-        secret: false,
-        msgs: [{ id: "1", ts: 500, sp: "A", kind: "PC", type: "text", text: "x" }],
-      },
-    ];
-    expect(remapChannelTimestamps(single, ["2026-10-10"], 1000, 2000)[0]?.msgs[0]?.ts).toBe(1000);
-
-    const equalTs: Channel[] = [
-      {
-        id: "a",
-        name: "メイン",
-        secret: false,
-        msgs: [
-          { id: "1", ts: 50, sp: "A", kind: "PC", type: "text", text: "1" },
-          { id: "2", ts: 50, sp: "A", kind: "PC", type: "text", text: "2" },
-          { id: "3", ts: 50, sp: "A", kind: "PC", type: "text", text: "3" },
-        ],
-      },
-    ];
-    const eqOut = remapChannelTimestamps(equalTs, ["2026-10-10"], 1000, 2000)[0]!.msgs.map((m) => m.ts);
-    expect(eqOut).toEqual([1000, 1500, 2000]);
-
-    // 3日分割 (中日バケットは 21:00 JST 〜 23:55 JST)
-    const sixMsgs: Channel[] = [
-      {
-        id: "a",
-        name: "メイン",
-        secret: false,
-        msgs: [0, 1, 2, 3, 4, 5].map((i) => ({
-          id: String(i),
-          ts: i,
-          sp: "A",
-          kind: "PC",
-          type: "text",
-          text: String(i),
-        })),
-      },
-    ];
-    const d0 = jstEpoch("2026-10-10", "21:00");
-    const d1Start = jstEpoch("2026-10-11", "21:00");
-    const d1End = jstEpoch("2026-10-11", "23:55");
-    const d2End = jstEpoch("2026-10-12", "23:00");
-    const threeDaysOut = remapChannelTimestamps(
-      sixMsgs,
-      ["2026-10-10", "2026-10-11", "2026-10-12"],
-      d0,
-      d2End,
-    )[0]!.msgs.map((m) => m.ts);
-    expect(threeDaysOut[0]).toBe(d0);
-    expect(threeDaysOut[2]).toBeGreaterThanOrEqual(d1Start);
-    expect(threeDaysOut[3]).toBeLessThanOrEqual(d1End);
-    expect(threeDaysOut[5]).toBe(d2End);
+  it("本人に結び付いた GM の発言者がいれば GM", () => {
+    expect(build(chan([{ sp: "KP:みかん", kind: "KP" }])).self.role).toBe("GM");
   });
 });

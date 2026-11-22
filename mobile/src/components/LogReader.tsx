@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View, type FlatListProps } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
+import { identiconDataUri } from "@shared/lib/identicon";
 import { fmtDate, fmtDateShort, jstTime, sessionDay } from "@shared/lib/time";
 import type { Log, Msg, MsgKind, State } from "@shared/types";
 import { hapticImpact, hapticSelection, isReduceMotionEnabled } from "../native/haptics";
@@ -34,24 +35,10 @@ export interface SpeakerMeta {
   roleLabel: string;
 }
 
-function hashString(input: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-function speakerFallbackSvg(sp: string, kind: Msg["kind"], color: string): string {
-  const hash = hashString(`${kind}:${sp}`);
-  const warmBg = ["#f3e5d8", "#ebe3d5", "#e8e0d8", "#f0dfd5", "#e4e6dc", "#e6e1ea"][hash % 6]!;
+/** 誰とも結び付かない発言者の顔。発言者名を種にした既定の画像（GM 側は円印、ほかはコマ）。Web の timeline と同じ */
+function speakerFallbackSvg(sp: string, kind: Msg["kind"]): string {
   const isKeeper = kind === "KP" || kind === "GM" || kind === "SYSTEM";
-  const inner = isKeeper
-    ? `<rect x="26" y="28" width="48" height="44" rx="6" fill="${color}" fill-opacity="0.9"/><path d="M50 28 L50 72" stroke="${warmBg}" stroke-width="2.4"/>`
-    : `<circle cx="50" cy="39" r="14" fill="${color}" fill-opacity="0.88"/><path d="M24 82 C26 63 36 56 50 56 C64 56 74 63 76 82 Z" fill="${color}" fill-opacity="0.88"/>`;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="50" fill="${warmBg}"/><circle cx="50" cy="50" r="46" fill="none" stroke="${color}" stroke-opacity="0.22" stroke-width="2"/>${inner}</svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  return identiconDataUri(sp, isKeeper ? "user" : "character");
 }
 
 export function resolveSpeakerMeta(sp: string, kind: Msg["kind"], log: Log, state: State): SpeakerMeta {
@@ -80,7 +67,7 @@ export function resolveSpeakerMeta(sp: string, kind: Msg["kind"], log: Log, stat
     iconUrl = users[log.ownerId].image;
   }
   if (!iconUrl && userByName?.image) iconUrl = userByName.image;
-  if (!iconUrl) iconUrl = speakerFallbackSvg(sp, kind, color);
+  if (!iconUrl) iconUrl = speakerFallbackSvg(sp, kind);
 
   return { iconUrl, color, plName, roleLabel: kind };
 }
@@ -88,6 +75,7 @@ export function resolveSpeakerMeta(sp: string, kind: Msg["kind"], log: Log, stat
 const ROLE_LABEL: Record<Msg["kind"], string> = {
   PC: "PC",
   NPC: "NPC",
+  ENEMY: "エネミー",
   KP: "GM",
   GM: "GM",
   PL: "PL",

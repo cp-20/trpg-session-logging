@@ -7,10 +7,12 @@ import {
   VALID_DATE,
   VALID_TIME,
   addDays,
+  applyCandidateRsvp,
+  applyConfirmCandidate,
+  busyChecker,
   calendarSubscribeLinks,
   canConfirmPoll,
   computeEndTime,
-  eventDurationMinutes,
   groupBy,
   monthCells,
   pollCandidates,
@@ -18,7 +20,7 @@ import {
   shiftYearMonth,
   unansweredCount,
 } from "@shared/lib/schedule";
-import { fmtDate, fmtDur, sessionPlayMinutes, todayStr, uid } from "@shared/lib/time";
+import { fmtDate, fmtDur, sessionPlayMinutes, todayStr, uid, sessionDays } from "@shared/lib/time";
 import type { Availability, Log, TableEvent, TableEventCandidate } from "@shared/types";
 import { EventDetailSheet, EventRow, PollCard } from "../../components/EventComponents";
 import { ScreenShell } from "../../components/ScreenShell";
@@ -35,6 +37,7 @@ import {
 import {
   BottomSheet,
   Button,
+  Combobox,
   CopyBox,
   DividerList,
   Field,
@@ -44,11 +47,10 @@ import {
   MetaRow,
   PageHead,
   SectionTitle,
-  Select,
+  type ComboboxOption,
   Surface,
   TextField,
   weekdayToneColor,
-  type SelectOption,
 } from "../../components/ui";
 import {
   fetchDeviceBusyDates,
@@ -59,6 +61,7 @@ import { openExternalUrl } from "../../native/native-share";
 import { hapticSelection, hapticSuccess } from "../../native/haptics";
 import { useMobileStore } from "../../store/mobile-store";
 import { useTheme } from "../../theme/ThemeProvider";
+import { userFacingError } from "@shared/lib/user-error";
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"] as const;
 const UNRECORDED_LOOKBACK_DAYS = 30;
@@ -124,7 +127,8 @@ export default function CalendarScreen() {
       .filter(
         (ev) =>
           !myLogs.some(
-            (l) => l.dates.includes(ev.date) && (!ev.tableId || !l.tableId || l.tableId === ev.tableId),
+            (l) =>
+              sessionDays(l).includes(ev.date) && (!ev.tableId || !l.tableId || l.tableId === ev.tableId),
           ),
       )
       .reverse();
@@ -140,19 +144,22 @@ export default function CalendarScreen() {
       .catch(() => {});
   }, [activePolls]);
 
-  const busyDateSet = useMemo(() => new Set(state.prefs.busyDates ?? []), [state.prefs.busyDates]);
-  const tableOptions = useMemo<SelectOption[]>(
+  const busyCheck = useMemo(
+    () => busyChecker({ googleBusy: state.prefs.googleBusy }),
+    [state.prefs.googleBusy],
+  );
+  const tableOptions = useMemo<ComboboxOption[]>(
     () => [{ value: "all", label: "すべての卓" }, ...myTables.map((t) => ({ value: t.id, label: t.name }))],
     [myTables],
   );
-  const formTableOptions = useMemo<SelectOption[]>(
+  const formTableOptions = useMemo<ComboboxOption[]>(
     () => [
       { value: "", label: "卓なし（個人の予定）" },
       ...myTables.map((t) => ({ value: t.id, label: t.name })),
     ],
     [myTables],
   );
-  const scenarioOptions = useMemo<SelectOption[]>(
+  const scenarioOptions = useMemo<ComboboxOption[]>(
     () => [
       { value: "", label: "選択しない" },
       ...Object.values(state.scenarios)
@@ -164,30 +171,11 @@ export default function CalendarScreen() {
   const defaultTableId = tableFilter !== "all" ? tableFilter : (myTables[0]?.id ?? "");
 
   function setCandidateRsvp(eventId: string, candidateId: string, value: Availability) {
-    update((s) => {
-      const target = s.events?.[eventId];
-      if (!target) return;
-      if (target.candidates && target.candidates.length > 0) {
-        const cand = target.candidates.find((c) => c.id === candidateId);
-        if (cand) cand.responses[s.me] = value;
-      } else {
-        target.responses[s.me] = value;
-      }
-    });
+    update((s) => applyCandidateRsvp(s, eventId, candidateId, value));
   }
 
   function confirmCandidate(eventId: string, cand: TableEventCandidate) {
-    update((s) => {
-      const target = s.events?.[eventId];
-      if (!target) return;
-      target.status = "confirmed";
-      target.date = cand.date;
-      target.startTime = cand.startTime;
-      target.endTime = cand.endTime;
-      target.durationMin = eventDurationMinutes(cand.startTime, cand.endTime, target.durationMin);
-      target.responses = { ...cand.responses };
-      delete target.candidates;
-    });
+    update((s) => applyConfirmCandidate(s, eventId, cand));
     setYm(cand.date.slice(0, 7));
     setSelectedDay(cand.date);
     hapticSuccess();
@@ -226,7 +214,7 @@ export default function CalendarScreen() {
     }
     const byDate = groupBy(
       myLogs.filter((l) => inFilter(l.tableId)),
-      (l) => l.dates,
+      (l) => sessionDays(l),
     );
     for (const [d, ls] of byDate) for (const l of ls) push(d, { kind: "log", key: l.id, log: l });
     return map;
@@ -271,7 +259,7 @@ export default function CalendarScreen() {
                 ev={ev}
                 state={state}
                 canConfirm={canConfirmPoll(ev, state)}
-                busyDates={busyDateSet}
+                busyCheck={busyCheck}
                 deviceBusy={deviceBusy}
                 onRsvp={(candId, v) => setCandidateRsvp(ev.id, candId, v)}
                 onConfirm={(cand) => confirmCandidate(ev.id, cand)}
@@ -306,7 +294,7 @@ export default function CalendarScreen() {
                 ev={ev}
                 state={state}
                 canConfirm={canConfirmPoll(ev, state)}
-                busyDates={busyDateSet}
+                busyCheck={busyCheck}
                 deviceBusy={deviceBusy}
                 onRsvp={(candId, v) => setCandidateRsvp(ev.id, candId, v)}
                 onConfirm={(cand) => confirmCandidate(ev.id, cand)}
@@ -367,7 +355,7 @@ export default function CalendarScreen() {
             </View>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               {myTables.length > 1 && (
-                <Select
+                <Combobox
                   size="sm"
                   ariaLabel="カレンダーに表示する卓"
                   value={tableFilter}
@@ -648,8 +636,8 @@ function ComposerSheet({
   mode: "confirmed" | "poll";
   initialDate: string;
   today: string;
-  tableOptions: SelectOption[];
-  scenarioOptions: SelectOption[];
+  tableOptions: ComboboxOption[];
+  scenarioOptions: ComboboxOption[];
   defaultTableId: string;
   onClose: () => void;
   onCreated: (date: string) => void;
@@ -773,12 +761,12 @@ function ComposerSheet({
         </Field>
 
         <Field label="卓">
-          <Select ariaLabel="卓" value={tableId} options={tableOptions} onChange={setTableId} />
+          <Combobox ariaLabel="卓" value={tableId} options={tableOptions} onChange={setTableId} />
         </Field>
 
         {scenarioOptions.length > 1 && (
           <Field label="シナリオ（任意）">
-            <Select
+            <Combobox
               ariaLabel="シナリオ"
               value={scenarioId}
               options={scenarioOptions}
@@ -905,7 +893,7 @@ function CalendarSyncSheet({
       setDeviceResult(res);
       hapticSuccess();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "端末のカレンダーと連携できませんでした。");
+      setError(userFacingError(cause, "端末のカレンダーと連携できませんでした。"));
     } finally {
       setBusy(false);
     }

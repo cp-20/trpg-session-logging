@@ -3,17 +3,20 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import Tables, { TableDetail } from "./Tables";
+import { JoinTable } from "./Entry";
+import { DEMO_INVITE_TOKEN } from "../data/seed";
 
-describe("Tables + PlayerPicker(fixedIds) + TableDetail + PollDetailModal 結合テスト", () => {
-  it("自分を固定行として含んだ卓を作成し、詳細画面で日程調整を直接開いて確定できる", async () => {
+describe("Tables + TableDetail + 招待リンク + PollDetailModal 結合テスト", () => {
+  it("卓名だけで卓を作成し、詳細画面で日程調整を直接開いて確定できる", async () => {
     const user = userEvent.setup();
     const listView = renderWithStore(<Tables />, { initialPath: "/tables" });
 
     await user.click(screen.getByRole("button", { name: /卓を作成/ }));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
 
-    // 自分は常に先頭固定行（「自分」表記、チェックボックスなし）
-    expect(screen.getByText("自分")).toBeInTheDocument();
+    // メンバーは名前で探して足さない（P14）。作成後に招待リンクで招く
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(screen.queryByLabelText("参加者を検索")).toBeNull();
 
     await user.type(screen.getByLabelText("卓名"), "深夜探索同好会");
     await user.click(screen.getByRole("button", { name: "作成する" }));
@@ -55,5 +58,35 @@ describe("Tables + PlayerPicker(fixedIds) + TableDetail + PollDetailModal 結合
 
     const saved = detailView.readPersistedState()!;
     expect(saved.events.ev_table_poll?.status).toBe("confirmed");
+  });
+
+  it("作成者は招待リンクを作って無効にでき、リンクを開いた人は卓の顔ぶれを見て参加できる", async () => {
+    const user = userEvent.setup();
+    const owner = renderWithStore(<TableDetail />, {
+      initialPath: "/tables/t_shiosai",
+      params: { id: "t_shiosai" },
+    });
+    // 名前で探す欄はない
+    expect(screen.queryByLabelText("参加者を検索")).toBeNull();
+    await user.click(screen.getByRole("radio", { name: "30日間" }));
+    await user.click(screen.getByRole("button", { name: "招待リンクを作る" }));
+    await waitFor(() => expect(screen.getByText(/\/join\//)).toBeInTheDocument());
+    const invite = owner.readPersistedState()!.tables.t_shiosai!.invite!;
+    expect(invite.token.length).toBeGreaterThanOrEqual(32);
+    expect(Date.parse(invite.expiresAt!) - Date.now()).toBeGreaterThan(29 * 86_400_000);
+    await user.click(screen.getByRole("button", { name: "無効にする" }));
+    await waitFor(() => expect(owner.readPersistedState()!.tables.t_shiosai!.invite).toBeUndefined());
+    owner.unmount();
+
+    // 夜祭班（みかんはメンバーでない）の見本の招待
+    const joinView = renderWithStore(<JoinTable />, {
+      initialPath: `/join/${DEMO_INVITE_TOKEN}`,
+      params: { token: DEMO_INVITE_TOKEN },
+    });
+    expect(screen.getByRole("heading", { level: 1, name: "夜祭班" })).toBeInTheDocument();
+    expect(screen.getByText("@sasa")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "この卓に参加する" }));
+    await waitFor(() => expect(getTestNav().pathname).toBe("/tables/t_yomatsuri"));
+    expect(joinView.readPersistedState()!.tables.t_yomatsuri!.memberIds).toContain("u_mikan");
   });
 });

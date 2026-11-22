@@ -323,7 +323,6 @@
    "systemId": "coc7",
    "source": "booth",
    "sourceUrl": "https://booth.pm/ja/items/4710900",
-   "policy": "public",
    "emoji": "CoC7",
    "bg": "#efe6d8",
    "tags": [
@@ -343,7 +342,6 @@
    "systemId": "coc7",
    "source": "booth",
    "sourceUrl": "https://booth.pm/ja/items/4821337",
-   "policy": "public",
    "emoji": "CoC7",
    "bg": "#e8dfd5",
    "tags": [
@@ -362,7 +360,6 @@
    "author": "夜霜（自作）",
    "systemId": "coc7",
    "source": "manual",
-   "policy": "members",
    "emoji": "CoC7",
    "bg": "#ede4d7",
    "tags": [
@@ -381,7 +378,6 @@
    "systemId": "coc7",
    "source": "booth",
    "sourceUrl": "https://booth.pm/ja/items/4501922",
-   "policy": "passed",
    "emoji": "CoC7",
    "bg": "#efe8da",
    "tags": [
@@ -399,7 +395,6 @@
    "systemId": "coc7",
    "source": "talto",
    "sourceUrl": "https://talto.io/works/19220",
-   "policy": "public",
    "emoji": "CoC7",
    "bg": "#e8e2d8",
    "tags": [
@@ -417,7 +412,6 @@
    "systemId": "emoklore",
    "source": "talto",
    "sourceUrl": "https://talto.io/works/20113",
-   "policy": "public",
    "emoji": "エモ",
    "bg": "#f0e1dc",
    "tags": [
@@ -436,7 +430,6 @@
    "systemId": "sw25",
    "source": "talto",
    "sourceUrl": "https://talto.io/works/18842",
-   "policy": "public",
    "emoji": "SW",
    "bg": "#f0e6d2",
    "tags": [
@@ -454,7 +447,6 @@
    "systemId": "sw25",
    "source": "booth",
    "sourceUrl": "https://booth.pm/ja/items/4630221",
-   "policy": "passed",
    "emoji": "SW",
    "bg": "#e7eadc",
    "tags": [
@@ -471,7 +463,6 @@
    "author": "雨宿り文庫",
    "systemId": "madamis",
    "source": "manual",
-   "policy": "passed",
    "emoji": "MM",
    "bg": "#e6e2da",
    "tags": [
@@ -489,7 +480,6 @@
    "author": "宵待舎",
    "systemId": "madamis",
    "source": "manual",
-   "policy": "members",
    "emoji": "MM",
    "bg": "#e6eadb",
    "tags": [
@@ -508,7 +498,6 @@
    "systemId": "coc7",
    "source": "booth",
    "sourceUrl": "https://booth.pm/ja/items/4910880",
-   "policy": "members",
    "emoji": "CoC7",
    "bg": "#ece0d2",
    "tags": [
@@ -526,7 +515,6 @@
    "systemId": "coc7",
    "source": "talto",
    "sourceUrl": "https://talto.io/works/20500",
-   "policy": "passed",
    "emoji": "CoC7",
    "bg": "#ebe5dc",
    "tags": [
@@ -544,7 +532,6 @@
    "systemId": "coc7",
    "source": "booth",
    "sourceUrl": "https://booth.pm/ja/items/5012410",
-   "policy": "public",
    "emoji": "CoC7",
    "bg": "#e6e1d9",
    "tags": [
@@ -563,7 +550,6 @@
    "systemId": "emoklore",
    "source": "talto",
    "sourceUrl": "https://talto.io/works/21405",
-   "policy": "passed",
    "emoji": "エモ",
    "bg": "#ebd9df",
    "tags": [
@@ -583,7 +569,6 @@
    "systemId": "emoklore",
    "source": "talto",
    "sourceUrl": "https://talto.io/works/22018",
-   "policy": "public",
    "emoji": "エモ",
    "bg": "#e9dfe6",
    "tags": [
@@ -601,7 +586,6 @@
    "systemId": "sw25",
    "source": "booth",
    "sourceUrl": "https://booth.pm/ja/items/5104200",
-   "policy": "public",
    "emoji": "SW",
    "bg": "#e5ebd6",
    "tags": [
@@ -620,7 +604,6 @@
    "systemId": "madamis",
    "source": "booth",
    "sourceUrl": "https://booth.pm/ja/items/5189300",
-   "policy": "passed",
    "emoji": "MM",
    "bg": "#eae2d8",
    "tags": [
@@ -1360,11 +1343,12 @@
     "ひな": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23f4dcd8%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23c85232%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%2357211d%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cpolygon%20points%3D%2228%2C27%2033%2C32%2028%2C37%2023%2C32%22%20fill%3D%22%23c85232%22%2F%3E%20%3Cpolygon%20points%3D%2273%2C38%2077%2C42%2073%2C46%2069%2C42%22%20fill%3D%22%23c85232%22%2F%3E%20%3Cpath%20d%3D%22M50%2018%20L66%2047%20L57%2067%20L43%2067%20L34%2047%20Z%22%20fill%3D%22%2357211d%22%2F%3E%20%3Cline%20x1%3D%2250%22%20y1%3D%2218%22%20x2%3D%2250%22%20y2%3D%2248%22%20stroke%3D%22%23f4dcd8%22%20stroke-width%3D%222.2%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%223.6%22%20fill%3D%22%23f4dcd8%22%2F%3E%20%3Crect%20x%3D%2240%22%20y%3D%2267%22%20width%3D%2220%22%20height%3D%227%22%20rx%3D%222%22%20fill%3D%22%23c85232%22%2F%3E%20%3Crect%20x%3D%2242%22%20y%3D%2275%22%20width%3D%2216%22%20height%3D%225%22%20rx%3D%222%22%20fill%3D%22%2357211d%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-09-12T18:14:21",
-   "dates": [
-    "2026-09-12"
+   "sittings": [
+    {
+     "start": 1789185903,
+     "end": 1789204461
+    }
    ],
-   "t0": 1789185903,
-   "t1": 1789204461,
    "impressions": [
     {
      "id": "imp_s01_1",
@@ -1988,11 +1972,12 @@
     "なつ": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23f5e6cf%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23c0782c%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%2336271d%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Crect%20x%3D%2226%22%20y%3D%2229%22%20width%3D%2211%22%20height%3D%225%22%20rx%3D%221.5%22%20fill%3D%22%23c0782c%22%2F%3E%20%3Crect%20x%3D%2261%22%20y%3D%2228%22%20width%3D%2212%22%20height%3D%226%22%20rx%3D%221.5%22%20fill%3D%22%2336271d%22%2F%3E%20%3Crect%20x%3D%2220%22%20y%3D%2234%22%20width%3D%2260%22%20height%3D%2239%22%20rx%3D%226%22%20fill%3D%22%2336271d%22%2F%3E%20%3Crect%20x%3D%2220%22%20y%3D%2234%22%20width%3D%2260%22%20height%3D%2211%22%20rx%3D%224%22%20fill%3D%22%23c0782c%22%2F%3E%20%3Crect%20x%3D%2227%22%20y%3D%2237%22%20width%3D%2211%22%20height%3D%225%22%20rx%3D%221.5%22%20fill%3D%22%23f5e6cf%22%2F%3E%20%3Ccircle%20cx%3D%2252%22%20cy%3D%2256%22%20r%3D%2214%22%20fill%3D%22%23f5e6cf%22%2F%3E%20%3Ccircle%20cx%3D%2252%22%20cy%3D%2256%22%20r%3D%2210.5%22%20fill%3D%22%2336271d%22%2F%3E%20%3Ccircle%20cx%3D%2252%22%20cy%3D%2256%22%20r%3D%225.5%22%20fill%3D%22%23c0782c%22%2F%3E%20%3Ccircle%20cx%3D%2254.5%22%20cy%3D%2253.5%22%20r%3D%222%22%20fill%3D%22%23f5e6cf%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-09-27T00:57:53",
-   "dates": [
-    "2026-09-26"
+   "sittings": [
+    {
+     "start": 1790422477,
+     "end": 1790438273
+    }
    ],
-   "t0": 1790422477,
-   "t1": 1790438273,
    "impressions": [
     {
      "id": "imp_s02_1",
@@ -2609,11 +2594,12 @@
     "なつ": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23f5e6cf%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23c0782c%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%2336271d%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Crect%20x%3D%2226%22%20y%3D%2229%22%20width%3D%2211%22%20height%3D%225%22%20rx%3D%221.5%22%20fill%3D%22%23c0782c%22%2F%3E%20%3Crect%20x%3D%2261%22%20y%3D%2228%22%20width%3D%2212%22%20height%3D%226%22%20rx%3D%221.5%22%20fill%3D%22%2336271d%22%2F%3E%20%3Crect%20x%3D%2220%22%20y%3D%2234%22%20width%3D%2260%22%20height%3D%2239%22%20rx%3D%226%22%20fill%3D%22%2336271d%22%2F%3E%20%3Crect%20x%3D%2220%22%20y%3D%2234%22%20width%3D%2260%22%20height%3D%2211%22%20rx%3D%224%22%20fill%3D%22%23c0782c%22%2F%3E%20%3Crect%20x%3D%2227%22%20y%3D%2237%22%20width%3D%2211%22%20height%3D%225%22%20rx%3D%221.5%22%20fill%3D%22%23f5e6cf%22%2F%3E%20%3Ccircle%20cx%3D%2252%22%20cy%3D%2256%22%20r%3D%2214%22%20fill%3D%22%23f5e6cf%22%2F%3E%20%3Ccircle%20cx%3D%2252%22%20cy%3D%2256%22%20r%3D%2210.5%22%20fill%3D%22%2336271d%22%2F%3E%20%3Ccircle%20cx%3D%2252%22%20cy%3D%2256%22%20r%3D%225.5%22%20fill%3D%22%23c0782c%22%2F%3E%20%3Ccircle%20cx%3D%2254.5%22%20cy%3D%2253.5%22%20r%3D%222%22%20fill%3D%22%23f5e6cf%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-10-11T00:39:58",
-   "dates": [
-    "2026-10-10"
-   ],
-   "t0": 1791630411,
-   "t1": 1791646798
+   "sittings": [
+    {
+     "start": 1791630411,
+     "end": 1791646798
+    }
+   ]
   },
   "s04": {
    "id": "s04",
@@ -2985,11 +2971,12 @@
     "ひな": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23f4dcd8%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23c85232%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%2357211d%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cpolygon%20points%3D%2228%2C27%2033%2C32%2028%2C37%2023%2C32%22%20fill%3D%22%23c85232%22%2F%3E%20%3Cpolygon%20points%3D%2273%2C38%2077%2C42%2073%2C46%2069%2C42%22%20fill%3D%22%23c85232%22%2F%3E%20%3Cpath%20d%3D%22M50%2018%20L66%2047%20L57%2067%20L43%2067%20L34%2047%20Z%22%20fill%3D%22%2357211d%22%2F%3E%20%3Cline%20x1%3D%2250%22%20y1%3D%2218%22%20x2%3D%2250%22%20y2%3D%2248%22%20stroke%3D%22%23f4dcd8%22%20stroke-width%3D%222.2%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%223.6%22%20fill%3D%22%23f4dcd8%22%2F%3E%20%3Crect%20x%3D%2240%22%20y%3D%2267%22%20width%3D%2220%22%20height%3D%227%22%20rx%3D%222%22%20fill%3D%22%23c85232%22%2F%3E%20%3Crect%20x%3D%2242%22%20y%3D%2275%22%20width%3D%2216%22%20height%3D%225%22%20rx%3D%222%22%20fill%3D%22%2357211d%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-09-20T21:23:04",
-   "dates": [
-    "2026-09-20"
-   ],
-   "t0": 1789898728,
-   "t1": 1789906984
+   "sittings": [
+    {
+     "start": 1789898728,
+     "end": 1789906984
+    }
+   ]
   },
   "s05": {
    "id": "s05",
@@ -3716,11 +3703,12 @@
     "ひな": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23f4dcd8%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23c85232%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%2357211d%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cpolygon%20points%3D%2228%2C27%2033%2C32%2028%2C37%2023%2C32%22%20fill%3D%22%23c85232%22%2F%3E%20%3Cpolygon%20points%3D%2273%2C38%2077%2C42%2073%2C46%2069%2C42%22%20fill%3D%22%23c85232%22%2F%3E%20%3Cpath%20d%3D%22M50%2018%20L66%2047%20L57%2067%20L43%2067%20L34%2047%20Z%22%20fill%3D%22%2357211d%22%2F%3E%20%3Cline%20x1%3D%2250%22%20y1%3D%2218%22%20x2%3D%2250%22%20y2%3D%2248%22%20stroke%3D%22%23f4dcd8%22%20stroke-width%3D%222.2%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%223.6%22%20fill%3D%22%23f4dcd8%22%2F%3E%20%3Crect%20x%3D%2240%22%20y%3D%2267%22%20width%3D%2220%22%20height%3D%227%22%20rx%3D%222%22%20fill%3D%22%23c85232%22%2F%3E%20%3Crect%20x%3D%2242%22%20y%3D%2275%22%20width%3D%2216%22%20height%3D%225%22%20rx%3D%222%22%20fill%3D%22%2357211d%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-10-25T02:20:08",
-   "dates": [
-    "2026-10-24"
+   "sittings": [
+    {
+     "start": 1792843396,
+     "end": 1792862408
+    }
    ],
-   "t0": 1792843396,
-   "t1": 1792862408,
    "impressions": [
     {
      "id": "imp_s05_1",
@@ -4344,11 +4332,12 @@
     "由良": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23e6dff0%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23b87a2e%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%233c304a%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2220%22%20r%3D%224%22%20fill%3D%22none%22%20stroke%3D%22%233c304a%22%20stroke-width%3D%222.6%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2253%22%20r%3D%2227%22%20fill%3D%22none%22%20stroke%3D%22%233c304a%22%20stroke-width%3D%222.6%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2253%22%20r%3D%2220%22%20fill%3D%22none%22%20stroke%3D%22%23b87a2e%22%20stroke-width%3D%221.6%22%20stroke-dasharray%3D%223%203%22%2F%3E%20%3Cpolygon%20points%3D%2250%2C31%2055%2C48%2072%2C53%2055%2C58%2050%2C75%2045%2C58%2028%2C53%2045%2C48%22%20fill%3D%22%233c304a%22%2F%3E%20%3Cpolygon%20points%3D%2250%2C31%2055%2C48%2050%2C53%22%20fill%3D%22%23b87a2e%22%2F%3E%20%3Cpolygon%20points%3D%2272%2C53%2055%2C58%2050%2C53%22%20fill%3D%22%23b87a2e%22%2F%3E%20%3Cpolygon%20points%3D%2250%2C75%2045%2C58%2050%2C53%22%20fill%3D%22%23b87a2e%22%2F%3E%20%3Cpolygon%20points%3D%2228%2C53%2045%2C48%2050%2C53%22%20fill%3D%22%23b87a2e%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2253%22%20r%3D%223.5%22%20fill%3D%22%23e6dff0%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-10-17T23:57:19",
-   "dates": [
-    "2026-10-17"
+   "sittings": [
+    {
+     "start": 1792233183,
+     "end": 1792249039
+    }
    ],
-   "t0": 1792233183,
-   "t1": 1792249039,
    "impressions": [
     {
      "id": "imp_s06_1",
@@ -4589,11 +4578,12 @@
     "あおい": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23f1dce2%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23c84640%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%23471c28%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cpath%20d%3D%22M29%2044%20L25%2020%20L43%2032%20C47%2031%2053%2031%2057%2032%20L75%2020%20L71%2044%20C73%2056%2063%2072%2050%2079%20C37%2072%2027%2056%2029%2044%20Z%22%20fill%3D%22%23471c28%22%2F%3E%20%3Cpath%20d%3D%22M32%2045%20L29%2027%20L41%2035%20Z%22%20fill%3D%22%23c84640%22%2F%3E%20%3Cpath%20d%3D%22M68%2045%20L71%2027%20L59%2035%20Z%22%20fill%3D%22%23c84640%22%2F%3E%20%3Cpath%20d%3D%22M36%2048%20Q42%2044%2046%2049%22%20fill%3D%22none%22%20stroke%3D%22%23f1dce2%22%20stroke-width%3D%222.8%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cpath%20d%3D%22M54%2049%20Q58%2044%2064%2048%22%20fill%3D%22none%22%20stroke%3D%22%23f1dce2%22%20stroke-width%3D%222.8%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cpath%20d%3D%22M45%2038%20L50%2035%20L55%2038%20L50%2042%20Z%22%20fill%3D%22%23c84640%22%2F%3E%20%3Cpath%20d%3D%22M33%2056%20L42%2060%20M67%2056%20L58%2060%22%20stroke%3D%22%23c84640%22%20stroke-width%3D%222.5%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2268%22%20r%3D%222.2%22%20fill%3D%22%23f1dce2%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-10-31T21:59:00",
-   "dates": [
-    "2026-10-31"
-   ],
-   "t0": 1793446611,
-   "t1": 1793451540
+   "sittings": [
+    {
+     "start": 1793446611,
+     "end": 1793451540
+    }
+   ]
   },
   "s08": {
    "id": "s08",
@@ -5201,12 +5191,16 @@
     "なつ": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23f5e6cf%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23c0782c%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%2336271d%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Crect%20x%3D%2226%22%20y%3D%2229%22%20width%3D%2211%22%20height%3D%225%22%20rx%3D%221.5%22%20fill%3D%22%23c0782c%22%2F%3E%20%3Crect%20x%3D%2261%22%20y%3D%2228%22%20width%3D%2212%22%20height%3D%226%22%20rx%3D%221.5%22%20fill%3D%22%2336271d%22%2F%3E%20%3Crect%20x%3D%2220%22%20y%3D%2234%22%20width%3D%2260%22%20height%3D%2239%22%20rx%3D%226%22%20fill%3D%22%2336271d%22%2F%3E%20%3Crect%20x%3D%2220%22%20y%3D%2234%22%20width%3D%2260%22%20height%3D%2211%22%20rx%3D%224%22%20fill%3D%22%23c0782c%22%2F%3E%20%3Crect%20x%3D%2227%22%20y%3D%2237%22%20width%3D%2211%22%20height%3D%225%22%20rx%3D%221.5%22%20fill%3D%22%23f5e6cf%22%2F%3E%20%3Ccircle%20cx%3D%2252%22%20cy%3D%2256%22%20r%3D%2214%22%20fill%3D%22%23f5e6cf%22%2F%3E%20%3Ccircle%20cx%3D%2252%22%20cy%3D%2256%22%20r%3D%2210.5%22%20fill%3D%22%2336271d%22%2F%3E%20%3Ccircle%20cx%3D%2252%22%20cy%3D%2256%22%20r%3D%225.5%22%20fill%3D%22%23c0782c%22%2F%3E%20%3Ccircle%20cx%3D%2254.5%22%20cy%3D%2253.5%22%20r%3D%222%22%20fill%3D%22%23f5e6cf%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-11-08T22:59:41",
-   "dates": [
-    "2026-11-07",
-    "2026-11-08"
+   "sittings": [
+    {
+     "start": 1794049471,
+     "end": 1794058330
+    },
+    {
+     "start": 1794139460,
+     "end": 1794146381
+    }
    ],
-   "t0": 1794049471,
-   "t1": 1794146381,
    "impressions": [
     {
      "id": "imp_s08_1",
@@ -5799,11 +5793,12 @@
     "由良": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23e6dff0%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23b87a2e%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%233c304a%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2220%22%20r%3D%224%22%20fill%3D%22none%22%20stroke%3D%22%233c304a%22%20stroke-width%3D%222.6%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2253%22%20r%3D%2227%22%20fill%3D%22none%22%20stroke%3D%22%233c304a%22%20stroke-width%3D%222.6%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2253%22%20r%3D%2220%22%20fill%3D%22none%22%20stroke%3D%22%23b87a2e%22%20stroke-width%3D%221.6%22%20stroke-dasharray%3D%223%203%22%2F%3E%20%3Cpolygon%20points%3D%2250%2C31%2055%2C48%2072%2C53%2055%2C58%2050%2C75%2045%2C58%2028%2C53%2045%2C48%22%20fill%3D%22%233c304a%22%2F%3E%20%3Cpolygon%20points%3D%2250%2C31%2055%2C48%2050%2C53%22%20fill%3D%22%23b87a2e%22%2F%3E%20%3Cpolygon%20points%3D%2272%2C53%2055%2C58%2050%2C53%22%20fill%3D%22%23b87a2e%22%2F%3E%20%3Cpolygon%20points%3D%2250%2C75%2045%2C58%2050%2C53%22%20fill%3D%22%23b87a2e%22%2F%3E%20%3Cpolygon%20points%3D%2228%2C53%2045%2C48%2050%2C53%22%20fill%3D%22%23b87a2e%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2253%22%20r%3D%223.5%22%20fill%3D%22%23e6dff0%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-11-04T01:22:09",
-   "dates": [
-    "2026-11-03"
-   ],
-   "t0": 1793707442,
-   "t1": 1793722929
+   "sittings": [
+    {
+     "start": 1793707442,
+     "end": 1793722929
+    }
+   ]
   },
   "s10": {
    "id": "s10",
@@ -6530,12 +6525,16 @@
     "ひな": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23f4dcd8%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23c85232%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%2357211d%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cpolygon%20points%3D%2228%2C27%2033%2C32%2028%2C37%2023%2C32%22%20fill%3D%22%23c85232%22%2F%3E%20%3Cpolygon%20points%3D%2273%2C38%2077%2C42%2073%2C46%2069%2C42%22%20fill%3D%22%23c85232%22%2F%3E%20%3Cpath%20d%3D%22M50%2018%20L66%2047%20L57%2067%20L43%2067%20L34%2047%20Z%22%20fill%3D%22%2357211d%22%2F%3E%20%3Cline%20x1%3D%2250%22%20y1%3D%2218%22%20x2%3D%2250%22%20y2%3D%2248%22%20stroke%3D%22%23f4dcd8%22%20stroke-width%3D%222.2%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%223.6%22%20fill%3D%22%23f4dcd8%22%2F%3E%20%3Crect%20x%3D%2240%22%20y%3D%2267%22%20width%3D%2220%22%20height%3D%227%22%20rx%3D%222%22%20fill%3D%22%23c85232%22%2F%3E%20%3Crect%20x%3D%2242%22%20y%3D%2275%22%20width%3D%2216%22%20height%3D%225%22%20rx%3D%222%22%20fill%3D%22%2357211d%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-11-15T23:22:26",
-   "dates": [
-    "2026-11-14",
-    "2026-11-15"
-   ],
-   "t0": 1794657883,
-   "t1": 1794752546
+   "sittings": [
+    {
+     "start": 1794657883,
+     "end": 1794668768
+    },
+    {
+     "start": 1794744230,
+     "end": 1794752546
+    }
+   ]
   },
   "s11": {
    "id": "s11",
@@ -6575,11 +6574,12 @@
     "あおい": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23f1dce2%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23c84640%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%23471c28%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cpath%20d%3D%22M29%2044%20L25%2020%20L43%2032%20C47%2031%2053%2031%2057%2032%20L75%2020%20L71%2044%20C73%2056%2063%2072%2050%2079%20C37%2072%2027%2056%2029%2044%20Z%22%20fill%3D%22%23471c28%22%2F%3E%20%3Cpath%20d%3D%22M32%2045%20L29%2027%20L41%2035%20Z%22%20fill%3D%22%23c84640%22%2F%3E%20%3Cpath%20d%3D%22M68%2045%20L71%2027%20L59%2035%20Z%22%20fill%3D%22%23c84640%22%2F%3E%20%3Cpath%20d%3D%22M36%2048%20Q42%2044%2046%2049%22%20fill%3D%22none%22%20stroke%3D%22%23f1dce2%22%20stroke-width%3D%222.8%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cpath%20d%3D%22M54%2049%20Q58%2044%2064%2048%22%20fill%3D%22none%22%20stroke%3D%22%23f1dce2%22%20stroke-width%3D%222.8%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cpath%20d%3D%22M45%2038%20L50%2035%20L55%2038%20L50%2042%20Z%22%20fill%3D%22%23c84640%22%2F%3E%20%3Cpath%20d%3D%22M33%2056%20L42%2060%20M67%2056%20L58%2060%22%20stroke%3D%22%23c84640%22%20stroke-width%3D%222.5%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2268%22%20r%3D%222.2%22%20fill%3D%22%23f1dce2%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-10-30T23:37:00",
-   "dates": [
-    "2026-10-30"
-   ],
-   "t0": 1793354400,
-   "t1": 1793371020
+   "sittings": [
+    {
+     "start": 1793354400,
+     "end": 1793371020
+    }
+   ]
   },
   "s12": {
    "id": "s12",
@@ -6619,11 +6619,12 @@
     "あおい": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23f1dce2%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23c84640%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%23471c28%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cpath%20d%3D%22M29%2044%20L25%2020%20L43%2032%20C47%2031%2053%2031%2057%2032%20L75%2020%20L71%2044%20C73%2056%2063%2072%2050%2079%20C37%2072%2027%2056%2029%2044%20Z%22%20fill%3D%22%23471c28%22%2F%3E%20%3Cpath%20d%3D%22M32%2045%20L29%2027%20L41%2035%20Z%22%20fill%3D%22%23c84640%22%2F%3E%20%3Cpath%20d%3D%22M68%2045%20L71%2027%20L59%2035%20Z%22%20fill%3D%22%23c84640%22%2F%3E%20%3Cpath%20d%3D%22M36%2048%20Q42%2044%2046%2049%22%20fill%3D%22none%22%20stroke%3D%22%23f1dce2%22%20stroke-width%3D%222.8%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cpath%20d%3D%22M54%2049%20Q58%2044%2064%2048%22%20fill%3D%22none%22%20stroke%3D%22%23f1dce2%22%20stroke-width%3D%222.8%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cpath%20d%3D%22M45%2038%20L50%2035%20L55%2038%20L50%2042%20Z%22%20fill%3D%22%23c84640%22%2F%3E%20%3Cpath%20d%3D%22M33%2056%20L42%2060%20M67%2056%20L58%2060%22%20stroke%3D%22%23c84640%22%20stroke-width%3D%222.5%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2268%22%20r%3D%222.2%22%20fill%3D%22%23f1dce2%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-11-14T00:53:00",
-   "dates": [
-    "2026-11-13"
-   ],
-   "t0": 1794565800,
-   "t1": 1794585180
+   "sittings": [
+    {
+     "start": 1794565800,
+     "end": 1794585180
+    }
+   ]
   },
   "s13": {
    "id": "s13",
@@ -6665,11 +6666,12 @@
     "佐々": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23ede2d5%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23b84724%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%234a3625%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cpath%20d%3D%22M25%2026%20L75%2074%20M75%2026%20L25%2074%22%20stroke%3D%22%23b84724%22%20stroke-width%3D%224.2%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cpath%20d%3D%22M24%2034%20L33%2025%20M76%2034%20L67%2025%22%20stroke%3D%22%234a3625%22%20stroke-width%3D%223%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cpath%20d%3D%22M32%2030%20L68%2030%20L68%2050%20C68%2063%2059%2072%2050%2077%20C41%2072%2032%2063%2032%2050%20Z%22%20fill%3D%22%234a3625%22%20stroke%3D%22%23ede2d5%22%20stroke-width%3D%222%22%2F%3E%20%3Cpath%20d%3D%22M50%2035%20L50%2070%20M38%2047%20L62%2047%22%20stroke%3D%22%23b84724%22%20stroke-width%3D%223.2%22%20stroke-linecap%3D%22round%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-11-06T22:03:00",
-   "dates": [
-    "2026-11-06"
-   ],
-   "t0": 1793959200,
-   "t1": 1793970180
+   "sittings": [
+    {
+     "start": 1793959200,
+     "end": 1793970180
+    }
+   ]
   },
   "s14": {
    "id": "s14",
@@ -6706,11 +6708,12 @@
     "佐々": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23ede2d5%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23b84724%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%234a3625%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cpath%20d%3D%22M25%2026%20L75%2074%20M75%2026%20L25%2074%22%20stroke%3D%22%23b84724%22%20stroke-width%3D%224.2%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cpath%20d%3D%22M24%2034%20L33%2025%20M76%2034%20L67%2025%22%20stroke%3D%22%234a3625%22%20stroke-width%3D%223%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cpath%20d%3D%22M32%2030%20L68%2030%20L68%2050%20C68%2063%2059%2072%2050%2077%20C41%2072%2032%2063%2032%2050%20Z%22%20fill%3D%22%234a3625%22%20stroke%3D%22%23ede2d5%22%20stroke-width%3D%222%22%2F%3E%20%3Cpath%20d%3D%22M50%2035%20L50%2070%20M38%2047%20L62%2047%22%20stroke%3D%22%23b84724%22%20stroke-width%3D%223.2%22%20stroke-linecap%3D%22round%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-11-06T00:30:00",
-   "dates": [
-    "2026-11-05"
-   ],
-   "t0": 1793876400,
-   "t1": 1793892600
+   "sittings": [
+    {
+     "start": 1793876400,
+     "end": 1793892600
+    }
+   ]
   },
   "s15": {
    "id": "s15",
@@ -7525,11 +7528,12 @@
     "まこと": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23dfeade%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%239c6234%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%232e4b38%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cpath%20d%3D%22M40%2033%20C37%2028%2043%2024%2040%2019%22%20fill%3D%22none%22%20stroke%3D%22%239c6234%22%20stroke-width%3D%222.4%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cpath%20d%3D%22M50%2031%20C47%2026%2053%2021%2050%2016%22%20fill%3D%22none%22%20stroke%3D%22%239c6234%22%20stroke-width%3D%222.4%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cpath%20d%3D%22M60%2033%20C57%2028%2063%2024%2060%2019%22%20fill%3D%22none%22%20stroke%3D%22%239c6234%22%20stroke-width%3D%222.4%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cpath%20d%3D%22M30%2040%20L66%2040%20L63%2058%20C62%2065%2056%2069%2048%2069%20C40%2069%2034%2065%2033%2058%20Z%22%20fill%3D%22%232e4b38%22%2F%3E%20%3Cpath%20d%3D%22M65%2044%20C73%2044%2075%2056%2064%2058%22%20fill%3D%22none%22%20stroke%3D%22%232e4b38%22%20stroke-width%3D%223.6%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cellipse%20cx%3D%2249%22%20cy%3D%2273%22%20rx%3D%2225%22%20ry%3D%224.5%22%20fill%3D%22%239c6234%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-11-02T03:16:36",
-   "dates": [
-    "2026-11-01"
-   ],
-   "t0": 1793536569,
-   "t1": 1793556996
+   "sittings": [
+    {
+     "start": 1793536569,
+     "end": 1793556996
+    }
+   ]
   },
   "s16": {
    "id": "s16",
@@ -7579,11 +7583,12 @@
     "夜霜": "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%3E%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2250%22%20fill%3D%22%23e8dfd6%22%2F%3E%20%3Cpath%20d%3D%22M12%2068%20A44%2044%200%200%200%2088%2068%20A48%2048%200%200%201%2012%2068%20Z%22%20fill%3D%22%23a86b28%22%20fill-opacity%3D%220.16%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2250%22%20r%3D%2245%22%20fill%3D%22none%22%20stroke%3D%22%23302720%22%20stroke-opacity%3D%220.2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2221%22%20r%3D%225%22%20fill%3D%22none%22%20stroke%3D%22%23302720%22%20stroke-width%3D%222.5%22%2F%3E%20%3Crect%20x%3D%2246%22%20y%3D%2225%22%20width%3D%228%22%20height%3D%225%22%20rx%3D%221.5%22%20fill%3D%22%23302720%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2254%22%20r%3D%2225%22%20fill%3D%22%23302720%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2254%22%20r%3D%2220%22%20fill%3D%22%23e8dfd6%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2254%22%20r%3D%2216.5%22%20fill%3D%22none%22%20stroke%3D%22%23a86b28%22%20stroke-width%3D%221.4%22%2F%3E%20%3Cpath%20d%3D%22M50%2038%20L50%2041%20M50%2067%20L50%2070%20M34%2054%20L37%2054%20M63%2054%20L66%2054%22%20stroke%3D%22%23302720%22%20stroke-width%3D%222.2%22%20stroke-linecap%3D%22round%22%2F%3E%20%3Cpolyline%20points%3D%2250%2C42%2050%2C54%2059%2C59%22%20fill%3D%22none%22%20stroke%3D%22%23302720%22%20stroke-width%3D%222.6%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%20%3Ccircle%20cx%3D%2250%22%20cy%3D%2254%22%20r%3D%222.6%22%20fill%3D%22%23a86b28%22%2F%3E%20%3C%2Fsvg%3E"
    },
    "createdAt": "2026-11-16T02:17:00",
-   "dates": [
-    "2026-11-15"
-   ],
-   "t0": 1794744000,
-   "t1": 1794763020
+   "sittings": [
+    {
+     "start": 1794744000,
+     "end": 1794763020
+    }
+   ]
   }
  },
  "characters": {

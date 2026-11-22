@@ -13,6 +13,8 @@ export type SheetProvider =
   | "charash"
   | "charasheet"
   | "ytsheet"
+  | "souko"
+  | "lhrpg"
   | "iachara"
   | "emoklore"
   | "ccfolia"
@@ -75,6 +77,8 @@ export const SHEET_PROVIDER_LABELS: Record<SheetProvider, string> = {
   charash: "キャラッシュ",
   charasheet: "キャラクター保管所",
   ytsheet: "ゆとシートⅡ",
+  souko: "キャラクターシート倉庫",
+  lhrpg: "冒険窓口",
   iachara: "いあきゃら",
   emoklore: "エモクロアキャラクターシート",
   ccfolia: "ココフォリアのコマ",

@@ -2,19 +2,22 @@ import { useEffect, useMemo, useRef, useState, type ComponentRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SvgXml } from "react-native-svg";
-import { SYSTEMS, SYSTEM_LIST } from "@shared/data/systems";
+import { SYSTEMS } from "@shared/data/systems";
+import { userHref } from "@shared/lib/people";
+import { recentSystemIds, systemOptions } from "@shared/lib/system-options";
 import { buildReportCardSVG, xIntentUrl } from "@shared/external";
 import { createSharedInvite, fetchSharedLog, revokeSharedMember } from "@shared/lib/cloud-state";
 import {
-  buildSessionRange,
   fmtDates,
+  fmtSessionWhen,
+  sessionDays,
   fmtDur,
   jstTime,
-  sessionClock,
   sessionPlayMinutes,
   uid,
 } from "@shared/lib/time";
-import type { Log, MsgKind, Scope } from "@shared/types";
+import { sittingToFields, sittingsFromFields, type SittingFields } from "@shared/lib/sittings";
+import type { Log, MsgKind } from "@shared/types";
 import { LogReader } from "../../components/LogReader";
 import { ScreenFrame, ScreenShell } from "../../components/ScreenShell";
 import { Avatar, CharAvatar } from "../../components/identity";
@@ -31,13 +34,13 @@ import {
   IconUnlink,
   IconUpload,
   IconUserPlus,
-  IconUsersGroup,
+  IconTable,
 } from "../../components/icons";
 import {
   BottomSheet,
   Button,
+  Combobox,
   CopyBox,
-  DateList,
   DividerList,
   EmptyState,
   Field,
@@ -48,14 +51,14 @@ import {
   NotFound,
   PageHead,
   SCOPE_META,
+  ScopePicker,
   SectionTitle,
   Seg,
-  Select,
+  SittingsInput,
   Surface,
   SysBadge,
   Tag,
   TextField,
-  TimeRange,
   Toggle,
 } from "../../components/ui";
 import { hapticSelection, hapticSuccess } from "../../native/haptics";
@@ -63,6 +66,7 @@ import { openExternalUrl, shareTextOrUrl, shareViewAsPng } from "../../native/na
 import { useMobileStore } from "../../store/mobile-store";
 import { useTheme } from "../../theme/ThemeProvider";
 import { RADII } from "../../theme/tokens";
+import { userFacingError } from "@shared/lib/user-error";
 
 export default function SessionDetailScreen() {
   const { tokens } = useTheme();
@@ -143,10 +147,7 @@ export default function SessionDetailScreen() {
               <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
                 <IconCalendarTime size={15} color={tokens.ink2} />
                 <Text style={{ fontSize: 13, color: tokens.ink, fontVariant: ["tabular-nums"] }}>
-                  {fmtDates(log.dates)}
-                  {log.dates.length > 1
-                    ? `（${log.dates.length}日間）`
-                    : ` ${jstTime(log.t0)}–${jstTime(log.t1)}`}
+                  {fmtSessionWhen(log)}
                 </Text>
               </View>
               {playMin > 0 && (
@@ -171,7 +172,7 @@ export default function SessionDetailScreen() {
                   onPress={() => router.push(`/tables/${tb.id}` as never)}
                   style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
                 >
-                  <IconUsersGroup size={14} color={tokens.primary} />
+                  <IconTable size={14} color={tokens.primary} />
                   <Text style={{ fontSize: 13, fontWeight: "600", color: tokens.primary }}>{tb.name}</Text>
                 </Pressable>
               )}
@@ -449,10 +450,7 @@ function MembersSection({ log }: { log: Log }) {
           {kp && (
             <View style={styles.memberRow}>
               <Avatar u={kp} size={36} />
-              <Pressable
-                style={{ flex: 1, minWidth: 0 }}
-                onPress={() => router.push(`/users/${kp.id}` as never)}
-              >
+              <Pressable style={{ flex: 1, minWidth: 0 }} onPress={() => router.push(userHref(kp) as never)}>
                 <Text style={{ fontSize: 15, fontWeight: "700", color: tokens.ink }}>{kp.name}</Text>
                 <Text style={{ fontSize: 12, color: tokens.ink2 }}>GM</Text>
               </Pressable>
@@ -473,7 +471,7 @@ function MembersSection({ log }: { log: Log }) {
                       </Text>
                     </Pressable>
                   ) : (
-                    <Pressable onPress={() => router.push(`/users/${u.id}` as never)}>
+                    <Pressable onPress={() => router.push(userHref(u) as never)}>
                       <Text style={{ fontSize: 15, fontWeight: "700", color: tokens.ink }} numberOfLines={1}>
                         {u.name}
                       </Text>
@@ -757,11 +755,7 @@ function EditLogSheet({ log, onClose }: { log: Log; onClose: () => void }) {
   const [systemId, setSystemId] = useState(log.systemId);
   const [scenarioId, setScenarioId] = useState(log.scenarioId ?? "");
   const [tableId, setTableId] = useState(log.tableId ?? "");
-  const [dates, setDates] = useState<string[]>(log.dates);
-  const [start, setStart] = useState(jstTime(log.t0));
-  const [end, setEnd] = useState(
-    sessionClock(log.t1, log.dates[log.dates.length - 1] ?? log.dates[0] ?? "2026-01-01"),
-  );
+  const [sittings, setSittings] = useState<SittingFields[]>(() => log.sittings.map(sittingToFields));
   const [error, setError] = useState<string | null>(null);
 
   function save() {
@@ -769,9 +763,9 @@ function EditLogSheet({ log, onClose }: { log: Log; onClose: () => void }) {
       setError("タイトルを入力してください");
       return;
     }
-    const range = buildSessionRange({ dates, startTime: start, endTime: end });
-    if (!range.ok) {
-      setError(range.error ?? "日時を確認してください");
+    const parsed = sittingsFromFields(sittings);
+    if (!parsed.ok) {
+      setError(parsed.error);
       return;
     }
     update((s) => {
@@ -781,9 +775,7 @@ function EditLogSheet({ log, onClose }: { log: Log; onClose: () => void }) {
       target.systemId = systemId;
       target.scenarioId = scenarioId || undefined;
       target.tableId = tableId || undefined;
-      target.dates = [...dates].sort();
-      target.t0 = range.t0;
-      target.t1 = range.t1;
+      target.sittings = parsed.sittings;
     });
     hapticSuccess();
     onClose();
@@ -809,15 +801,16 @@ function EditLogSheet({ log, onClose }: { log: Log; onClose: () => void }) {
         <TextField value={title} onChangeText={setTitle} />
       </Field>
       <Field label="システム">
-        <Select
+        <Combobox
           ariaLabel="システム"
           value={systemId}
           onChange={setSystemId}
-          options={SYSTEM_LIST.map((s) => ({ value: s.id, label: s.name }))}
+          options={systemOptions()}
+          pinned={recentSystemIds(Object.values(state.logs))}
         />
       </Field>
       <Field label="シナリオ">
-        <Select
+        <Combobox
           ariaLabel="シナリオ"
           value={scenarioId}
           onChange={setScenarioId}
@@ -828,7 +821,7 @@ function EditLogSheet({ log, onClose }: { log: Log; onClose: () => void }) {
         />
       </Field>
       <Field label="卓">
-        <Select
+        <Combobox
           ariaLabel="卓"
           value={tableId}
           onChange={setTableId}
@@ -840,11 +833,8 @@ function EditLogSheet({ log, onClose }: { log: Log; onClose: () => void }) {
       </Field>
       {!log.hasLog && (
         <>
-          <Field label="実施日">
-            <DateList dates={dates} setDates={setDates} />
-          </Field>
-          <Field label="時間">
-            <TimeRange start={start} end={end} setStart={setStart} setEnd={setEnd} />
+          <Field label="遊んだ日時">
+            <SittingsInput rows={sittings} onChange={setSittings} />
           </Field>
         </>
       )}
@@ -882,7 +872,7 @@ function ShareSheet({
       const token = await createSharedInvite(log, state);
       setInviteUrl(`${origin}/invite/${token}`);
     } catch (cause) {
-      setInviteError(cause instanceof Error ? cause.message : "招待リンクを作成できませんでした。");
+      setInviteError(userFacingError(cause, "招待リンクを作成できませんでした。"));
     } finally {
       setInviteBusy(false);
     }
@@ -902,20 +892,14 @@ function ShareSheet({
       <View style={{ gap: 18 }}>
         <View style={{ gap: 8 }}>
           <Text style={{ fontSize: 14, fontWeight: "700", color: tokens.ink }}>公開範囲</Text>
-          <Seg<Scope>
+          <ScopePicker
             value={log.scope}
             onChange={(v) =>
               update((s) => {
                 if (s.logs[log.id]) s.logs[log.id]!.scope = v;
               })
             }
-            options={[
-              { v: "members", label: "メンバー限定" },
-              { v: "passed", label: "プレイした人" },
-              { v: "public", label: "公開" },
-            ]}
           />
-          <Text style={{ fontSize: 13, color: tokens.ink2 }}>{SCOPE_META[log.scope].hint}</Text>
         </View>
 
         <View style={{ gap: 8 }}>
@@ -1014,12 +998,12 @@ function ReportCardSheet({ log, onClose }: { log: Log; onClose: () => void }) {
       scenarioTitle: sc?.title,
       scenarioEmoji: sc?.emoji,
       title: log.title,
-      dateLabel: fmtDates(log.dates),
+      dateLabel: fmtDates(sessionDays(log)),
       systemName: sys?.name ?? "汎用・その他",
       playerCount: Object.keys(log.players).length || 1,
       shareUrl,
     }),
-    [log.dates, log.players, log.title, sc?.emoji, sc?.title, shareUrl, sys?.name],
+    [log, sc?.emoji, sc?.title, shareUrl, sys?.name],
   );
   const svg = useMemo(() => buildReportCardSVG(data), [data]);
 
@@ -1029,7 +1013,7 @@ function ReportCardSheet({ log, onClose }: { log: Log; onClose: () => void }) {
     try {
       await shareViewAsPng(cardRef, `takufu-report-${log.slug}.png`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "画像を書き出せませんでした。");
+      setError(userFacingError(cause, "画像を書き出せませんでした。"));
     } finally {
       setBusy(false);
     }

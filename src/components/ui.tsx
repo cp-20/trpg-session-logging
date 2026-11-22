@@ -7,16 +7,32 @@ import {
   useEffect,
   useId,
   useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
+import { createPortal } from "react-dom";
 import type { ComponentPropsWithRef, ReactNode, Ref } from "react";
 import { Link } from "../lib/router";
+import {
+  MARK_BOARD,
+  MARK_BOARD_OPACITY,
+  MARK_BOARD_WIDTH,
+  MARK_RADIUS,
+  MARK_STONE,
+  MARK_VIEWBOX,
+} from "./brand";
 import { getJapaneseHolidayName } from "../lib/holidays";
 import { fmtDelta, todayStr } from "../lib/format";
+import { fmtDateText, parseDateText } from "../lib/date-text";
+import { nextSittingFields, normalizeTime, type SittingFields } from "../lib/sittings";
 import { DICETOUS_COMMONS, LEGAL_LINKS, rightsNoticesFor } from "../lib/rights";
-import type { Scope, SystemDef } from "../types";
+import { identiconDataUri } from "../lib/identicon";
+import { comboEntries, hasExactLabel } from "../lib/search-text";
+import type { ComboEntry, SearchOption } from "../lib/search-text";
+import type { Scope, SystemDef, Table } from "../types";
 import {
   IconBooks,
   IconCalendar,
@@ -83,11 +99,82 @@ export function SysBadge({ sys }: { sys: SystemDef | undefined }) {
 }
 
 /* ---------- 共有範囲ラベル ---------- */
-export const SCOPE_META: Record<Scope, { label: string; hint: string; Icon: typeof IconLock }> = {
-  members: { label: "メンバー限定", hint: "参加者と卓のメンバーだけが読めます", Icon: IconLock },
-  passed: { label: "プレイした人", hint: "このシナリオを通過した人も読めます", Icon: IconUsers },
-  public: { label: "公開", hint: "リンクを知っている人なら誰でも読めます", Icon: IconWorld },
-};
+export const SCOPE_META: Record<Scope, { label: string; hint: string; who: string; Icon: typeof IconLock }> =
+  {
+    members: {
+      label: "メンバー限定",
+      hint: "参加者と卓のメンバーだけが読めます",
+      who: "参加者と卓のメンバー",
+      Icon: IconLock,
+    },
+    passed: {
+      label: "プレイした人",
+      hint: "このシナリオを通過した人も読めます",
+      who: "＋このシナリオを遊んだ人",
+      Icon: IconUsers,
+    },
+    public: {
+      label: "公開",
+      hint: "リンクを知っている人なら誰でも読めます",
+      who: "リンクを知っている人",
+      Icon: IconWorld,
+    },
+  };
+
+/**
+ * 共有範囲を選ぶ。3 つを「だれが読めるか」と並べて見比べられるようにし、説明の段落を足さない（P4）。
+ * 狭い順に並べる（メンバー限定 ⊂ プレイした人 ⊂ 公開）。
+ */
+export function ScopePicker({
+  value,
+  onChange,
+  ariaLabel = "共有範囲",
+}: {
+  value: Scope;
+  onChange: (scope: Scope) => void;
+  ariaLabel?: string;
+}) {
+  const name = useId();
+  return (
+    <div role="radiogroup" aria-label={ariaLabel} className="grid gap-2 sm:grid-cols-3">
+      {(["members", "passed", "public"] as const).map((v) => {
+        const M = SCOPE_META[v];
+        const on = value === v;
+        const descId = `${name}-${v}`;
+        return (
+          <label
+            key={v}
+            className={cx(
+              "flex items-start gap-2.5 rounded-lg border px-3 py-2.5 transition-colors",
+              on
+                ? "cursor-pointer border-primary bg-primary/5"
+                : "cursor-pointer border-base-300 hover:bg-base-200/60",
+            )}
+          >
+            <input
+              type="radio"
+              name={name}
+              className="radio radio-primary radio-sm mt-0.5"
+              checked={on}
+              aria-labelledby={`${descId}-label`}
+              aria-describedby={descId}
+              onChange={() => onChange(v)}
+            />
+            <span className="min-w-0">
+              <span id={`${descId}-label`} className="flex items-center gap-1.5 text-sm font-bold">
+                <M.Icon width={15} height={15} className="shrink-0 text-ink2" aria-hidden />
+                {M.label}
+              </span>
+              <span id={descId} className="mt-0.5 block text-xs text-ink2">
+                {M.who}
+              </span>
+            </span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
 
 export function ScopeLabel({ scope, className }: { scope: Scope; className?: string }) {
   const m = SCOPE_META[scope];
@@ -352,6 +439,885 @@ export function Select<T extends string = string>({
   );
 }
 
+/* ---------- Combobox / MultiCombobox（多い・増えうる選択肢） ---------- */
+/**
+ * 候補 1 件。`keywords` は表示しない別名・読み（検索だけに使う）、`group` は見出し、`hint` は右に添える補足。
+ * 絞り込みは src/lib/search-text.ts（全角半角・大文字小文字・ひらがなカタカナを区別しない）
+ */
+export type ComboboxOption<T extends string = string> = SearchOption<T>;
+
+/** 一度に描く候補の数。これを超えた分は「ほか N 件」とだけ出し、入力で絞らせる */
+const COMBOBOX_LIMIT = 50;
+
+/** 入力欄の下（入らなければ上）に浮かぶ層の位置。document.body に出すので fixed で置く */
+function useAnchoredPopover(open: boolean, anchorRef: React.RefObject<HTMLElement | null>) {
+  const [pos, setPos] = useState<{
+    left: number;
+    width: number;
+    maxHeight: number;
+    top?: number;
+    bottom?: number;
+  } | null>(null);
+  // 描く前に測る（前に開いたときの位置を一瞬でも出さない）
+  useLayoutEffect(() => {
+    if (!open) return;
+    const update = () => {
+      const rect = anchorRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const vw = window.innerWidth;
+      // ソフトウェアキーボードが出ているときは見えている高さで決める
+      const vh = window.visualViewport?.height ?? window.innerHeight;
+      const below = vh - rect.bottom - 12;
+      const above = rect.top - 12;
+      const openUp = below < 200 && above > below;
+      const width = Math.min(Math.max(rect.width, 240), vw - 16);
+      const left = Math.max(8, Math.min(rect.left, vw - width - 8));
+      const maxHeight = Math.max(140, Math.min(320, openUp ? above : below));
+      setPos(
+        openUp
+          ? { left, width, maxHeight, bottom: window.innerHeight - rect.top + 4 }
+          : { left, width, maxHeight, top: rect.bottom + 4 },
+      );
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    window.visualViewport?.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+      window.visualViewport?.removeEventListener("resize", update);
+    };
+  }, [open, anchorRef]);
+  return pos;
+}
+
+/** 入力から候補の並び（見出し・「追加」行を含む）を作る。Combobox と MultiCombobox で共通（中身は src/lib/search-text.ts） */
+function useComboEntries<T extends string>(args: Parameters<typeof comboEntries<T>>[0]) {
+  const { options, query, pinned, pinnedLabel, allLabel, canCreate, limit } = args;
+  return useMemo(
+    () => comboEntries({ options, query, pinned, pinnedLabel, allLabel, canCreate, limit }),
+    [options, query, pinned, pinnedLabel, allLabel, canCreate, limit],
+  );
+}
+
+/** 浮かぶ候補の一覧。見出しごとに role=group でまとめ、いまの候補は地の色だけで示す（ring・遷移なし） */
+function ComboListbox<T extends string>({
+  id,
+  label,
+  entries,
+  hidden,
+  activeIdx,
+  isSelected,
+  onHover,
+  onChoose,
+  pos,
+  emptyText,
+}: {
+  id: string;
+  label?: string;
+  entries: ComboEntry<T>[];
+  hidden: number;
+  activeIdx: number;
+  isSelected: (value: T) => boolean;
+  onHover: (idx: number) => void;
+  onChoose: (entry: ComboEntry<T>) => void;
+  pos: ReturnType<typeof useAnchoredPopover>;
+  emptyText: string;
+}) {
+  if (typeof document === "undefined") return null;
+  const sections: { title?: string; items: { entry: ComboEntry<T>; idx: number }[] }[] = [];
+  entries.forEach((entry, idx) => {
+    const last = sections[sections.length - 1];
+    if (last && last.title === entry.section) last.items.push({ entry, idx });
+    else sections.push({ title: entry.section, items: [{ entry, idx }] });
+  });
+  const renderEntry = ({ entry, idx }: { entry: ComboEntry<T>; idx: number }) => {
+    const highlighted = idx === activeIdx;
+    const selected = entry.kind === "option" && isSelected(entry.option.value);
+    return (
+      <div
+        key={entry.kind === "option" ? `o-${entry.option.value}-${idx}` : "create"}
+        id={`${id}-o${idx}`}
+        role="option"
+        aria-selected={selected}
+        className={cx(
+          "flex w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm",
+          highlighted && "bg-base-200",
+          selected ? "font-bold text-primary" : "text-base-content",
+        )}
+        onMouseMove={() => {
+          if (!highlighted) onHover(idx);
+        }}
+        onClick={() => onChoose(entry)}
+      >
+        {entry.kind === "create" ? (
+          <span className="flex min-w-0 items-center gap-2">
+            <IconPlus width={16} height={16} strokeWidth={2.2} className="shrink-0 text-ink2" aria-hidden />
+            <span className="truncate">「{entry.text}」を追加</span>
+          </span>
+        ) : (
+          <>
+            <span className="min-w-0 truncate">{entry.option.label}</span>
+            <span className="flex shrink-0 items-center gap-1.5">
+              {entry.option.hint && (
+                <span className="text-xs font-normal text-ink2">{entry.option.hint}</span>
+              )}
+              {selected && <IconCheck width={15} height={15} className="text-primary" aria-hidden />}
+            </span>
+          </>
+        )}
+      </div>
+    );
+  };
+  return createPortal(
+    <div
+      className="popover fixed z-[90] flex flex-col overflow-hidden p-1.5"
+      style={
+        pos
+          ? { left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight }
+          : { visibility: "hidden" }
+      }
+      // 押しても入力欄からフォーカスを動かさない（閉じずに選べる）
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      <div
+        id={id}
+        role="listbox"
+        aria-label={label}
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+      >
+        {sections.map((section, sIdx) =>
+          section.title ? (
+            <div key={`${section.title}-${sIdx}`} role="group" aria-labelledby={`${id}-g${sIdx}`}>
+              <div
+                id={`${id}-g${sIdx}`}
+                role="presentation"
+                className="px-3 pb-1 pt-2 text-xs font-medium text-ink2"
+              >
+                {section.title}
+              </div>
+              {section.items.map(renderEntry)}
+            </div>
+          ) : (
+            section.items.map(renderEntry)
+          ),
+        )}
+      </div>
+      {entries.length === 0 && <p className="px-3 py-2 text-sm text-ink2">{emptyText}</p>}
+      {hidden > 0 && <p className="shrink-0 px-3 pb-1 pt-2 text-xs text-ink2">ほか {hidden} 件</p>}
+    </div>,
+    document.body,
+  );
+}
+
+/** IME で変換中のキー操作か（変換の確定の Enter で候補を選ばない） */
+const isComposingKey = (e: React.KeyboardEvent) => e.nativeEvent.isComposing || e.keyCode === 229;
+
+/** 開いている一覧の上下移動（端で反対へ回る）と Home / End */
+function nextActive(key: string, current: number, count: number): number | null {
+  if (count === 0) return null;
+  if (key === "ArrowDown") return current < 0 ? 0 : (current + 1) % count;
+  if (key === "ArrowUp") return current < 0 ? count - 1 : (current - 1 + count) % count;
+  if (key === "Home") return 0;
+  if (key === "End") return count - 1;
+  return null;
+}
+
+/**
+ * 1 つを選ぶ、検索できる選択欄（WAI-ARIA 1.2 combobox + listbox）。
+ * 多い・増えうる選択肢（システム・技能・シナリオ・人・キャラクター・卓）に使う。少なく決まったものは Select、見比べる少数は Seg。
+ *
+ * - 入力欄が role=combobox、候補は document.body に出す listbox。フォーカスは入力欄に置いたまま aria-activedescendant で候補を示す
+ * - ↑↓ で移動（端で回る）、Home / End で先頭・末尾、Enter で選ぶ、Escape で閉じて入力を戻す、Tab は選ばずに閉じる
+ * - IME の変換中は絞り込まず、変換確定の Enter で選ばない
+ * - `pinned` は入力が空のときだけ先頭に出す（最近使ったものなど）。`onCreate` を渡すと、名前の一致がないとき「追加」を出す
+ */
+export function Combobox<T extends string = string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  placeholder,
+  pinned,
+  pinnedLabel = "最近使ったもの",
+  allLabel = "すべて",
+  onCreate,
+  emptyText = "見つかりません",
+  size = "md",
+  className,
+  disabled,
+  id,
+  limit = COMBOBOX_LIMIT,
+  invalid,
+}: {
+  value: T;
+  options: readonly ComboboxOption<T>[];
+  onChange: (value: T) => void;
+  ariaLabel?: string;
+  placeholder?: string;
+  pinned?: readonly T[];
+  pinnedLabel?: string;
+  /** pinned があるとき、残りの候補の見出し */
+  allLabel?: string;
+  onCreate?: (text: string) => void;
+  emptyText?: string;
+  size?: "sm" | "md";
+  className?: string;
+  disabled?: boolean;
+  id?: string;
+  limit?: number;
+  invalid?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  /** 開いている間に打った文字。null は「まだ何も打っていない」 */
+  const [editing, setEditing] = useState<string | null>(null);
+  /** 絞り込みに使う文字（IME の変換中は前の値のまま） */
+  const [query, setQuery] = useState("");
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const composingRef = useRef(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listboxId = useId();
+  const selected = options.find((o) => o.value === value);
+  const { entries, hidden } = useComboEntries({
+    options,
+    query,
+    pinned,
+    pinnedLabel,
+    allLabel,
+    canCreate: Boolean(onCreate),
+    limit,
+  });
+  const pos = useAnchoredPopover(open, wrapRef);
+
+  useEffect(() => {
+    if (!open || activeIdx < 0) return;
+    document.getElementById(`${listboxId}-o${activeIdx}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [open, activeIdx, listboxId]);
+
+  function openList() {
+    if (disabled || open) return;
+    // 閉じている間の並びは入力が空のときのもの。選んでいるものを最初のいまの候補にする
+    const idx = entries.findIndex((e) => e.kind === "option" && e.option.value === value);
+    setActiveIdx(idx >= 0 ? idx : entries.length > 0 ? 0 : -1);
+    setEditing(null);
+    setQuery("");
+    setOpen(true);
+  }
+
+  function close() {
+    setOpen(false);
+    setEditing(null);
+    setQuery("");
+    setActiveIdx(-1);
+  }
+
+  function choose(entry: ComboEntry<T>) {
+    if (entry.kind === "create") onCreate?.(entry.text);
+    else onChange(entry.option.value);
+    close();
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (disabled || isComposingKey(e)) return;
+    if (!open) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        openList();
+      }
+      return;
+    }
+    const moved = nextActive(e.key, activeIdx, entries.length);
+    if (e.key === "ArrowDown" && e.altKey) return;
+    if (moved !== null) {
+      e.preventDefault();
+      setActiveIdx(moved);
+    } else if (e.key === "Enter") {
+      const entry = entries[activeIdx];
+      e.preventDefault();
+      if (entry) choose(entry);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      // Modal の Escape（window で受ける）まで届けない。閉じるのは一覧だけ
+      e.nativeEvent.stopPropagation();
+      close();
+    } else if (e.key === "Tab") {
+      close();
+    }
+  }
+
+  const inputValue = open ? (editing ?? "") : (selected?.label ?? "");
+
+  return (
+    <div
+      ref={wrapRef}
+      className={cx(
+        "input input-bordered relative flex max-w-full items-center gap-1 pr-1",
+        size === "sm" ? "input-sm min-h-9 pl-3" : "min-h-10 pl-3.5",
+        invalid && "input-error",
+        disabled && "pointer-events-none opacity-60",
+        className,
+      )}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) {
+          e.preventDefault();
+          inputRef.current?.focus();
+          openList();
+        }
+      }}
+    >
+      <input
+        ref={inputRef}
+        id={id}
+        type="text"
+        role="combobox"
+        aria-label={ariaLabel}
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        aria-activedescendant={open && activeIdx >= 0 ? `${listboxId}-o${activeIdx}` : undefined}
+        aria-invalid={invalid || undefined}
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+        disabled={disabled}
+        // 開いている間は、いま選んでいるものを薄く見せたまま新しく探せるようにする
+        placeholder={open ? (selected?.label ?? placeholder) : placeholder}
+        className="min-w-0 flex-1 truncate bg-transparent text-sm"
+        value={inputValue}
+        onClick={() => (open ? undefined : openList())}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (!open) setOpen(true);
+          setEditing(next);
+          if (!composingRef.current) {
+            setQuery(next);
+            setActiveIdx(0);
+          }
+        }}
+        onCompositionStart={() => {
+          composingRef.current = true;
+        }}
+        onCompositionEnd={(e) => {
+          composingRef.current = false;
+          setQuery(e.currentTarget.value);
+          setActiveIdx(0);
+        }}
+        onKeyDown={handleKeyDown}
+        onBlur={close}
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={open ? "候補を閉じる" : "候補を開く"}
+        className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink2"
+        disabled={disabled}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          if (open) close();
+          else {
+            inputRef.current?.focus();
+            openList();
+          }
+        }}
+      >
+        <IconChevronDown
+          width={16}
+          height={16}
+          className={cx("opacity-70", open && "rotate-180")}
+          aria-hidden
+        />
+      </button>
+      {open && (
+        <ComboListbox
+          id={listboxId}
+          label={ariaLabel}
+          entries={entries}
+          hidden={hidden}
+          activeIdx={activeIdx}
+          isSelected={(v) => v === value}
+          onHover={setActiveIdx}
+          onChoose={choose}
+          pos={pos}
+          emptyText={emptyText}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * 複数を選ぶ、検索できる入力欄（Notion の multi-select のような形）。タグ・キーワードなどに使う。カンマ区切りの文字入力は使わない。
+ *
+ * - 選んだものは欄の中に薄い面の札（token）で並ぶ。札ごとの × と、空の入力欄での Backspace で外せる
+ * - 空の入力欄で ← を押すと札へ移り、← → で札の間を動き、Backspace / Delete で外す。→ で入力欄に戻る
+ * - 候補の操作は Combobox と同じ（↑↓・Home / End・Enter・Escape・Tab、IME の変換中は選ばない）。選んでも一覧は閉じない
+ * - `creatable` なら一致しない名前を「追加」できる。追加・削除は読み上げで知らせる
+ */
+export function MultiCombobox({
+  values,
+  options,
+  onChange,
+  ariaLabel,
+  placeholder,
+  creatable = true,
+  emptyText = "見つかりません",
+  size = "md",
+  className,
+  disabled,
+  id,
+  limit = COMBOBOX_LIMIT,
+}: {
+  values: readonly string[];
+  options: readonly ComboboxOption[];
+  onChange: (values: string[]) => void;
+  ariaLabel: string;
+  placeholder?: string;
+  creatable?: boolean;
+  emptyText?: string;
+  size?: "sm" | "md";
+  className?: string;
+  disabled?: boolean;
+  id?: string;
+  limit?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [query, setQuery] = useState("");
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [announce, setAnnounce] = useState("");
+  const composingRef = useRef(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const tokenRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const listboxId = useId();
+  const labelOf = (v: string) => options.find((o) => o.value === v)?.label ?? v;
+  const chosen = useMemo(() => new Set(values), [values]);
+  // 選んだものは候補から外す。名前の一致の判定には選んだものも含める（同じタグを 2 回足さない）
+  const remaining = useMemo(() => options.filter((o) => !chosen.has(o.value)), [options, chosen]);
+  const { entries: rawEntries, hidden } = useComboEntries({
+    options: remaining,
+    query,
+    pinnedLabel: "",
+    allLabel: "",
+    canCreate: creatable,
+    limit,
+  });
+  const entries = rawEntries.filter(
+    (e) =>
+      e.kind !== "create" ||
+      !hasExactLabel(
+        values.map((v) => ({ label: labelOf(v) })),
+        e.text,
+      ),
+  );
+  const pos = useAnchoredPopover(open, wrapRef);
+
+  useEffect(() => {
+    if (!open) return;
+    document.getElementById(`${listboxId}-o${activeIdx}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [open, activeIdx, listboxId]);
+
+  function add(entry: ComboEntry<string>) {
+    const value = entry.kind === "create" ? entry.text.trim() : entry.option.value;
+    if (!value || chosen.has(value)) return;
+    onChange([...values, value]);
+    setAnnounce(`「${entry.kind === "create" ? value : entry.option.label}」を追加しました`);
+    setText("");
+    setQuery("");
+    setActiveIdx(0);
+  }
+
+  function remove(idx: number, focusAfter: "input" | "token" = "input") {
+    const v = values[idx];
+    if (v === undefined) return;
+    onChange(values.filter((_, i) => i !== idx));
+    setAnnounce(`「${labelOf(v)}」を外しました`);
+    requestAnimationFrame(() => {
+      const prev = idx - 1;
+      if (focusAfter === "token" && prev >= 0) tokenRefs.current[prev]?.focus();
+      else inputRef.current?.focus();
+    });
+  }
+
+  function handleInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (disabled || isComposingKey(e)) return;
+    const caretAtStart = e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0;
+    if (e.key === "Backspace" && text === "" && values.length > 0) {
+      e.preventDefault();
+      remove(values.length - 1);
+      return;
+    }
+    if (e.key === "ArrowLeft" && caretAtStart && values.length > 0) {
+      e.preventDefault();
+      setOpen(false);
+      tokenRefs.current[values.length - 1]?.focus();
+      return;
+    }
+    if (!open) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setOpen(true);
+        setActiveIdx(0);
+      }
+      return;
+    }
+    const moved = nextActive(e.key, activeIdx, entries.length);
+    if (moved !== null) {
+      e.preventDefault();
+      setActiveIdx(moved);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const entry = entries[activeIdx];
+      if (entry) add(entry);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.nativeEvent.stopPropagation();
+      setOpen(false);
+    } else if (e.key === "Tab") {
+      setOpen(false);
+    }
+  }
+
+  function handleTokenKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, idx: number) {
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      tokenRefs.current[Math.max(0, idx - 1)]?.focus();
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      if (idx + 1 < values.length) tokenRefs.current[idx + 1]?.focus();
+      else inputRef.current?.focus();
+    } else if (e.key === "Backspace" || e.key === "Delete") {
+      e.preventDefault();
+      remove(idx, e.key === "Backspace" ? "token" : "input");
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      inputRef.current?.focus();
+    }
+  }
+
+  return (
+    <div
+      ref={wrapRef}
+      className={cx(
+        "input input-bordered flex max-w-full flex-wrap items-center gap-1.5",
+        size === "sm" ? "input-sm min-h-9 px-1.5 py-1" : "min-h-10 px-1.5 py-1.5",
+        disabled && "pointer-events-none opacity-60",
+        className,
+      )}
+      onMouseDown={(e) => {
+        // 札の間の余白を押しても入力欄に入る
+        if (e.target === e.currentTarget) {
+          e.preventDefault();
+          inputRef.current?.focus();
+          setOpen(true);
+        }
+      }}
+    >
+      {values.length > 0 && (
+        <ul role="list" aria-label={`選んだ${ariaLabel}`} className="contents">
+          {values.map((v, idx) => (
+            <li
+              key={v}
+              className="inline-flex h-7 max-w-full items-center gap-0.5 rounded-md bg-base-200 pl-2 pr-0.5 text-sm text-base-content"
+            >
+              <span className="min-w-0 truncate">{labelOf(v)}</span>
+              <button
+                ref={(el) => {
+                  tokenRefs.current[idx] = el;
+                }}
+                type="button"
+                tabIndex={-1}
+                aria-label={`${labelOf(v)}を外す`}
+                className="flex size-6 shrink-0 items-center justify-center rounded text-ink2 hover:bg-base-300 hover:text-base-content"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => remove(idx)}
+                onKeyDown={(e) => handleTokenKeyDown(e, idx)}
+              >
+                <IconX width={14} height={14} strokeWidth={2.2} aria-hidden />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <input
+        ref={inputRef}
+        id={id}
+        type="text"
+        role="combobox"
+        aria-label={ariaLabel}
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        aria-activedescendant={open && entries[activeIdx] ? `${listboxId}-o${activeIdx}` : undefined}
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+        disabled={disabled}
+        placeholder={values.length === 0 ? placeholder : undefined}
+        className="h-7 min-w-[6rem] flex-1 bg-transparent px-1.5 text-sm"
+        value={text}
+        onClick={() => setOpen(true)}
+        onChange={(e) => {
+          const next = e.target.value;
+          setText(next);
+          setOpen(true);
+          if (!composingRef.current) {
+            setQuery(next);
+            setActiveIdx(0);
+          }
+        }}
+        onCompositionStart={() => {
+          composingRef.current = true;
+        }}
+        onCompositionEnd={(e) => {
+          composingRef.current = false;
+          setQuery(e.currentTarget.value);
+          setActiveIdx(0);
+        }}
+        onKeyDown={handleInputKeyDown}
+        onBlur={() => {
+          setOpen(false);
+          setText("");
+          setQuery("");
+        }}
+      />
+      <span className="sr-only" aria-live="polite">
+        {announce}
+      </span>
+      {open && (
+        <ComboListbox
+          id={listboxId}
+          label={ariaLabel}
+          entries={entries}
+          hidden={hidden}
+          activeIdx={activeIdx}
+          isSelected={() => false}
+          onHover={setActiveIdx}
+          onChoose={add}
+          pos={pos}
+          emptyText={creatable ? "名前を入力して追加" : emptyText}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ---------- 完了のモーダル ---------- */
+const DIALOG_FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+
+/**
+ * モーダルの振る舞い（Modal・CompletionModal で共通）: Escape で閉じる、Tab を中に閉じ込める、背面のスクロールを止める、
+ * 開いたら initialFocus の中の最初の操作へ、閉じたら開く前の要素へフォーカスを戻す
+ */
+/** 開いているダイアログの重なり。キー操作（Esc・Tab）はいちばん上のダイアログだけが受ける */
+const openDialogs: object[] = [];
+
+function useModalDialog(
+  boxRef: React.RefObject<HTMLDivElement | null>,
+  initialFocusRef: React.RefObject<HTMLElement | null>,
+  onClose: () => void,
+) {
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  useEffect(() => {
+    const prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const self = {};
+    openDialogs.push(self);
+    const h = (e: KeyboardEvent) => {
+      if (openDialogs.at(-1) !== self) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key === "Tab" && boxRef.current) {
+        const focusables = Array.from(boxRef.current.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE)).filter(
+          (el) => el.getClientRects().length > 0 || el === document.activeElement,
+        );
+        if (focusables.length === 0) {
+          e.preventDefault();
+          return;
+        }
+        const first = focusables[0]!;
+        const last = focusables[focusables.length - 1]!;
+        const active = document.activeElement as HTMLElement | null;
+        if (e.shiftKey) {
+          if (!active || active === first || !boxRef.current.contains(active)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else if (!active || active === last || !boxRef.current.contains(active)) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", h);
+    document.body.style.overflow = "hidden";
+    if (boxRef.current && !boxRef.current.contains(document.activeElement)) {
+      const preferred = initialFocusRef.current?.querySelector<HTMLElement>(DIALOG_FOCUSABLE);
+      const fallback = boxRef.current.querySelector<HTMLElement>(DIALOG_FOCUSABLE);
+      (preferred ?? fallback ?? boxRef.current).focus();
+    }
+    return () => {
+      window.removeEventListener("keydown", h);
+      openDialogs.splice(openDialogs.indexOf(self), 1);
+      if (openDialogs.length === 0) document.body.style.overflow = "";
+      if (prevFocus && prevFocus.isConnected) prevFocus.focus();
+    };
+    // 開いたときに 1 回だけ。onClose は ref で最新を読む
+  }, [boxRef, initialFocusRef]);
+}
+
+/**
+ * 完了の印。譜に押す朱の角印（判子）。字は 1 字（既定は「済」、記録なら「記」）。CompletionModal の既定の stamp。
+ * 字は明朝で描き、角の丸い二重枠で囲む
+ */
+export function Seal({ char = "済", size = 84 }: { char?: string; size?: number }) {
+  return (
+    <svg viewBox="0 0 84 84" width={size} height={size} className="text-primary" aria-hidden>
+      <rect x="5" y="5" width="74" height="74" rx="14" fill="none" stroke="currentColor" strokeWidth="5" />
+      <rect
+        x="12"
+        y="12"
+        width="60"
+        height="60"
+        rx="9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeOpacity=".65"
+      />
+      <text
+        x="42"
+        y="43"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fill="currentColor"
+        fontSize="44"
+        fontWeight="700"
+        fontFamily='"Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", serif'
+      >
+        {char}
+      </text>
+    </svg>
+  );
+}
+
+export interface CompletionAction {
+  label: string;
+  /** ラベルの前に置くアイコン（16px） */
+  icon?: ReactNode;
+  /** 行き先。あればリンクにする */
+  to?: string;
+  onClick?: () => void;
+}
+
+/**
+ * 大事な操作の完了（P11）。区切って、短い動きで「済んだ」を伝え、次の行動を主 1 つと副に絞る。
+ * 判子を譜に押すような印（.motion-stamp）が、少し浮いてから押し込まれる。reduced-motion では動かない。
+ * 開くと主操作にフォーカスするので、Enter でそのまま次へ進める。
+ *
+ * @example
+ * <CompletionModal title="セッションを記録しました" primary={{ label: "セッションを見る", to: `/sessions/${id}` }}
+ *   secondary={[{ label: "共有する", onClick: share }]} onClose={close}>
+ *   <SessionSummary … />
+ * </CompletionModal>
+ */
+export function CompletionModal({
+  title,
+  children,
+  primary,
+  secondary = [],
+  onClose,
+  stamp,
+}: {
+  title: ReactNode;
+  /** 何が残ったかの要約（1〜2 行、または小さな行の並び） */
+  children?: ReactNode;
+  primary: CompletionAction;
+  secondary?: readonly CompletionAction[];
+  onClose: () => void;
+  /** 既定の角印（「済」）の代わりに押すもの。<Seal char="記" /> など */
+  stamp?: ReactNode;
+}) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const descId = useId();
+  useModalDialog(boxRef, actionsRef, onClose);
+  // 押すと表示が変わる操作（「コピーしました」）でもフォーカスを失わないよう、key は並びの位置にする
+  const renderAction = (a: CompletionAction, cls: string, key: number) =>
+    a.to ? (
+      <Link key={key} to={a.to} className={cls} onClick={a.onClick}>
+        {a.icon}
+        {a.label}
+      </Link>
+    ) : (
+      <button key={key} type="button" className={cls} onClick={a.onClick}>
+        {a.icon}
+        {a.label}
+      </button>
+    );
+  return (
+    <div
+      role="presentation"
+      className="motion-fade fixed inset-0 z-[80] flex items-end bg-black/50 sm:items-center sm:justify-center sm:p-4"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={boxRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={children ? descId : undefined}
+        tabIndex={-1}
+        data-completion
+        className="motion-pop relative flex max-h-[90dvh] w-full max-w-md flex-col overflow-y-auto rounded-t-2xl border border-base-300 bg-base-100 sm:rounded-box"
+      >
+        <button
+          type="button"
+          className="icon-btn absolute right-2 top-2"
+          onClick={onClose}
+          aria-label="閉じる"
+        >
+          <IconX width={20} height={20} strokeWidth={2.2} />
+        </button>
+        <div className="flex flex-col items-center px-6 pt-9 text-center">
+          <span className="motion-stamp">{stamp ?? <Seal />}</span>
+          <h2 id={titleId} className="mt-5 text-lg font-bold sm:text-xl">
+            {title}
+          </h2>
+          {children && (
+            <div id={descId} className="mt-2 w-full text-sm text-ink2">
+              {children}
+            </div>
+          )}
+        </div>
+        <div
+          ref={actionsRef}
+          className="flex flex-col gap-2 px-6 pt-6"
+          style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))" }}
+        >
+          {renderAction(primary, "btn btn-primary w-full", -1)}
+          {secondary.length > 0 && (
+            <div className="flex flex-wrap justify-center gap-2">
+              {secondary.map((a, i) => renderAction(a, "btn btn-quiet", i))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- スイッチ ---------- */
 /** スイッチ。表示ラベルがないときは label が aria-label になる */
 export function Toggle({
@@ -387,8 +1353,6 @@ export function Toggle({
 }
 
 /* ---------- モーダル ---------- */
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 
 export function Modal({
   title,
@@ -406,60 +1370,8 @@ export function Modal({
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
   const titleId = useId();
-
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  useEffect(() => {
-    const prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const h = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-      if (e.key === "Tab" && boxRef.current) {
-        const focusables = Array.from(
-          boxRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-        ).filter((el) => el.getClientRects().length > 0 || el === document.activeElement);
-        if (focusables.length === 0) {
-          e.preventDefault();
-          return;
-        }
-        const first = focusables[0]!;
-        const last = focusables[focusables.length - 1]!;
-        const active = document.activeElement as HTMLElement | null;
-        if (e.shiftKey) {
-          if (!active || active === first || !boxRef.current.contains(active)) {
-            e.preventDefault();
-            last.focus();
-          }
-        } else {
-          if (!active || active === last || !boxRef.current.contains(active)) {
-            e.preventDefault();
-            first.focus();
-          }
-        }
-      }
-    };
-    window.addEventListener("keydown", h);
-    document.body.style.overflow = "hidden";
-    if (boxRef.current && !boxRef.current.contains(document.activeElement)) {
-      const firstBody = bodyRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-      const fallback = boxRef.current.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-      (firstBody ?? fallback ?? boxRef.current).focus();
-    }
-    return () => {
-      window.removeEventListener("keydown", h);
-      document.body.style.overflow = "";
-      if (prevFocus && prevFocus.isConnected) {
-        prevFocus.focus();
-      }
-    };
-  }, []);
+  useModalDialog(boxRef, bodyRef, onClose);
 
   return (
     <div
@@ -527,12 +1439,12 @@ export function CopyBox({ text, note }: { text: string; note?: string }) {
       <code className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-ink2">{text}</code>
       <button
         type="button"
-        className={cx("btn btn-sm shrink-0 w-28", copied && "text-success")}
+        className={cx("btn btn-sm shrink-0 w-36", copied && "text-success")}
         onClick={handleCopy}
         aria-live="polite"
       >
         {copied ? <IconCheck width={16} height={16} /> : <IconLink width={16} height={16} />}
-        {copied ? "コピーした" : "コピー"}
+        {copied ? "コピーしました" : "コピー"}
       </button>
       {note && <span className="text-xs text-ink2">{note}</span>}
     </div>
@@ -907,21 +1819,38 @@ export function LegalLinks({ className }: { className?: string }) {
   );
 }
 
-export function LogoMark({ size = 22, className }: { size?: number; className?: string }) {
+/**
+ * 卓譜のブランドマーク（盤と一手。形は brand.ts）。地は文字色（currentColor）で塗り、盤と駒は `on` の色で抜く。
+ * 既定の `on` は面の色なので、テーマが変わっても穴が開いて見える。UI のアイコンではないので `data-brand` を付ける
+ */
+export function LogoMark({
+  size = 22,
+  className,
+  on = "oklch(var(--b1))",
+}: {
+  size?: number;
+  className?: string;
+  on?: string;
+}) {
   return (
-    <svg viewBox="0 0 24 24" width={size} height={size} className={className} aria-hidden>
+    <svg
+      viewBox={`0 0 ${MARK_VIEWBOX} ${MARK_VIEWBOX}`}
+      width={size}
+      height={size}
+      className={className}
+      data-brand
+      aria-hidden
+    >
+      <rect width={MARK_VIEWBOX} height={MARK_VIEWBOX} rx={MARK_RADIUS} fill="currentColor" />
       <path
-        d="M3 6h18M3 10.5h18M3 15h18"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        opacity="0.55"
+        d={MARK_BOARD}
         fill="none"
+        stroke={on}
+        strokeOpacity={MARK_BOARD_OPACITY}
+        strokeWidth={MARK_BOARD_WIDTH}
+        strokeLinejoin="round"
       />
-      <circle cx="9" cy="14.2" r="2.5" fill="currentColor" />
-      <path d="M11.5 14.2V5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M11.5 5.5l5 1.4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <circle cx="16.5" cy="10" r="2.1" fill="currentColor" />
+      <circle cx={MARK_STONE.cx} cy={MARK_STONE.cy} r={MARK_STONE.r} fill={on} />
     </svg>
   );
 }
@@ -999,18 +1928,19 @@ export function weekdayTone(date: string): "text-error" | "text-info" | "text-in
 }
 
 /**
- * 一覧の左に置く日付ブロック。月日を大きく、曜日（または日数）を小さく。
+ * 一覧の左に置く日付ブロック。月日を大きく、曜日（複数回に分けて遊んだセッションは回数）を小さく。
  * 月見出しの下に並べるときは showMonth={false}。
  */
 export function DateBlock({
   date,
-  days = 1,
+  times = 1,
   showMonth = true,
   muted,
   highlight,
 }: {
   date: string;
-  days?: number;
+  /** 集まりの回数（2 回以上なら曜日の代わりに「2回」） */
+  times?: number;
   showMonth?: boolean;
   muted?: boolean;
   highlight?: boolean;
@@ -1022,56 +1952,135 @@ export function DateBlock({
     <div className="w-12 shrink-0 text-center leading-tight tabular-nums">
       {showMonth && <div className="text-xs text-ink2">{m}月</div>}
       <div className={cx("text-xl font-bold", muted ? "text-ink2" : highlight && "text-primary")}>{d}</div>
-      <div className={cx("text-xs", days > 1 || muted ? "text-ink2" : weekdayTone(date))}>
-        {days > 1 ? `${days}日間` : wd}
+      <div className={cx("text-xs", times > 1 || muted ? "text-ink2" : weekdayTone(date))}>
+        {times > 1 ? `${times}回` : wd}
       </div>
     </div>
   );
 }
 
-/** 複数日の実施日入力 */
-export function DateList({
-  dates,
-  setDates,
+/**
+ * 遊んだ日時（集まり）の入力。1 行が 1 回で、日付・開始・終了を入れる。
+ * 終了が開始より前なら翌日に終わる集まりとして「翌」を添える（25:30 のような書き方はさせない）。
+ */
+export function SittingsInput({
+  rows,
+  onChange,
+  invalidIndex,
   size = "md",
 }: {
-  dates: string[];
-  setDates: (d: string[]) => void;
+  rows: SittingFields[];
+  onChange: (rows: SittingFields[]) => void;
+  /** 問題のある行（枠を赤くする） */
+  invalidIndex?: number | null;
   size?: "sm" | "md";
 }) {
-  function addDate() {
-    const last = dates.at(-1) || todayStr();
-    const base = new Date(last + "T00:00:00Z");
-    base.setUTCDate(base.getUTCDate() + 1);
-    setDates([...dates, base.toISOString().slice(0, 10)]);
-  }
+  const many = rows.length > 1;
+  const set = (i: number, patch: Partial<SittingFields>) =>
+    onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   return (
     <div className="space-y-2">
-      {dates.map((d, i) => (
-        <div key={i} className="flex items-center gap-1.5">
-          <DateInput
-            aria-label={`実施日 ${i + 1}`}
-            className="w-full max-w-56"
-            size={size}
-            value={d}
-            onChange={(e) => setDates(dates.map((date, idx) => (idx === i ? e.target.value : date)))}
-          />
-          {dates.length > 1 && (
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label={`実施日 ${i + 1} を削除`}
-              onClick={() => setDates(dates.filter((_, idx) => idx !== i))}
-            >
-              <IconX width={16} height={16} />
-            </button>
-          )}
-        </div>
-      ))}
-      <button type="button" className="btn btn-quiet btn-sm" onClick={addDate}>
-        <IconPlus width={14} height={14} /> 日を追加
+      <ol className="space-y-2">
+        {rows.map((r, i) => {
+          const start = normalizeTime(r.start);
+          const end = normalizeTime(r.end);
+          const nextDay = Boolean(start && end && end <= start);
+          const label = many ? `${i + 1}回目の` : "";
+          const bad = invalidIndex === i;
+          return (
+            <li key={i} className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <DateInput
+                aria-label={`${label}日付`}
+                className="w-40"
+                size={size}
+                invalid={bad}
+                value={r.date}
+                onChange={(e) => set(i, { date: e.target.value })}
+              />
+              <span className="flex items-center gap-1.5">
+                <TimeInput
+                  ariaLabel={`${label}開始時刻`}
+                  size={size}
+                  invalid={bad}
+                  value={r.start}
+                  onChange={(v) => set(i, { start: v })}
+                />
+                <span className="text-ink2" aria-hidden>
+                  〜
+                </span>
+                <span
+                  className={cx("w-4 text-center text-sm text-ink2", !nextDay && "invisible")}
+                  aria-hidden={!nextDay}
+                >
+                  翌
+                </span>
+                <TimeInput
+                  ariaLabel={`${label}終了時刻${nextDay ? "（翌日）" : ""}`}
+                  size={size}
+                  invalid={bad}
+                  value={r.end}
+                  onChange={(v) => set(i, { end: v })}
+                />
+              </span>
+              {many && (
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label={`${i + 1}回目を外す`}
+                  onClick={() => onChange(rows.filter((_, idx) => idx !== i))}
+                >
+                  <IconX width={16} height={16} />
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      <button
+        type="button"
+        className="btn btn-quiet btn-sm"
+        onClick={() => onChange([...rows, nextSittingFields(rows, todayStr())])}
+      >
+        <IconPlus width={14} height={14} /> 日時を追加
       </button>
     </div>
+  );
+}
+
+/** 時刻（HH:MM、0〜23 時）の入力。打ちかけの値はそのまま持ち、欄を離れたときに 09:05 の形にそろえる */
+function TimeInput({
+  value,
+  onChange,
+  ariaLabel,
+  invalid,
+  size = "md",
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  ariaLabel: string;
+  invalid?: boolean;
+  size?: "sm" | "md";
+}) {
+  const unreadable = value.trim() !== "" && !normalizeTime(value);
+  return (
+    <input
+      aria-label={ariaLabel}
+      inputMode="numeric"
+      autoComplete="off"
+      placeholder="21:00"
+      aria-invalid={invalid || unreadable || undefined}
+      className={cx(
+        "input w-[4.75rem] text-center tabular-nums",
+        size === "sm" && "input-sm",
+        (invalid || unreadable) && "input-error",
+      )}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={() => {
+        const t = normalizeTime(value);
+        if (t && t !== value) onChange(t);
+      }}
+    />
   );
 }
 
@@ -1250,8 +2259,9 @@ function DatePickerPanel({
 }
 
 /**
- * 日付の入力。中身はブラウザの <input type="date">（キーボードで打てる・フォームの register がそのまま使える）。
- * マウスなどのポインタ端末では標準の暦の代わりに卓譜の暦（DatePickerPanel）を開く。タッチ端末では OS 標準の選択 UI を使う。
+ * 日付の入力。画面では YYYY/MM/DD で見せ・打て、値（value・onChange・register）は YYYY-MM-DD で受け渡す。
+ * ブラウザの <input type="date"> は端末の言語設定で表示が変わる（英語環境では MM/DD/YYYY）ので使わない。
+ * 右の暦ボタン（マウスでは入力欄を押しても）で卓譜の暦（DatePickerPanel）を開く。
  * className は外枠（幅）に付く。入力欄の見た目は size / invalid で選ぶ。
  */
 export function DateInput({
@@ -1264,15 +2274,53 @@ export function DateInput({
   size?: "sm" | "md";
   invalid?: boolean;
 }) {
+  const {
+    id,
+    "aria-label": ariaLabel,
+    "aria-labelledby": ariaLabelledBy,
+    "aria-describedby": ariaDescribedBy,
+    "aria-invalid": ariaInvalid,
+    placeholder,
+    disabled,
+    readOnly,
+    autoFocus,
+    onBlur,
+    onFocus,
+    onKeyDown,
+    onMouseDown,
+    ...valueProps
+  } = props;
   const fine = useFinePointer();
+  /** 値（YYYY-MM-DD）を持つ隠れた入力欄。name・value・onChange・register の ref はこちらに付く */
   const inputRef = useInputRef(ref);
+  const textRef = useRef<HTMLInputElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const initialIso = String(props.value ?? props.defaultValue ?? "");
+  const [text, setText] = useState(() => fmtDateText(initialIso));
+  const [touched, setTouched] = useState(false);
+  const lastIso = useRef(initialIso);
   /** 開いているときは、開いた時点の値と、暦へフォーカスを移すか（ボタンから開いたとき）を持つ */
   const [open, setOpen] = useState<null | { focus: boolean; value: string }>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const panelId = useId();
+
+  // 外から値が変わったとき（親の state・フォームの reset）に表示を合わせる。reset は隠れた欄の値を
+  // 直接書き換えるので、描くたびに見比べる（同じなら何もしないので描き直しは続かない）
+  // oxlint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const iso = props.value !== undefined ? String(props.value ?? "") : (inputRef.current?.value ?? "");
+    if (iso !== lastIso.current) {
+      lastIso.current = iso;
+      setText(fmtDateText(iso));
+    }
+  });
+
+  const commit = (iso: string) => {
+    lastIso.current = iso;
+    if (inputRef.current && inputRef.current.value !== iso) setNativeValue(inputRef.current, iso);
+  };
 
   const close = useCallback((refocus: boolean) => {
     setOpen(null);
@@ -1310,8 +2358,8 @@ export function DateInput({
     };
   }, [open]);
 
-  const openPicker = (focus: boolean) =>
-    setOpen({ focus, value: (props.value as string | undefined) ?? inputRef.current?.value ?? "" });
+  const openPicker = (focus: boolean) => setOpen({ focus, value: parseDateText(text) ?? lastIso.current });
+  const unreadable = touched && text.trim() !== "" && !parseDateText(text);
 
   return (
     <div
@@ -1325,47 +2373,70 @@ export function DateInput({
         }
       }}
     >
+      <input {...valueProps} ref={inputRef} type="text" hidden tabIndex={-1} aria-hidden />
       <input
-        {...props}
-        ref={inputRef}
-        type="date"
-        data-picker={fine ? "" : undefined}
-        aria-invalid={invalid ? true : props["aria-invalid"]}
+        ref={textRef}
+        id={id}
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabelledBy}
+        aria-describedby={ariaDescribedBy}
+        aria-invalid={invalid || unreadable ? true : ariaInvalid}
+        placeholder={placeholder ?? "YYYY/MM/DD"}
+        disabled={disabled}
+        readOnly={readOnly}
+        autoFocus={autoFocus}
+        value={text}
         className={cx(
-          "input w-full tabular-nums",
+          "input w-full pr-11 tabular-nums",
           size === "sm" && "input-sm",
-          fine && "pr-11",
-          invalid && "input-error",
+          (invalid || unreadable) && "input-error",
         )}
+        onChange={(e) => {
+          const v = e.target.value;
+          setText(v);
+          setTouched(false);
+          const iso = parseDateText(v);
+          if (iso) commit(iso);
+          else if (!v.trim()) commit("");
+        }}
+        onFocus={onFocus}
+        onKeyDown={onKeyDown}
+        onBlur={(e) => {
+          setTouched(true);
+          const iso = parseDateText(text);
+          if (iso) setText(fmtDateText(iso));
+          onBlur?.(e);
+        }}
         onMouseDown={(e) => {
-          props.onMouseDown?.(e);
+          onMouseDown?.(e);
           // 入力欄そのものを押しても暦を開く（フォーカスは入力欄に残し、キーボードでも打てる）
-          if (fine && e.button === 0 && !props.disabled && !props.readOnly) openPicker(false);
+          if (fine && e.button === 0 && !disabled && !readOnly) openPicker(false);
         }}
       />
-      {fine && (
-        <button
-          ref={buttonRef}
-          type="button"
-          tabIndex={-1}
-          aria-label="カレンダーから選ぶ"
-          aria-haspopup="dialog"
-          aria-expanded={Boolean(open)}
-          aria-controls={open ? panelId : undefined}
-          disabled={props.disabled}
-          className="absolute right-1 top-1/2 inline-flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-ink2 transition-colors hover:bg-base-200 hover:text-base-content"
-          onClick={() => (open ? setOpen(null) : openPicker(true))}
-        >
-          <IconCalendar width={16} height={16} />
-        </button>
-      )}
+      <button
+        ref={buttonRef}
+        type="button"
+        tabIndex={-1}
+        aria-label="カレンダーから選ぶ"
+        aria-haspopup="dialog"
+        aria-expanded={Boolean(open)}
+        aria-controls={open ? panelId : undefined}
+        disabled={disabled || readOnly}
+        className="absolute right-1 top-1/2 inline-flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-ink2 transition-colors hover:bg-base-200 hover:text-base-content"
+        onClick={() => (open ? setOpen(null) : openPicker(true))}
+      >
+        <IconCalendar width={16} height={16} />
+      </button>
       {open && (
         <div
           ref={panelRef}
           id={panelId}
           role="dialog"
           aria-label="日付を選ぶ"
-          className="popover fixed z-[95] p-2"
+          className="popover motion-pop fixed z-[95] p-2"
           // 位置を測るまでは透明にしておく（visibility: hidden だと暦の日にフォーカスを移せない）
           style={pos ? { top: pos.top, left: pos.left } : { top: 0, left: 0, opacity: 0 }}
         >
@@ -1374,9 +2445,11 @@ export function DateInput({
             autoFocus={open.focus}
             onClose={() => close(true)}
             onPick={(date) => {
-              if (inputRef.current) setNativeValue(inputRef.current, date);
+              setText(fmtDateText(date));
+              setTouched(false);
+              commit(date);
               close(false);
-              inputRef.current?.focus();
+              textRef.current?.focus();
             }}
           />
         </div>
@@ -1492,53 +2565,23 @@ export function StatChange({
   );
 }
 
-/** 卓の印。卓名の頭文字を小さな角丸の面に載せる（サイドバーなど、顔の代わりに卓を見分ける） */
-export function TableMark({ name, size = 20 }: { name: string; size?: number }) {
-  const initial = Array.from(name.trim())[0] ?? "卓";
+/**
+ * 卓の印（サイドバーなど、顔の代わりに卓を見分ける）。
+ * 卓の画像があればそれを、なければ卓 ID から作った角印（和柄とダイスの目）を出す。頭文字は使わない
+ */
+export function TableMark({ table, size = 20 }: { table: Pick<Table, "id" | "image">; size?: number }) {
   return (
-    <span
+    <img
+      src={table.image || identiconDataUri(table.id, "table")}
+      alt=""
       aria-hidden
-      className="inline-flex shrink-0 items-center justify-center rounded-md border border-base-300 bg-base-200 font-bold leading-none text-ink2"
-      style={{ width: size, height: size, fontSize: Math.max(12, Math.round(size * 0.55)) }}
-    >
-      {initial}
-    </span>
-  );
-}
-
-/** 開始〜終了の時刻入力（日本時間。日付をまたぐときは 25:30 のように書く） */
-export function TimeRange({
-  start,
-  end,
-  setStart,
-  setEnd,
-}: {
-  start: string;
-  end: string;
-  setStart: (v: string) => void;
-  setEnd: (v: string) => void;
-}) {
-  return (
-    <div>
-      <div className="flex items-center gap-2">
-        <input
-          aria-label="開始時刻（JST）"
-          inputMode="numeric"
-          className="input input-bordered w-24 text-center tabular-nums"
-          value={start}
-          onChange={(e) => setStart(e.target.value)}
-        />
-        <span className="text-ink2">〜</span>
-        <input
-          aria-label="終了時刻（JST）"
-          inputMode="numeric"
-          className="input input-bordered w-24 text-center tabular-nums"
-          value={end}
-          onChange={(e) => setEnd(e.target.value)}
-        />
-      </div>
-      <p className="mt-1.5 text-xs text-ink2">日付をまたぐときは 25:30 のように書きます。</p>
-    </div>
+      width={size}
+      height={size}
+      decoding="async"
+      referrerPolicy="no-referrer"
+      className="shrink-0 rounded-md object-cover"
+      style={{ width: size, height: size }}
+    />
   );
 }
 

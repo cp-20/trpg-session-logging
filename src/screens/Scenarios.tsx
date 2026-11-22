@@ -19,14 +19,17 @@ import {
   PageHead,
   SectionTitle,
   Seg,
-  Select,
+  Combobox,
+  MultiCombobox,
   SysBadge,
   cx,
   useVisibleCount,
 } from "../components/ui";
 import { SYSTEMS, SYSTEM_LIST } from "../data/systems";
 import { evaluateShareGate } from "../lib/share-gate";
-import { fmtDur, sessionPlayMinutes, uid } from "../lib/time";
+import { fmtDur, sessionPlayMinutes, uid, sessionStart } from "../lib/time";
+import { systemOptions } from "../lib/system-options";
+import { cleanTags, tagOptions } from "../lib/tags";
 import { useStore } from "../store";
 import type { ExternalSyncConfig, ExternalSyncProvider, Scenario, ScenarioEditChanges } from "../types";
 import type { ImportedScenario } from "../lib/external-sync";
@@ -72,7 +75,7 @@ export default function Scenarios() {
     for (const l of Object.values(state.logs)) {
       if (!l.scenarioId) continue;
       const cur = bySc.get(l.scenarioId) ?? { last: 0, played: false };
-      if (evaluateShareGate(l, viewer).visible && l.t0 > cur.last) cur.last = l.t0;
+      if (evaluateShareGate(l, viewer).visible && sessionStart(l) > cur.last) cur.last = sessionStart(l);
       if (l.ownerId === state.me || Boolean(l.players[state.me])) cur.played = true;
       bySc.set(l.scenarioId, cur);
     }
@@ -129,17 +132,14 @@ export default function Scenarios() {
             ]}
           />
           {usedSystems.size > 1 && (
-            <Select
+            <Combobox
               ariaLabel="システムで絞り込み"
               value={sys}
               onChange={setSys}
               className="min-w-40 flex-1 sm:w-56 sm:flex-none"
               options={[
                 { value: "all", label: "すべてのシステム" },
-                ...SYSTEM_LIST.filter((x) => usedSystems.has(x.id)).map((x) => ({
-                  value: x.id,
-                  label: x.name,
-                })),
+                ...systemOptions(SYSTEM_LIST.filter((x) => usedSystems.has(x.id))),
               ]}
             />
           )}
@@ -285,7 +285,7 @@ export function ScenarioDetail() {
       sc
         ? Object.values(state.logs)
             .filter((l) => l.scenarioId === sc.id)
-            .sort((a, b) => b.t0 - a.t0)
+            .sort((a, b) => sessionStart(b) - sessionStart(a))
         : [],
     [sc, state.logs],
   );
@@ -514,7 +514,7 @@ export function ScenarioDetail() {
 interface EditScenarioFormValues {
   title: string;
   author: string;
-  tags: string;
+  tags: string[];
   description: string;
 }
 
@@ -525,9 +525,12 @@ function EditScenarioModal({
   sc: ReturnType<typeof useStore>["state"]["scenarios"][string];
   onClose: () => void;
 }) {
-  const { update } = useStore();
+  const { state, update } = useStore();
+  // キーワードの候補は、ほかのシナリオに付いているもの
+  const keywordSuggestions = useMemo(() => tagOptions(Object.values(state.scenarios)), [state.scenarios]);
   const {
     register,
+    control,
     handleSubmit,
     formState: { errors, isValid },
   } = useForm<EditScenarioFormValues>({
@@ -535,7 +538,7 @@ function EditScenarioModal({
     defaultValues: {
       title: sc.title,
       author: sc.author,
-      tags: sc.tags.join(", "),
+      tags: [...sc.tags],
       description: sc.description ?? "",
     },
   });
@@ -545,10 +548,7 @@ function EditScenarioModal({
       const x = s.scenarios[sc.id]!;
       x.title = values.title.trim();
       x.author = values.author.trim() || x.author;
-      x.tags = values.tags
-        .split(/[,、]/)
-        .map((t) => t.trim())
-        .filter(Boolean);
+      x.tags = cleanTags(values.tags);
       x.description = values.description.trim() || undefined;
     });
     onClose();
@@ -592,8 +592,21 @@ function EditScenarioModal({
         <Field label="作者・サークル">
           <input className="input input-bordered w-full" {...register("author")} />
         </Field>
-        <Field label="キーワード" hint="読点かカンマで区切る">
-          <input className="input input-bordered w-full" {...register("tags")} />
+        <Field label="キーワード">
+          <Controller
+            name="tags"
+            control={control}
+            render={({ field }) => (
+              <MultiCombobox
+                ariaLabel="キーワード"
+                className="w-full"
+                values={field.value}
+                onChange={field.onChange}
+                options={keywordSuggestions}
+                placeholder="キーワードを探すか、新しく追加"
+              />
+            )}
+          />
         </Field>
         <Field label="概要">
           <textarea
@@ -612,7 +625,7 @@ interface EditRequestFormValues {
   author: string;
   systemId: string;
   sourceUrl: string;
-  tags: string;
+  tags: string[];
   description: string;
   note: string;
 }
@@ -625,6 +638,8 @@ function EditRequestModal({
   onClose: () => void;
 }) {
   const { state, update } = useStore();
+  // キーワードの候補は、ほかのシナリオに付いているもの
+  const keywordSuggestions = useMemo(() => tagOptions(Object.values(state.scenarios)), [state.scenarios]);
   const [formError, setFormError] = useState<string | null>(null);
   const pending = state.editRequests.some(
     (r) => r.scenarioId === sc.id && r.uid === state.me && r.status === "pending",
@@ -641,7 +656,7 @@ function EditRequestModal({
       author: sc.author,
       systemId: sc.systemId,
       sourceUrl: sc.sourceUrl ?? "",
-      tags: sc.tags.join(", "),
+      tags: [...sc.tags],
       description: sc.description ?? "",
       note: "",
     },
@@ -653,10 +668,7 @@ function EditRequestModal({
     const nextTitle = values.title.trim();
     const nextAuthor = values.author.trim();
     const nextUrl = values.sourceUrl.trim();
-    const nextTags = values.tags
-      .split(/[,、]/)
-      .map((t) => t.trim())
-      .filter(Boolean);
+    const nextTags = cleanTags(values.tags);
     const nextDesc = values.description.trim();
     const nextNote = values.note.trim();
 
@@ -728,10 +740,10 @@ function EditRequestModal({
               name="systemId"
               control={control}
               render={({ field }) => (
-                <Select
+                <Combobox
                   ariaLabel="システム"
                   value={field.value}
-                  options={SYSTEM_LIST.map((s) => ({ value: s.id, label: s.name }))}
+                  options={systemOptions()}
                   onChange={field.onChange}
                   className="w-full"
                 />
@@ -750,8 +762,21 @@ function EditRequestModal({
             {...register("sourceUrl")}
           />
         </Field>
-        <Field label="キーワード" hint="読点かカンマで区切る">
-          <input className="input input-bordered w-full" {...register("tags")} />
+        <Field label="キーワード">
+          <Controller
+            name="tags"
+            control={control}
+            render={({ field }) => (
+              <MultiCombobox
+                ariaLabel="キーワード"
+                className="w-full"
+                values={field.value}
+                onChange={field.onChange}
+                options={keywordSuggestions}
+                placeholder="キーワードを探すか、新しく追加"
+              />
+            )}
+          />
         </Field>
         <Field label="概要">
           <textarea
@@ -788,12 +813,14 @@ interface ScenarioNewFormValues {
   author: string;
   systemId: string;
   sourceUrl: string;
-  tags: string;
+  tags: string[];
   description: string;
 }
 
 export function ScenarioNew() {
-  const { update } = useStore();
+  const { state, update } = useStore();
+  // キーワードの候補は、ほかのシナリオに付いているもの
+  const keywordSuggestions = useMemo(() => tagOptions(Object.values(state.scenarios)), [state.scenarios]);
   const nav = useNavigate();
   const urlParam = useSearchParam("url");
   const titleParam = useSearchParam("title");
@@ -817,7 +844,7 @@ export function ScenarioNew() {
       author: "",
       systemId: "coc7",
       sourceUrl: urlParam ?? "",
-      tags: "",
+      tags: [],
       description: "",
     },
   });
@@ -854,7 +881,7 @@ export function ScenarioNew() {
         setValue("systemId", sc.systemId, { shouldDirty: true });
       }
       if (sc.sourceUrl) setValue("sourceUrl", sc.sourceUrl, { shouldDirty: true });
-      if (sc.tags.length > 0) setValue("tags", sc.tags.join(", "), { shouldDirty: true });
+      if (sc.tags.length > 0) setValue("tags", cleanTags(sc.tags), { shouldDirty: true });
       if (sc.description) setValue("description", sc.description, { shouldDirty: true });
       if (sc.tags.length > 0 || sc.description) setDetailsOpen(true);
       setFormOpen(true);
@@ -892,13 +919,9 @@ export function ScenarioNew() {
         systemId: values.systemId,
         source: sourceFromUrl(values.sourceUrl),
         sourceUrl: values.sourceUrl.trim() || undefined,
-        policy: "public",
         emoji: SYSTEMS[values.systemId]?.short ?? "汎用",
         bg: BG[Object.keys(s.scenarios).length % BG.length]!,
-        tags: values.tags
-          .split(/[,、]/)
-          .map((t) => t.trim())
-          .filter(Boolean),
+        tags: cleanTags(values.tags),
         description: values.description.trim() || undefined,
         claimedBy: null,
         addedBy: "user",
@@ -980,10 +1003,10 @@ export function ScenarioNew() {
                   name="systemId"
                   control={control}
                   render={({ field }) => (
-                    <Select
+                    <Combobox
                       ariaLabel="システム"
                       value={field.value}
-                      options={SYSTEM_LIST.map((s) => ({ value: s.id, label: s.name }))}
+                      options={systemOptions()}
                       onChange={field.onChange}
                       className="w-full"
                     />
@@ -1014,11 +1037,20 @@ export function ScenarioNew() {
                   {...register("description")}
                 />
               </Field>
-              <Field label="キーワード" hint="読点かカンマで区切る">
-                <input
-                  className="input input-bordered w-full"
-                  placeholder="例: 学校, クローズド"
-                  {...register("tags")}
+              <Field label="キーワード">
+                <Controller
+                  name="tags"
+                  control={control}
+                  render={({ field }) => (
+                    <MultiCombobox
+                      ariaLabel="キーワード"
+                      className="w-full"
+                      values={field.value}
+                      onChange={field.onChange}
+                      options={keywordSuggestions}
+                      placeholder="キーワードを探すか、新しく追加"
+                    />
+                  )}
                 />
               </Field>
             </details>

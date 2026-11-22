@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { enterDemo } from "./design-audit";
+import { auditPage, enterDemo } from "./design-audit";
 
 test("卓の作成 → 日程調整の作成と確定 → カレンダー購読エンドポイントまで連動する", async ({ page }) => {
   await enterDemo(page);
@@ -8,7 +8,8 @@ test("卓の作成 → 日程調整の作成と確定 → カレンダー購読�
   await page.goto("/tables");
   await page.getByRole("button", { name: "卓を作成" }).click();
   const tableDialog = page.getByRole("dialog");
-  await expect(tableDialog.getByText("自分")).toBeVisible();
+  // メンバーは名前で探して足さない（P14）。作成後に招待リンクで招く
+  await expect(tableDialog.getByLabel("参加者を検索")).toHaveCount(0);
   await tableDialog.getByLabel("卓名", { exact: true }).fill("週末ミステリ部");
   await tableDialog.getByRole("button", { name: "作成する" }).click();
   await expect(page).toHaveURL(/\/tables\/t_/);
@@ -154,7 +155,40 @@ test("Google カレンダーの照らし合わせは設定で本人がオンに�
   await page.goto("/settings");
   const toggle = page.getByRole("checkbox", { name: "Google カレンダーの空き時間を使う" });
   await expect(toggle).not.toBeChecked();
+  expect(await auditPage(page)).toEqual([]);
+
+  // カレンダー連携からも同じ設定を直接変えられる（設定へ行かせない）。予定のある日を手で入れる欄はない
   await page.goto("/calendar");
   await page.getByRole("button", { name: "カレンダー連携" }).click();
-  await expect(page.getByRole("dialog").getByText("Google カレンダー: 使っていません")).toBeVisible();
+  const dialog = page.getByRole("dialog", { name: "カレンダー連携" });
+  await expect(dialog.getByRole("checkbox", { name: "Google カレンダーの空き時間を使う" })).not.toBeChecked();
+  await expect(dialog.getByRole("link", { name: "設定で変える" })).toHaveCount(0);
+  await expect(dialog.getByText("予定のある日")).toHaveCount(0);
+  expect(await auditPage(page)).toEqual([]);
+
+  // アプリごとの登録のしかたは、要る人が開くガイド
+  await dialog.getByRole("button", { name: "登録のしかた" }).click();
+  const guide = page.getByRole("dialog", { name: "登録のしかた" });
+  await expect(guide.locator("[data-guide]")).toContainText("Apple カレンダー");
+  expect(await auditPage(page)).toEqual([]);
+  // 上に重なったガイドだけが Esc で閉じる
+  await page.keyboard.press("Escape");
+  await expect(guide).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+});
+
+test("月の暦は凡例なしで種類が分かる（印の横に「候補」「記録」）", async ({ page }) => {
+  await enterDemo(page);
+  await page.goto("/calendar");
+  const month = page.locator("section[aria-labelledby=sec-month]");
+  await expect(month.getByText("日程調整の候補", { exact: true })).toHaveCount(0);
+  const cells = month.locator("[data-calendar-day]");
+  // 予定の印は描画のあとに入るので、出そろうまで待つ
+  await expect
+    .poll(async () =>
+      (await cells.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label") ?? ""))).some((l) =>
+        /、(?:候補|記録) /.test(l),
+      ),
+    )
+    .toBe(true);
 });

@@ -286,6 +286,8 @@ async function cmdRules(args: string[]): Promise<void> {
   console.log(`deployed: ${FIRESTORE_DB} <- ${ruleset.name}`);
 }
 
+const CALENDAR_API = "calendar-json.googleapis.com";
+
 async function cmdFirebase(args: string[]): Promise<void> {
   const project = assertProjectId();
   const headers = gcloudHeaders(project);
@@ -300,6 +302,17 @@ async function cmdFirebase(args: string[]): Promise<void> {
     const cur = await apiJson<{ authorizedDomains?: string[] }>("GET", `${baseUrl}/config`, headers);
     const authorizedDomains = [...new Set([...(cur.authorizedDomains ?? []), domain])];
     await apiJson("PATCH", `${baseUrl}/config?updateMask=authorizedDomains`, headers, { authorizedDomains });
+  }
+
+  // Google カレンダーの空き時間（src/lib/google-calendar.ts）は、ログインと同じプロジェクトの
+  // Calendar API を呼ぶ。無効だと一覧の取得が 403 (SERVICE_DISABLED) になる（2026-11-22 の不具合）
+  const calendarApi = `https://serviceusage.googleapis.com/v1/projects/${project}/services/${CALENDAR_API}`;
+  if (args.includes("--enable-calendar-api")) {
+    await apiJson("POST", `${calendarApi}:enable`, headers, {});
+  }
+  const calendarState = await apiJson<{ state?: string }>("GET", calendarApi, headers);
+  if (calendarState.state !== "ENABLED") {
+    console.warn(`${CALENDAR_API} is disabled; run: node scripts/ops.ts firebase --enable-calendar-api`);
   }
 
   const config = await apiJson<{ authorizedDomains?: string[] }>("GET", `${baseUrl}/config`, headers);
@@ -317,6 +330,7 @@ async function cmdFirebase(args: string[]): Promise<void> {
       {
         project,
         authorizedDomains: config.authorizedDomains ?? [],
+        calendarApiEnabled: calendarState.state === "ENABLED",
         providers: (providers.defaultSupportedIdpConfigs ?? []).map((p) => ({
           provider: p.name.split("/").at(-1),
           enabled: p.enabled,

@@ -1,21 +1,13 @@
 import * as Clipboard from "expo-clipboard";
-import {
-  importCharacterFromText,
-  importLogFromText,
-  type CharacterImportResult,
-  type LogImportResult,
-} from "@shared/lib/importers";
+import { importLogFromText, type LogImportResult } from "@shared/lib/importers";
+import { describeSheetUrl } from "@shared/lib/external-sync";
 
 export type ClipboardSuggestion =
   | { kind: "invite"; token: string; url: string }
   | { kind: "shareLog"; slug: string; url: string }
   | { kind: "shareCharacter"; id: string; url: string }
-  | {
-      kind: "character";
-      result: CharacterImportResult;
-      previewName: string;
-      sourceLabel: string;
-    }
+  /** キャラシの URL（取り込みは URL からだけ。P6） */
+  | { kind: "sheetUrl"; url: string; sourceLabel: string }
   | {
       kind: "log";
       result: LogImportResult;
@@ -47,15 +39,8 @@ export function classifyClipboardContent(raw: string): ClipboardSuggestion | nul
     return { kind: "shareCharacter", id: shareCharMatch[1], url: trimmed };
   }
 
-  const charRes = importCharacterFromText(trimmed);
-  if (charRes) {
-    return {
-      kind: "character",
-      result: charRes,
-      previewName: charRes.character.name,
-      sourceLabel: charRes.sourceLabel,
-    };
-  }
+  const sheet = describeSheetUrl(trimmed);
+  if (sheet.state === "ok") return { kind: "sheetUrl", url: sheet.url, sourceLabel: sheet.label };
 
   const logRes = importLogFromText(trimmed);
   if (logRes && logRes.log.messageCount > 0) {

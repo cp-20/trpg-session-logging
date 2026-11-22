@@ -2,18 +2,19 @@ import { useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SYSTEM_LIST } from "@shared/data/systems";
-import { todayStr } from "@shared/lib/time";
+import { systemOptions } from "@shared/lib/system-options";
+import { todayStr, sessionStart, sessionDays } from "@shared/lib/time";
 import type { Log } from "@shared/types";
 import { ScreenShell } from "../../components/ScreenShell";
 import { SessionRow } from "../../components/SessionRow";
 import { IconPlus, IconSearch, IconUpload, IconX } from "../../components/icons";
 import {
   Button,
+  Combobox,
   DividerList,
   EmptyState,
   IconButton,
   PageHead,
-  Select,
   Surface,
   TextField,
 } from "../../components/ui";
@@ -42,14 +43,14 @@ export default function SessionsScreen() {
         return [l.title, sc, tb].some((t) => t?.toLowerCase().includes(needle));
       });
     }
-    return list.sort((a, b) => b.t0 - a.t0);
+    return list.sort((a, b) => sessionStart(b) - sessionStart(a));
   }, [myLogs, q, sys, state.scenarios, state.tables]);
 
   const groups = useMemo(() => {
     const out: { key: string; label: string; items: Log[] }[] = [];
     const thisYear = Number(todayStr().slice(0, 4));
     for (const l of logs) {
-      const [y, m] = (l.dates[0] ?? "2026-01-01").split("-").map(Number);
+      const [y, m] = (sessionDays(l)[0] ?? "2026-01-01").split("-").map(Number);
       const key = `${y}-${m}`;
       let g = out[out.length - 1];
       if (!g || g.key !== key) {
@@ -64,7 +65,7 @@ export default function SessionsScreen() {
   const sysOptions = useMemo(
     () => [
       { value: "all", label: "すべてのシステム" },
-      ...SYSTEM_LIST.filter((s) => usedSystems.has(s.id)).map((s) => ({ value: s.id, label: s.name })),
+      ...systemOptions(SYSTEM_LIST.filter((s) => usedSystems.has(s.id))),
     ],
     [usedSystems],
   );
@@ -96,7 +97,7 @@ export default function SessionsScreen() {
               </>
             }
           >
-            CCFOLIA・Udonarium・テキストのログに対応しています。ログがなくても記録は残せます。
+            CCFOLIA・Udonarium のログに対応しています。
           </EmptyState>
         </Surface>
       </ScreenShell>
@@ -124,7 +125,7 @@ export default function SessionsScreen() {
           )}
         </View>
         {sysOptions.length > 2 && (
-          <Select ariaLabel="システムで絞り込み" value={sys} options={sysOptions} onChange={setSys} />
+          <Combobox ariaLabel="システムで絞り込み" value={sys} options={sysOptions} onChange={setSys} />
         )}
       </View>
 

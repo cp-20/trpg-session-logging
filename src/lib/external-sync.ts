@@ -1,18 +1,19 @@
 import type { Character, ExternalSyncConfig, ExternalSyncProvider, GrowthRecord } from "../types";
 import { SYSTEMS } from "../data/systems";
 import { toCharacterFields, type ParsedCharacter } from "./ccfolia-character";
-import {
-  guessSystemFromText,
-  parseCharasheetJson,
-  parseEmokloreCharacter,
-  parseIacharaText,
-  parseYtsheetJson,
-} from "./importers";
+import { guessSystemFromText, parseCharasheetJson, parseYtsheetJson } from "./importers";
 import { uid } from "./format";
 import { diffSheetSkills, type SheetProvider } from "./sheet";
+import { defaultGrowthSession, growthFromSync, growthRecords } from "./character-growth";
 import {
+  SOUKO_SYSTEMS,
   parseCharaenoJson,
   parseCharashJson,
+  isIacharaSheet,
+  isIacharaSheetPublic,
+  parseIacharaSheet,
+  parseLhrpgJson,
+  parseSoukoJson,
   sheetFromCharasheet,
   sheetFromStats,
   sheetFromYtsheet,
@@ -26,6 +27,8 @@ export const EXTERNAL_PROVIDER_LABELS: Record<ExternalSyncProvider, string> = {
   emoklore: "エモクロアキャラクターシート",
   charaeno: "キャラエノ",
   charash: "キャラッシュ",
+  souko: "キャラクターシート倉庫",
+  lhrpg: "冒険窓口",
   booth: "BOOTH",
   talto: "TALTO",
 };
@@ -67,6 +70,32 @@ export type ParsedExternalUrlResult =
       fetchUrls: string[];
     }
   | { ok: false; error: string };
+
+/** いあきゃらの閲覧ページが読む API */
+export const IACHARA_API_ORIGIN = "https://apiv3.iachara.com";
+
+/**
+ * いあきゃらの API は取得できないときも HTTP 200 で { success: false } を返すので、本文から理由を出す。
+ * 読めるシートなら undefined
+ */
+export function iacharaSheetError(raw: string): string | undefined {
+  let root: unknown;
+  try {
+    root = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (isIacharaSheetPublic(root) && isIacharaSheet(root)) return undefined;
+  const outer = asRecord(asRecord(root)?.data);
+  const meta = asRecord(asRecord(outer?.data)?.metadata);
+  if (outer?.public === false || meta?.isPublic === false) {
+    return "このキャラクターシートは非公開です。いあきゃらで公開に設定してから、もう一度お試しください。";
+  }
+  if (asRecord(root)?.success === true && outer?.deleted !== true && outer?.data) {
+    return "このキャラクターシートの形式は読み取れませんでした。";
+  }
+  return "いあきゃらにこのキャラクターシートが見つかりませんでした。URL をお確かめください。";
+}
 
 const SAFE_BOOTH_SUBDOMAIN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const BANNED_BOOTH_SUBDOMAINS = new Set(["admin", "accounts", "manage", "checkout", "api"]);
@@ -208,23 +237,22 @@ export function parseExternalUrl(rawUrl: string): ParsedExternalUrlResult {
     return { ok: false, error: "対応していないホストです。" };
   }
 
-  // 1. いあきゃら (https://iachara.com/view/..., /char/view/..., /sns/.../view)
+  // 1. いあきゃら (https://iachara.com/view/{id})。閲覧ページと同じ API を、閲覧者用の匿名の鍵で読む
+  //    （鍵の受け取りは external-import-server.ts の取得手順）
   if (host === "iachara.com" || host === "www.iachara.com") {
-    const m = u.pathname.match(/^\/(?:char\/)?view\/(\d+)/) ?? u.pathname.match(/^\/sns\/(\d+)\/view/);
+    const m = u.pathname.match(/^\/(?:char\/)?(?:view|edit)\/(\d{1,12})\/?$/);
     if (!m) {
       return {
         ok: false,
-        error: "いあきゃらのキャラクター共有 URL（例: https://iachara.com/view/123456）を指定してください。",
+        error: "いあきゃらのキャラクター URL（例: https://iachara.com/view/…）を指定してください。",
       };
     }
-    const id = m[1]!;
-    const displayUrl = `https://iachara.com/view/${id}`;
     return {
       ok: true,
       provider: "iachara",
       kind: "character",
-      displayUrl,
-      fetchUrls: [displayUrl],
+      displayUrl: `https://iachara.com/view/${m[1]}`,
+      fetchUrls: [`${IACHARA_API_ORIGIN}/v3/charasheet/${m[1]}`],
     };
   }
 
@@ -293,7 +321,10 @@ export function parseExternalUrl(rawUrl: string): ParsedExternalUrlResult {
 
   // 3c. キャラッシュ (https://charash.jp/view/{id})。公開 API /api/v1/characters/{id} を読む
   if (host === "charash.jp" || host === "www.charash.jp") {
-    const m = u.pathname.match(/^\/(?:view|api\/v1\/characters)\/([A-Za-z0-9_-]{4,64})\/?$/);
+    /* 閲覧 URL は /view/{id}/{システム} に転送されるので、後ろのシステムの道も受ける */
+    const m = u.pathname.match(
+      /^\/(?:view|api\/v1\/characters)\/([A-Za-z0-9_-]{4,64})(?:\/[a-z0-9_-]+)?\/?$/,
+    );
     if (!m) {
       return {
         ok: false,
@@ -309,19 +340,59 @@ export function parseExternalUrl(rawUrl: string): ParsedExternalUrlResult {
     };
   }
 
-  // 4. エモクロアキャラクターシート (https://emoklore.charasheet.jp/...)
-  if (host === "emoklore.charasheet.jp") {
-    if (u.pathname.length < 3) {
-      return { ok: false, error: "エモクロアキャラクターシートの個別 URL を指定してください。" };
+  // 3d. TRPGキャラクターシート倉庫 (https://character-sheets.appspot.com/{システム}/edit.html?key=…)。公開 JSON の display?ajax=1 を読む
+  if (host === "character-sheets.appspot.com") {
+    const m = u.pathname.match(/^\/([a-z0-9]+)\/(?:edit\.html|display)$/);
+    const key = u.searchParams.get("key")?.trim();
+    if (!m || !key || !/^[A-Za-z0-9_-]{8,200}$/.test(key)) {
+      return {
+        ok: false,
+        error: "キャラクターシート倉庫のキャラシート URL（…/edit.html?key=…）を指定してください。",
+      };
     }
-    const displayUrl = `${u.origin}${u.pathname}`;
+    const sys = m[1]!;
+    if (!SOUKO_SYSTEMS[sys]) {
+      return {
+        ok: false,
+        error: `キャラクターシート倉庫は${Object.values(SOUKO_SYSTEMS)
+          .map((x) => x.label)
+          .join("・")}のキャラシに対応しています。`,
+      };
+    }
+    const base = `https://character-sheets.appspot.com/${sys}`;
     return {
       ok: true,
-      provider: "emoklore",
+      provider: "souko",
       kind: "character",
-      displayUrl,
-      fetchUrls: [displayUrl],
+      displayUrl: `${base}/edit.html?key=${encodeURIComponent(key)}`,
+      fetchUrls: [`${base}/display?ajax=1&key=${encodeURIComponent(key)}`],
     };
+  }
+
+  // 3e. ログ・ホライズンTRPG 冒険窓口 (https://lhrpg.com/lhz/pc?id=…)。公開 JSON API /lhz/api/{id}.json を読む
+  if (host === "lhrpg.com" || host === "www.lhrpg.com") {
+    const id =
+      u.pathname === "/lhz/pc"
+        ? u.searchParams.get("id")?.trim()
+        : u.pathname.match(/^\/lhz\/api\/(\d+)\.json$/)?.[1];
+    if (!id || !/^\d{1,10}$/.test(id)) {
+      return {
+        ok: false,
+        error: "冒険窓口のキャラクター URL（例: https://lhrpg.com/lhz/pc?id=…）を指定してください。",
+      };
+    }
+    return {
+      ok: true,
+      provider: "lhrpg",
+      kind: "character",
+      displayUrl: `https://lhrpg.com/lhz/pc?id=${id}`,
+      fetchUrls: [`https://lhrpg.com/lhz/api/${id}.json`],
+    };
+  }
+
+  // 4. エモクロアキャラクターシート。キャラッシュに移ったので、キャラッシュの URL を貼ってもらう
+  if (host === "emoklore.charasheet.jp") {
+    return { ok: false, error: "エモクロアのキャラシはキャラッシュの URL を貼ってください。" };
   }
 
   // 5. BOOTH (https://booth.pm/ja/items/{id} or https://{shop}.booth.pm/items/{id})
@@ -368,8 +439,7 @@ export function parseExternalUrl(rawUrl: string): ParsedExternalUrlResult {
 
   return {
     ok: false,
-    error:
-      "未対応の URL です。キャラエノ・キャラッシュ・キャラクター保管所・ゆとシートⅡ・いあきゃら・BOOTH・TALTO に対応しています。",
+    error: `未対応の URL です。${SHEET_SITES.map((x) => x.label).join("・")}・BOOTH・TALTO に対応しています。`,
   };
 }
 
@@ -396,20 +466,6 @@ export function decodeHtmlEntities(input: string): string {
   );
 }
 
-function stripHtmlTags(html: string): string {
-  return decodeHtmlEntities(
-    html
-      .replace(/<script\b[\s\S]*?<\/script>/gi, "\n")
-      .replace(/<style\b[\s\S]*?<\/style>/gi, "\n")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/(?:p|div|li|tr|h[1-6]|dt|dd|section)>/gi, "\n")
-      .replace(/<[^>]+>/g, " "),
-  )
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
 function extractMetaTags(html: string): Record<string, string> {
   const metas: Record<string, string> = {};
   const tagRe = /<meta\s+([^>]+?)\/?>/gi;
@@ -429,16 +485,6 @@ function extractMetaTags(html: string): Record<string, string> {
   return metas;
 }
 
-function extractNextDataJson(html: string): unknown | null {
-  const m = html.match(/<script\b[^>]*id\s*=\s*["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
-  if (!m) return null;
-  try {
-    return JSON.parse(m[1]!.trim());
-  } catch {
-    return null;
-  }
-}
-
 function safeHttpsUrl(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
   const trimmed = raw.trim();
@@ -456,170 +502,6 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 
 function strVal(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v.trim() : undefined;
-}
-
-function numVal(v: unknown): number | undefined {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && /^-?\d+(?:\.\d+)?$/.test(v.trim())) {
-    const n = Number(v.trim());
-    if (Number.isFinite(n)) return n;
-  }
-  return undefined;
-}
-
-function findIacharaCharObject(node: unknown, depth = 0): Record<string, unknown> | null {
-  if (depth > 8 || !node || typeof node !== "object") return null;
-  // 配列も Object.values で要素順に辿る（配列は name を持たないのでキャラ判定されない）
-  const rec = node as Record<string, unknown>;
-  const hasName = typeof rec.name === "string" && rec.name.trim().length > 0;
-  const looksLikeChar =
-    rec.abilities !== undefined ||
-    rec.status !== undefined ||
-    rec.params !== undefined ||
-    rec.skills !== undefined ||
-    rec.occupation !== undefined ||
-    rec.str !== undefined ||
-    rec.san !== undefined;
-  if (hasName && looksLikeChar) return rec;
-  for (const val of Object.values(rec)) {
-    const hit = findIacharaCharObject(val, depth + 1);
-    if (hit) return hit;
-  }
-  return null;
-}
-
-function mapIacharaObject(obj: Record<string, unknown>): ParsedCharacter | null {
-  const name = strVal(obj.name);
-  if (!name) return null;
-
-  const stats: Record<string, number> = {};
-  const directKeys = ["str", "con", "pow", "dex", "app", "siz", "int", "edu", "hp", "mp", "san", "luck"];
-  for (const k of directKeys) {
-    const v = numVal(obj[k] ?? obj[k.toUpperCase()]);
-    if (v !== undefined) stats[k] = v;
-  }
-
-  for (const field of [obj.abilities, obj.status, obj.params, obj.attributes, obj.skills]) {
-    if (Array.isArray(field)) {
-      for (const item of field) {
-        const entry = asRecord(item);
-        if (!entry) continue;
-        const label = strVal(entry.label) ?? strVal(entry.name) ?? strVal(entry.key);
-        const val = numVal(entry.total ?? entry.value ?? entry.current ?? entry.now ?? entry.score);
-        if (label && val !== undefined) {
-          const norm = /^[A-Z]{2,5}$/i.test(label) ? label.toLowerCase() : label;
-          stats[norm] = val;
-        }
-      }
-    } else if (asRecord(field)) {
-      for (const [k, v] of Object.entries(field as Record<string, unknown>)) {
-        const n = numVal(v);
-        if (n !== undefined) {
-          stats[/^[A-Z]{2,5}$/i.test(k) ? k.toLowerCase() : k] = n;
-        }
-      }
-    }
-  }
-
-  const occ = strVal(obj.occupation) ?? strVal(obj.job);
-  const memo = strVal(obj.memo) ?? strVal(obj.backstory) ?? strVal(obj.profile);
-  const memoLines: string[] = [];
-  if (occ) memoLines.push(`職業: ${occ}`);
-  if (memo) memoLines.push(memo);
-
-  let systemId = guessSystemFromText(`${strVal(obj.system) ?? ""} ${occ ?? ""} ${memo ?? ""}`);
-  if (!systemId) {
-    const game = strVal(obj.game) ?? strVal(obj.version);
-    if (game && /6/.test(game)) systemId = "coc6";
-    else if (stats.san !== undefined || stats.hp !== undefined) {
-      systemId = (stats.str ?? 0) > 0 && (stats.str ?? 0) <= 21 && (stats.edu ?? 0) <= 21 ? "coc6" : "coc7";
-    }
-  }
-
-  const image = safeHttpsUrl(obj.image ?? obj.imageUrl ?? obj.icon ?? obj.thumbnail);
-  return {
-    name,
-    memo: memoLines.join("\n") || undefined,
-    systemId,
-    stats,
-    ...(image ? { image } : {}),
-  };
-}
-
-/** いあきゃらの HTML / JSON / テキストレスポンスを解析する */
-export function parseIacharaResponse(raw: string, _url: string): ParsedCharacter | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-
-  // 1. 直接 JSON
-  if (trimmed.startsWith("{")) {
-    try {
-      const parsed = JSON.parse(trimmed);
-      const found = findIacharaCharObject(parsed);
-      if (found) {
-        const mapped = mapIacharaObject(found);
-        if (mapped) return mapped;
-      }
-    } catch {
-      /* HTML やテキストとして続行 */
-    }
-  }
-
-  // 2. HTML 内の __NEXT_DATA__
-  if (trimmed.startsWith("<")) {
-    const nextData = extractNextDataJson(trimmed);
-    if (nextData) {
-      const found = findIacharaCharObject(nextData);
-      if (found) {
-        const mapped = mapIacharaObject(found);
-        if (mapped) return mapped;
-      }
-    }
-
-    // 3. HTML meta (og:title / og:description / og:image) + 可視テキスト抽出
-    const metas = extractMetaTags(trimmed);
-    const bodyText = stripHtmlTags(trimmed);
-    const rawTitle = metas["og:title"] ?? metas.title ?? "";
-    const cleanedTitle = rawTitle
-      .replace(/\s*[-|｜]\s*いあきゃら.*$/i, "")
-      .replace(/^【?いあきゃら】?\s*/, "")
-      .trim();
-
-    const desc = metas["og:description"] ?? metas.description ?? "";
-    const combinedText = `${desc}\n${bodyText}`;
-    const textResult = parseIacharaText(
-      cleanedTitle && !/^名前\s*[:：]/m.test(combinedText)
-        ? `名前: ${cleanedTitle}\n${combinedText}`
-        : combinedText,
-    );
-    if (textResult) {
-      const img = safeHttpsUrl(metas["og:image"]);
-      return { ...textResult, ...(img ? { image: img } : {}) };
-    }
-
-    if (cleanedTitle) {
-      const stats: Record<string, number> = {};
-      for (const m of combinedText.matchAll(
-        /\b(STR|CON|POW|DEX|APP|SIZ|INT|EDU|HP|MP|SAN|LUCK)\b\s*[:：]\s*(\d+)/gi,
-      )) {
-        stats[m[1]!.toLowerCase()] = Number(m[2]);
-      }
-      if (Object.keys(stats).length > 0 || desc) {
-        const img = safeHttpsUrl(metas["og:image"]);
-        return {
-          name: cleanedTitle,
-          memo: desc || undefined,
-          systemId: guessSystemFromText(combinedText) ?? ((stats.str ?? 0) >= 25 ? "coc7" : "coc6"),
-          stats,
-          ...(img ? { image: img } : {}),
-        };
-      }
-    }
-    return null;
-  }
-
-  // 4. プレーンテキスト
-  return parseIacharaText(trimmed);
 }
 
 /** キャラクター保管所の JSON / JSONP レスポンスを解析する */
@@ -658,37 +540,6 @@ export function parseYtsheetResponse(raw: string): ParsedCharacter | null {
       stats: {},
       ...(img ? { image: img } : {}),
     };
-  }
-  return null;
-}
-
-/** エモクロアキャラクターシートのレスポンスを解析する */
-export function parseEmokloreResponse(raw: string, _url: string): ParsedCharacter | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const direct = parseEmokloreCharacter(trimmed);
-  if (direct) return direct;
-  if (trimmed.startsWith("<")) {
-    const metas = extractMetaTags(trimmed);
-    const bodyText = stripHtmlTags(trimmed);
-    const title = (metas["og:title"] ?? metas.title ?? "")
-      .replace(/\s*[-|｜]\s*(?:エモクロア|EMOKLORE).*$/i, "")
-      .trim();
-    const withName =
-      title && !/^(?:共鳴者名|名前)\s*[:：]/m.test(bodyText) ? `共鳴者名: ${title}\n${bodyText}` : bodyText;
-    const parsed = parseEmokloreCharacter(withName);
-    if (parsed) {
-      const img = safeHttpsUrl(metas["og:image"]);
-      return img ? { ...parsed, image: img } : parsed;
-    }
-    if (title) {
-      return {
-        name: title,
-        memo: metas["og:description"] || undefined,
-        systemId: "emoklore",
-        stats: {},
-      };
-    }
   }
   return null;
 }
@@ -885,12 +736,15 @@ export function parseExternalResponse(
   }
 
   let character: ParsedCharacter | null = null;
-  if (provider === "iachara") character = parseIacharaResponse(raw, displayUrl);
-  else if (provider === "charasheet") character = parseCharasheetResponse(raw);
+  if (provider === "charasheet") character = parseCharasheetResponse(raw);
   else if (provider === "ytsheet") character = parseYtsheetResponse(raw);
-  else if (provider === "emoklore") character = parseEmokloreResponse(raw, displayUrl);
   else if (provider === "charaeno") character = parseCharaenoJson(raw.trim(), displayUrl);
   else if (provider === "charash") character = parseCharashJson(raw.trim(), displayUrl);
+  else if (provider === "iachara") character = parseIacharaSheet(raw.trim(), displayUrl);
+  else if (provider === "souko") {
+    const sys = displayUrl.match(/^https:\/\/character-sheets\.appspot\.com\/([a-z0-9]+)\//)?.[1] ?? "";
+    character = parseSoukoJson(jsonBody(raw), sys, displayUrl);
+  } else if (provider === "lhrpg") character = parseLhrpgJson(jsonBody(raw), displayUrl);
 
   if (!character) return null;
   character = withSheet(provider, character, raw, displayUrl);
@@ -972,12 +826,16 @@ export interface MergeExternalCharacterResult {
   changed: boolean;
   statChanges: StatChangeDiff[];
   profileChanges: string[];
+  /** 同期で上がった技能から自動で残した成長（どのセッションのあとかは既定で決め、あとから付け替えられる） */
+  growth: GrowthRecord[];
 }
 
 /**
  * 既存の探索者データに外部シートからの最新データを非破壊マージする。
  * キャラシが正なので名前・職業・システム・画像・能力値・シートは置き換える。
  * 卓譜だけの項目（ひとこと紹介・タグ・共有設定・sessions・過去の growth）は絶対に失わない。
+ * 上がった技能は成長として残す。どのセッションのあとかの既定は、前の同期のあとに遊んだうちいちばん新しいもの
+ * （セッションが 1 つもなければ成長としては残さない。値はキャラシに残る）。
  */
 export function mergeExternalCharacterUpdate(
   existing: Character,
@@ -986,7 +844,6 @@ export function mergeExternalCharacterUpdate(
     url: string;
     provider: ExternalSyncProvider;
     syncedAt: string;
-    today: string;
     contentHash?: string;
     autoSync?: boolean;
   },
@@ -994,7 +851,6 @@ export function mergeExternalCharacterUpdate(
   // fields.systemId は使わない（nextSystemId を下で決める）ので既定システムは渡すだけ
   const fields = toCharacterFields(incoming, existing.systemId);
   const nextHash = opts.contentHash ?? computeExternalContentHash(incoming);
-  const providerLabel = EXTERNAL_PROVIDER_LABELS[opts.provider];
   const nextArchetype = extractArchetypeFromMemo(incoming.memo) || existing.archetype;
   const nextName = fields.name || existing.name;
   const nextSystemId = incoming.systemId ?? existing.systemId;
@@ -1035,15 +891,11 @@ export function mergeExternalCharacterUpdate(
     !hashSame &&
     (statChanges.length > 0 || profileChanges.length > 0 || skillChanges.length > 0 || sheetChanged);
 
-  const newGrowth: GrowthRecord[] = changed
-    ? [...statChanges, ...skillChanges].map((d) => ({
-        id: `g_${uid()}`,
-        date: opts.today,
-        skill: d.label,
-        from: d.from,
-        to: d.to,
-        note: `${providerLabel}から同期`,
-      }))
+  const session = changed
+    ? defaultGrowthSession(existing, existing.externalSync?.lastSyncedAt ?? existing.sheet?.fetchedAt)
+    : undefined;
+  const newGrowth: GrowthRecord[] = session
+    ? growthRecords(growthFromSync(nextSystemId, skillChanges, statChanges), session, () => `g_${uid()}`)
     : [];
 
   const externalSync: ExternalSyncConfig = {
@@ -1074,6 +926,7 @@ export function mergeExternalCharacterUpdate(
     changed,
     statChanges: [...statChanges, ...skillChanges.map((d) => ({ key: d.label, ...d }))],
     profileChanges,
+    growth: newGrowth,
   };
 }
 
@@ -1098,49 +951,37 @@ export function shouldAutoSync(
   return nowMs - lastMs >= intervalMs;
 }
 
-/** URL から読める（取得できる）キャラシサイト。貼り付け画面の案内と同じ並び */
+/** URL から読めるキャラシサイト（取り込みの画面にこの順で名前を並べる） */
 export const SHEET_SITES: { label: string; example: string }[] = [
   { label: "キャラエノ", example: "https://charaeno.com/7th/…" },
   { label: "キャラッシュ", example: "https://charash.jp/view/…" },
+  { label: "いあきゃら", example: "https://iachara.com/view/…" },
   { label: "キャラクター保管所", example: "https://charasheet.vampire-blood.net/…" },
   { label: "ゆとシートⅡ", example: "https://yutorize.work/ytsheet/sw2.5/?id=…" },
+  { label: "キャラクターシート倉庫", example: "https://character-sheets.appspot.com/dx3/edit.html?key=…" },
+  { label: "冒険窓口", example: "https://lhrpg.com/lhz/pc?id=…" },
 ];
 
 export type SheetUrlStatus =
   | { state: "empty" }
   | { state: "invalid"; message: string }
-  /** URL からは読めないサイト。コマ出力の貼り付けを案内する */
-  | { state: "paste"; provider: ExternalSyncProvider; label: string; url: string; message: string }
   | { state: "ok"; provider: ExternalSyncProvider; label: string; url: string };
 
-/** 入力中の URL がどのキャラシサイトか（通信しない） */
+/** 入力中の URL がどのキャラシサイトか（通信しない）。URL から読めないサイトは受け付けない（P6） */
 export function describeSheetUrl(raw: string): SheetUrlStatus {
   const t = raw.trim();
   if (!t) return { state: "empty" };
-  if (/^https?:\/\/emoklore\.charasheet\.jp\//i.test(t)) {
-    return {
-      state: "invalid",
-      message:
-        "エモクロアのキャラクターシートはキャラッシュ（charash.jp）に移りました。キャラッシュの URL を貼ってください。",
-    };
-  }
   const parsed = parseExternalUrl(t);
   if (!parsed.ok) return { state: "invalid", message: parsed.error };
   if (parsed.kind !== "character") {
     return { state: "invalid", message: "キャラクターシートの URL を貼ってください。" };
   }
-  const label = EXTERNAL_PROVIDER_LABELS[parsed.provider];
-  if (parsed.provider === "iachara") {
-    return {
-      state: "paste",
-      provider: parsed.provider,
-      label,
-      url: parsed.displayUrl,
-      message:
-        "いあきゃらは URL から読み込めません。いあきゃらのキャラシで「ココフォリア駒出力」を押し、コピーした内容を下に貼り付けてください。",
-    };
-  }
-  return { state: "ok", provider: parsed.provider, label, url: parsed.displayUrl };
+  return {
+    state: "ok",
+    provider: parsed.provider,
+    label: EXTERNAL_PROVIDER_LABELS[parsed.provider],
+    url: parsed.displayUrl,
+  };
 }
 
 /** キャラシと結び付いているか（名前・能力値・技能をキャラシ側で直すキャラクター） */
@@ -1148,10 +989,10 @@ export function isSheetLinked(c: Pick<Character, "externalSync" | "sheet">): boo
   return Boolean(c.externalSync?.url || c.sheet);
 }
 
-/** URL から更新できるか（いあきゃらなど貼り付けで取り込んだものは貼り直して更新する） */
+/** URL から更新できるか。以前エモクロアキャラクターシートから取り込んだものは、キャラシで開くだけ */
 export function canFetchSheet(c: Pick<Character, "externalSync">): boolean {
   const ext = c.externalSync;
-  return Boolean(ext?.url && ext.provider !== "iachara");
+  return Boolean(ext?.url && parseExternalUrl(ext.url).ok);
 }
 
 /** キャラシのメモから卓譜の「ひとこと紹介」の初期値を作る（職業・種族などの行は除く） */

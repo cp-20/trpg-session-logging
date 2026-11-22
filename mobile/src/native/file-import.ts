@@ -2,12 +2,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { File as ExpoFile } from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import { Platform } from "react-native";
-import {
-  importCharacterFromFile,
-  importLogFromFile,
-  type CharacterImportResult,
-  type LogImportResult,
-} from "@shared/lib/importers";
+import { importLogFromFile, type LogImportResult } from "@shared/lib/importers";
 import { parseSavedState } from "@shared/lib/state-schema";
 import type { State } from "@shared/types";
 
@@ -51,34 +46,6 @@ export async function pickAndImportLogFile(): Promise<{
   const asset = picked.assets[0];
   const result = await importLogFromFile(assetToWebFileLike(asset));
   return { fileName: asset.name, result };
-}
-
-export async function pickAndImportCharacterFile(): Promise<{
-  fileName: string;
-  size: number;
-  result: CharacterImportResult | null;
-} | null> {
-  const picked = await DocumentPicker.getDocumentAsync({
-    type: [
-      "application/json",
-      "text/plain",
-      "text/xml",
-      "application/xml",
-      "application/zip",
-      "application/x-zip-compressed",
-      "*/*",
-    ],
-    copyToCacheDirectory: true,
-    multiple: false,
-  });
-  if (picked.canceled || !picked.assets[0]) return null;
-  const asset = picked.assets[0];
-  const size = asset.size ?? 0;
-  if (size > 20 * 1024 * 1024) {
-    throw new Error("20MB以下のキャラクターファイルを選んでください。");
-  }
-  const result = await importCharacterFromFile(assetToWebFileLike(asset));
-  return { fileName: asset.name, size, result };
 }
 
 export async function pickAndImportBackupJson(): Promise<State | null> {

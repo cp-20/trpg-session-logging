@@ -10,7 +10,10 @@ reports/
 .impeccable/review/
 .live-review/
 .next/
+.next-e2e-discord/
 next-env.d.ts
 mobile/.expo
 mobile/dist
+mobile/android
+mobile/ios
 mobile/expo-env.d.ts

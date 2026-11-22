@@ -9,10 +9,8 @@ import {
   mergeExternalCharacterUpdate,
   parseBoothResponse,
   parseCharasheetResponse,
-  parseEmokloreResponse,
   parseExternalResponse,
   parseExternalUrl,
-  parseIacharaResponse,
   parseTaltoResponse,
   parseYtsheetResponse,
   shouldAutoSync,
@@ -184,14 +182,18 @@ describe("SSRF guard: isIpLiteral & isPrivateOrReservedIp", () => {
 });
 
 describe("parseExternalUrl", () => {
-  it("対応 6 サービスの URL を正規化し取得候補 URL を返す", () => {
-    expect(parseExternalUrl("https://www.iachara.com:443/char/view/12345?foo=bar")).toEqual({
+  it("対応サービスの URL を正規化し取得候補 URL を返す", () => {
+    const ia = {
       ok: true,
       provider: "iachara",
       kind: "character",
       displayUrl: "https://iachara.com/view/12345",
-      fetchUrls: ["https://iachara.com/view/12345"],
-    });
+      fetchUrls: ["https://apiv3.iachara.com/v3/charasheet/12345"],
+    };
+    expect(parseExternalUrl("https://www.iachara.com:443/char/view/12345?foo=bar")).toEqual(ia);
+    expect(parseExternalUrl("https://iachara.com/view/12345")).toEqual(ia);
+    expect(parseExternalUrl("https://iachara.com/edit/12345/")).toEqual(ia);
+    expect(parseExternalUrl("https://iachara.com/view/12345#skills")).toEqual(ia);
     expect(parseExternalUrl("https://booth.pm/items/654321")).toEqual({
       ok: true,
       provider: "booth",
@@ -214,10 +216,6 @@ describe("parseExternalUrl", () => {
     expect(parseExternalUrl("https://yutorize.2-d.jp/other/?id=1").ok).toBe(false);
     expect(parseExternalUrl("https://charasheet.vampire-blood.net/").ok).toBe(false);
     expect(parseExternalUrl("https://booth.pm/x").ok).toBe(false);
-    expect(parseExternalUrl("https://iachara.com/sns/999/view")).toMatchObject({
-      ok: true,
-      displayUrl: "https://iachara.com/view/999",
-    });
 
     expect(parseExternalUrl("https://charasheet.vampire-blood.net/m4455.html")).toEqual({
       ok: true,
@@ -235,12 +233,7 @@ describe("parseExternalUrl", () => {
       expect(yt.fetchUrls[0]).toContain("mode=json");
     }
 
-    expect(parseExternalUrl("https://emoklore.charasheet.jp/chars/555")).toMatchObject({
-      ok: true,
-      provider: "emoklore",
-      kind: "character",
-      displayUrl: "https://emoklore.charasheet.jp/chars/555",
-    });
+    expect(parseExternalUrl("https://emoklore.charasheet.jp/chars/555").ok).toBe(false);
 
     expect(parseExternalUrl("https://booth.pm/ja/items/123456")).toEqual({
       ok: true,
@@ -303,97 +296,7 @@ describe("HTML / JSON パーサー群", () => {
     );
   });
 
-  it("parseIacharaResponse: JSON, __NEXT_DATA__, OGP/テキストの 3 経路で抽出できる", () => {
-    const jsonChar = parseIacharaResponse(
-      JSON.stringify({
-        data: {
-          name: "雪村 千歳",
-          occupation: "考古学者",
-          system: "CoC7",
-          STR: 45,
-          SAN: 70,
-          skills: [{ name: "考古学", total: 75 }],
-          image: "https://cdn.example.com/a.png",
-        },
-      }),
-      "https://iachara.com/view/1",
-    );
-    expect(jsonChar?.name).toBe("雪村 千歳");
-    expect(jsonChar?.stats).toMatchObject({ str: 45, san: 70, 考古学: 75 });
-    expect(jsonChar?.image).toBe("https://cdn.example.com/a.png");
-
-    const ogHtml = `<html><head>
-      <meta property="og:title" content="朝霧 薫 - いあきゃら" />
-      <meta property="og:description" content="STR: 60 CON: 55 SAN: 68 CoC7版" />
-      <meta property="og:image" content="https://cdn.example.com/b.png" />
-    </head><body></body></html>`;
-    const ogChar = parseIacharaResponse(ogHtml, "https://iachara.com/view/2");
-    expect(ogChar?.name).toBe("朝霧 薫");
-    expect(ogChar?.stats).toMatchObject({ str: 60, con: 55, san: 68 });
-    expect(ogChar?.image).toBe("https://cdn.example.com/b.png");
-
-    expect(parseIacharaResponse("   ", "https://iachara.com/view/3")).toBeNull();
-
-    // iachara レコード型 fields・game:"6" / STR<=21 の CoC6 推定・HTML タグ除去・非 https 画像除外
-    const recChar = parseIacharaResponse(
-      JSON.stringify({
-        deep: [
-          null,
-          {
-            name: "高瀬 湊",
-            job: "刑事",
-            backstory: "真面目な性格",
-            game: "6",
-            attributes: { STR: 12, EDU: 14, HP: 11 },
-            skills: [{ label: "聞き耳", value: "65" }],
-            icon: "http://insecure.example.com/x.png",
-          },
-        ],
-      }),
-      "https://iachara.com/view/4",
-    );
-    expect(recChar?.systemId).toBe("coc6");
-    expect(recChar?.memo).toBe("職業: 刑事\n真面目な性格");
-    expect(recChar?.stats).toEqual({ str: 12, edu: 14, hp: 11, 聞き耳: 65 });
-    expect(recChar?.image).toBeUndefined();
-
-    // CoC6 fallback via str<=21 && edu<=21 without game field
-    const inferredCoc6 = parseIacharaResponse(
-      JSON.stringify({ name: "旧版PC", str: 15, edu: 18, hp: 12 }),
-      "https://iachara.com/view/5",
-    );
-    expect(inferredCoc6?.systemId).toBe("coc6");
-
-    // plain text body + HTML body stripping fallback
-    const htmlStrip = parseIacharaResponse(
-      `<html><body><script>var ignore="STR:99";</script><style>.x{}</style>名前: 神崎 律<br>STR: 55 SAN: 60<br>【技能】<br>図書館 75%</body></html>`,
-      "https://iachara.com/view/6",
-    );
-    expect(htmlStrip?.name).toBe("神崎 律");
-    expect(htmlStrip?.stats).toMatchObject({ str: 55, san: 60, 図書館: 75 });
-
-    // __NEXT_DATA__ が壊れた JSON でも HTML meta + 数値フォールバック経路 (L556) へ進む
-    // (名前: 行も【能力値】等も持たない og:description + 本文により parseIacharaText が null となり L556 へ到達)
-    const fallbackMetaHtml = `<!doctype html><html><head>
-      <title>【いあきゃら】夜霧 蓮 - いあきゃら</title>
-      <meta content='短編&#x26;&#0;&#1114112;&#x110000;シナリオ用' name='og:description' />
-      <meta property='og:image' content='https://cdn.example.com/single-quote.png' />
-      <meta property="og:invalid" content="ftp://not-https.example/x.png" />
-    </head><body><p>STR: 18 DEX: 12</p></body></html>`;
-    const metaFallback = parseIacharaResponse(fallbackMetaHtml, "https://iachara.com/view/7");
-    expect(metaFallback?.name).toBe("夜霧 蓮");
-    expect(metaFallback?.systemId).toBe("coc6");
-    expect(metaFallback?.stats).toEqual({ str: 18, dex: 12 });
-    expect(metaFallback?.image).toBe("https://cdn.example.com/single-quote.png");
-
-    // broken NEXT_DATA with coc7 >= 25 (no SAN/HP/MP marker so reaches L556 fallback)
-    const coc7MetaHtml = `<html><head><script id="__NEXT_DATA__" type="application/json">{broken</script><meta property="og:title" content="久遠 誠 - いあきゃら"/><meta property="og:image" content="not a url"/></head><body>STR: 65 DEX: 70</body></html>`;
-    const coc7Fallback = parseIacharaResponse(coc7MetaHtml, "https://iachara.com/view/8");
-    expect(coc7Fallback?.systemId).toBe("coc7");
-    expect(coc7Fallback?.image).toBeUndefined();
-  });
-
-  it("parseCharasheetResponse / parseYtsheetResponse / parseEmokloreResponse を正しく処理する", () => {
+  it("parseCharasheetResponse / parseYtsheetResponse を正しく処理する", () => {
     const jsonp = `fn(${JSON.stringify({
       pc_name: "水無瀬 柊",
       works: "私立探偵",
@@ -423,28 +326,6 @@ describe("HTML / JSON パーサー群", () => {
       systemId: "sw25",
     });
     expect(parseYtsheetResponse("")).toBeNull();
-
-    const emoHtml = `<html><head>
-      <meta property="og:title" content="黒崎 律 - エモクロア" />
-      <meta property="og:image" content="https://cdn.example.com/emo.png" />
-    </head><body><p>共鳴者です。共鳴: 4 HP: 12 〈調査〉[3]</p></body></html>`;
-    const emo = parseEmokloreResponse(emoHtml, "https://emoklore.charasheet.jp/1");
-    expect(emo?.name).toBe("黒崎 律");
-    expect(emo?.systemId).toBe("emoklore");
-    expect(emo?.stats["調査"]).toBe(3);
-
-    // 本文手がかり無しのエモクロア HTML 取り込み (og:image と共鳴者名解決)
-    const emoMetaOnly = parseEmokloreResponse(
-      `<html><head><meta property='og:title' content='霧島 透 - エモクロアキャラクターシート' /><meta property='og:description' content='新規共鳴' /><meta property='og:image' content='https://cdn.example.com/e2.png' /></head><body><p>紹介</p></body></html>`,
-      "https://emoklore.charasheet.jp/2",
-    );
-    expect(emoMetaOnly).toEqual({
-      name: "霧島 透",
-      systemId: "emoklore",
-      stats: {},
-      image: "https://cdn.example.com/e2.png",
-    });
-    expect(parseEmokloreResponse("   ", "https://emoklore.charasheet.jp/3")).toBeNull();
   });
 
   it("parseBoothResponse / parseTaltoResponse / parseExternalResponse がシナリオとキャラを正しく変換する", () => {
@@ -568,7 +449,7 @@ describe("HTML / JSON パーサー群", () => {
       description: "クトゥルフ6版向け",
     });
 
-    // parseExternalResponse 全 6 プロバイダ + 不正入力 null
+    // parseExternalResponse 各プロバイダ + 不正入力 null
     expect(parseExternalResponse("iachara", "   ", "text/html", "https://iachara.com/view/1")).toBeNull();
     expect(
       parseExternalResponse(
@@ -592,8 +473,8 @@ describe("HTML / JSON パーサー群", () => {
         JSON.stringify({ system: "emoklore", name: "E1", von: 3 }),
         "application/json",
         "https://emoklore.charasheet.jp/chars/1",
-      )?.kind,
-    ).toBe("character");
+      ),
+    ).toBeNull();
     expect(
       parseExternalResponse(
         "talto",
@@ -648,7 +529,6 @@ describe("computeExternalContentHash, mergeExternalCharacterUpdate, shouldAutoSy
         url: "https://iachara.com/view/1",
         provider: "iachara",
         syncedAt: "2026-11-20T00:00:00.000Z",
-        today: "2026-11-20",
         contentHash: "new_hash",
       },
     );
@@ -660,8 +540,8 @@ describe("computeExternalContentHash, mergeExternalCharacterUpdate, shouldAutoSy
     expect(res.next.archetype).toBe("上級司書");
     expect(res.statChanges.map((d) => `${d.key}:${d.from}->${d.to}`)).toEqual(["san:65->59", "mp:12->14"]);
     expect(res.profileChanges).toContain("名前");
-    expect(res.next.growth).toHaveLength(2);
-    expect(res.next.growth[0]?.note).toBe("いあきゃらから同期");
+    /* SAN・MP の増減は状態の値で、成長ではない */
+    expect(res.next.growth).toHaveLength(0);
 
     // 同一ハッシュの時は変更扱いにならない
     const sameHashRes = mergeExternalCharacterUpdate(
@@ -676,12 +556,11 @@ describe("computeExternalContentHash, mergeExternalCharacterUpdate, shouldAutoSy
         url: "https://iachara.com/view/1",
         provider: "iachara",
         syncedAt: "2026-11-20T01:00:00.000Z",
-        today: "2026-11-20",
         contentHash: "new_hash",
       },
     );
     expect(sameHashRes.changed).toBe(false);
-    expect(sameHashRes.next.growth).toHaveLength(2);
+    expect(sameHashRes.next.growth).toHaveLength(0);
 
     // 4項目 (名前/職業など/システム/画像。ひとこと紹介は卓譜側の項目なので上書きしない) + 未知ラベル(英数字は大文字化・日本語はそのまま) + 未入力フィールドの既存値維持
     const customExisting = baseCharacter({
@@ -704,7 +583,6 @@ describe("computeExternalContentHash, mergeExternalCharacterUpdate, shouldAutoSy
         url: "https://charasheet.vampire-blood.net/m1",
         provider: "charasheet",
         syncedAt: "2026-11-20T02:00:00.000Z",
-        today: "2026-11-20",
         autoSync: false,
       },
     );
@@ -712,7 +590,12 @@ describe("computeExternalContentHash, mergeExternalCharacterUpdate, shouldAutoSy
     expect(fullDiff.profileChanges).toEqual(["名前", "職業など", "システム", "画像"]);
     expect(fullDiff.next.bio).toBe("元メモ");
     expect(fullDiff.statChanges.map((d) => d.label)).toEqual(["SAN", "CUSTOMSTAT", "図書館"]);
-    expect(fullDiff.next.growth.map((g) => g.skill)).toEqual(["SAN", "CUSTOMSTAT", "図書館"]);
+    /* 上がった技能だけが成長になり、どれもいちばん新しいセッションのあとのもの（SAN は下がった状態の値） */
+    expect(fullDiff.next.growth.map((g) => [g.skill, g.logId])).toEqual([
+      ["CUSTOMSTAT", "s01"],
+      ["図書館", "s01"],
+    ]);
+    expect(fullDiff.growth).toEqual(fullDiff.next.growth);
     expect(fullDiff.next.growth[0]?.id).toMatch(/^g_/);
     expect(fullDiff.next.stats).toMatchObject({ san: 55, hp: 12, customStat: 15, 図書館: 80 });
     expect(fullDiff.statChanges[0]).toEqual({ key: "san", label: "SAN", from: 60, to: 55 });
@@ -725,7 +608,6 @@ describe("computeExternalContentHash, mergeExternalCharacterUpdate, shouldAutoSy
         url: "https://iachara.com/view/1",
         provider: "iachara",
         syncedAt: "2026-11-20T00:00:00Z",
-        today: "2026-11-20",
         contentHash: "new_diff_hash",
       },
     );
@@ -741,7 +623,6 @@ describe("computeExternalContentHash, mergeExternalCharacterUpdate, shouldAutoSy
         url: "https://charasheet.vampire-blood.net/m1",
         provider: "charasheet",
         syncedAt: "2026-11-20T03:00:00.000Z",
-        today: "2026-11-20",
       },
     );
     expect(keepExistingRes.changed).toBe(true); // 名前が "名前未設定" に変わるため

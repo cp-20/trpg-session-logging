@@ -3,19 +3,19 @@ import { Pressable, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SYSTEMS } from "@shared/data/systems";
 import { acceptSharedInvite, getSharedInvite, type SharedInvite } from "@shared/lib/cloud-state";
-import { fmtDates } from "@shared/lib/time";
+import { fmtDates, sessionDays } from "@shared/lib/time";
 import type { Msg } from "@shared/types";
 import { ScreenShell } from "../../components/ScreenShell";
 import { CharAvatar, characterAvatarSrc, userAvatarSrc } from "../../components/identity";
 import { IconBooks, IconCheck, IconUserPlus } from "../../components/icons";
 import {
   Button,
+  Combobox,
   DividerList,
   InlineNotice,
   MetaRow,
   NotFound,
   PageHead,
-  Select,
   Surface,
   SysBadge,
   WarmSkeleton,
@@ -240,8 +240,8 @@ function LocalClaimInvite({ logId }: { logId: string }) {
             )}
             <MetaRow>
               {sys && <SysBadge sys={sys} />}
-              {log.dates.length > 0 && (
-                <Text style={{ fontSize: 13, color: tokens.ink2 }}>{fmtDates(log.dates)}</Text>
+              {sessionDays(log).length > 0 && (
+                <Text style={{ fontSize: 13, color: tokens.ink2 }}>{fmtDates(sessionDays(log))}</Text>
               )}
               {scenario && <Text style={{ fontSize: 13, color: tokens.ink2 }}>{scenario.title}</Text>}
             </MetaRow>
@@ -302,7 +302,7 @@ function LocalClaimInvite({ logId }: { logId: string }) {
               <Text style={{ fontSize: 15, fontWeight: "700", color: tokens.ink }}>
                 参加したキャラクター（任意）
               </Text>
-              <Select
+              <Combobox
                 ariaLabel="参加したキャラクター"
                 value={charId}
                 onChange={setCharId}

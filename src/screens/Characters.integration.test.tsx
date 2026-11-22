@@ -1,5 +1,5 @@
-import { createDemoState, getTestNav, renderWithStore, resetTestNav } from "../test/integration-harness";
-import { screen, waitFor } from "@testing-library/react";
+import { createDemoState, getTestNav, renderWithStore } from "../test/integration-harness";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Characters from "./Characters";
@@ -31,7 +31,7 @@ describe("Characters + ImportWizard + CharacterDetail 結合テスト", () => {
                 name: "天海 詩織",
                 systemId: "coc7",
                 memo: "職業: 図書館司書\n落ち着いた司書。",
-                stats: { san: 65, hp: 11, mp: 13 },
+                stats: { san: 65, hp: 11, mp: 13, 図書館: 60 },
               },
             }
           : {
@@ -46,7 +46,7 @@ describe("Characters + ImportWizard + CharacterDetail 結合テスト", () => {
                 name: "天海 詩織",
                 systemId: "coc7",
                 memo: "職業: 図書館司書\n落ち着いた司書。",
-                stats: { san: 58, hp: 11, mp: 13 },
+                stats: { san: 58, hp: 11, mp: 13, 図書館: 70 },
               },
             };
       return new Response(JSON.stringify(payload), {
@@ -61,7 +61,7 @@ describe("Characters + ImportWizard + CharacterDetail 結合テスト", () => {
     await user.click(screen.getByRole("button", { name: /キャラシから取り込む/ }));
     const urlInput = screen.getByPlaceholderText("https://charaeno.com/7th/…");
     await user.type(urlInput, "https://charaeno.com/7th/h_wQNXeiHPXDEDtG3r2ac");
-    expect(screen.getByText("のキャラシとして読み込みます")).toBeInTheDocument();
+    expect(screen.getByText("キャラエノ")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "読み込む" }));
 
     // 名前・職業はキャラシが正なので入力欄にせず、そのまま見せる
@@ -107,51 +107,17 @@ describe("Characters + ImportWizard + CharacterDetail 結合テスト", () => {
     await user.click(screen.getByRole("button", { name: "更新" }));
 
     await waitFor(() => expect(screen.getByText(/SAN 65→58/)).toBeInTheDocument());
+    /* 上がった技能は成長として自動で残り、前の同期のあとに遊んだセッションに結ばれる（手で打たせない） */
+    expect(screen.getByText("成長ロールを記録しました")).toBeInTheDocument();
     const savedAfterSync = detailView.readPersistedState()!;
     const updatedChar = savedAfterSync.characters[createdId]!;
     expect(updatedChar.stats.san).toBe(58);
     expect(updatedChar.sessions).toHaveLength(1);
     expect(updatedChar.sessions[0]!.title).toBe("初参加セッション");
-    expect(updatedChar.growth.some((g) => g.skill === "SAN" && g.from === 65 && g.to === 58)).toBe(true);
-    expect(updatedChar.externalSync?.contentHash).toBe("hash_v2");
-  });
-
-  it("貼り付けから複数キャラ（JSON 配列）を一括取り込みできる", async () => {
-    const user = userEvent.setup();
-    const view = renderWithStore(<Characters />, { initialPath: "/characters" });
-
-    await user.click(screen.getByRole("button", { name: /キャラシから取り込む/ }));
-    await user.click(screen.getByRole("button", { name: /ファイル・コマから読む/ }));
-
-    const batchJson = JSON.stringify([
-      {
-        characterName: "エルナ",
-        race: "エルフ",
-        job: "シューター",
-        hpTotal: 34,
-        mpTotal: 26,
-      },
-      {
-        system: "emoklore",
-        name: "黒崎 律",
-        von: 3,
-        taisyo: 6,
-      },
+    expect(updatedChar.growth).toEqual([
+      expect.objectContaining({ skill: "図書館", from: 60, to: 70, logId: "s01", date: "2026-11-01" }),
     ]);
-
-    const textarea = screen.getByLabelText("またはコマ・キャラシの内容を貼り付け");
-    await user.click(textarea);
-    await user.paste(batchJson);
-    await user.click(screen.getByRole("button", { name: "内容を確認" }));
-
-    await waitFor(() => expect(screen.getByText(/2件のキャラクターを読み取りました/)).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "2件を取り込む" }));
-
-    const saved = view.readPersistedState()!;
-    const names = Object.values(saved.characters).map((c) => c.name);
-    expect(names).toContain("エルナ");
-    expect(names).toContain("黒崎 律");
-    resetTestNav("/");
+    expect(updatedChar.externalSync?.contentHash).toBe("hash_v2");
   });
 
   it("キャラシと結び付いたキャラは、前の更新から 1 日たっていれば開いたときに読み直し、名前は編集できない", async () => {
@@ -186,7 +152,8 @@ describe("Characters + ImportWizard + CharacterDetail 結合テスト", () => {
 
     await user.click(screen.getByRole("button", { name: /編集/ }));
     expect(screen.queryByLabelText("名前")).toBeNull();
-    expect(screen.getByRole("link", { name: /キャラシで編集/ })).toHaveAttribute(
+    expect(within(screen.getByRole("dialog")).queryByLabelText("SAN")).toBeNull();
+    expect(screen.getByRole("link", { name: /名前・能力値をキャラエノで直す/ })).toHaveAttribute(
       "href",
       "https://charaeno.com/7th/Tq3kZ8vX1pLm0aYb7RcWe",
     );
@@ -208,5 +175,62 @@ describe("Characters + ImportWizard + CharacterDetail 結合テスト", () => {
     expect(await screen.findByRole("heading", { name: "キャラシ" })).toBeInTheDocument();
     expect(screen.getByText("図書館")).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("キャラシと結び付いたキャラには成長を手で記録する入口がない", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const fresh = createDemoState((s) => {
+      const ch = s.characters.ch_towa!;
+      ch.externalSync = { ...ch.externalSync!, lastSyncedAt: new Date().toISOString() };
+    });
+    renderWithStore(<CharacterDetail />, {
+      initialPath: "/characters/ch_towa",
+      params: { id: "ch_towa" },
+      initialState: fresh,
+    });
+    expect(await screen.findByRole("heading", { name: "キャラシ" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /を記録/ })).toBeNull();
+  });
+
+  it("キャラシのないキャラは、セッション・技能・新しい値だけで成長を記録し、前の値と日付は埋まる", async () => {
+    const user = userEvent.setup();
+    const state = createDemoState((s) => {
+      const ch = s.characters.ch_towa!;
+      delete ch.externalSync;
+      delete ch.sheet;
+      ch.growth = [
+        {
+          id: "g0",
+          logId: ch.sessions[0]!.logId,
+          date: ch.sessions[0]!.date,
+          skill: "目星",
+          from: 60,
+          to: 65,
+        },
+      ];
+    });
+    const latest = [...state.characters.ch_towa!.sessions].sort((a, b) => b.date.localeCompare(a.date))[0]!;
+    const view = renderWithStore(<CharacterDetail />, {
+      initialPath: "/characters/ch_towa",
+      params: { id: "ch_towa" },
+      initialState: state,
+    });
+    await user.click(screen.getByRole("button", { name: "成長ロールを記録" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).not.toHaveTextContent("セッションに紐付けない");
+    expect(screen.queryByLabelText("日付")).toBeNull();
+    expect(screen.queryByLabelText("補足")).toBeNull();
+    expect(screen.queryByLabelText("前の値")).toBeNull();
+    expect(dialog).toHaveTextContent("65");
+    await user.type(screen.getByLabelText("新しい値"), "70");
+    await user.click(screen.getByRole("button", { name: "記録" }));
+    const saved = view.readPersistedState()!.characters.ch_towa!;
+    expect(saved.growth.at(-1)).toMatchObject({
+      skill: "目星",
+      from: 65,
+      to: 70,
+      logId: latest.logId,
+      date: latest.date,
+    });
   });
 });

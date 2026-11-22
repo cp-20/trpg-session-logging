@@ -3,9 +3,8 @@
  * 画面に依存しない純粋関数だけを置く（顔アイコンの解決は呼び出し側から渡す）。
  */
 import { inferSystem } from "../data/systems";
-import { jstEpoch } from "./format";
-import { deriveSessionFromMessages } from "./time";
-import type { Channel, Character, Log, MsgKind, Policy, Scope, State, User } from "../types";
+import { deriveSittings, type Sitting } from "./sittings";
+import type { Channel, Character, Log, MsgKind, Scope, SelfRole, State, User } from "../types";
 
 export interface SpeakerLink {
   userId?: string;
@@ -14,7 +13,8 @@ export interface SpeakerLink {
 
 /** 確定前の入力状態。ログあり/なしの両方を同じ形で運ぶ */
 export interface Draft {
-  fileName: string | null;
+  /** 読み込んだログのファイル名（複数のログを 1 つのセッションにまとめたときは複数） */
+  fileNames: string[];
   channels: Channel[];
   kinds: Record<string, MsgKind>;
   speakerIcons: Record<string, string>;
@@ -24,11 +24,24 @@ export interface Draft {
   scope: Scope;
   tableId: string;
   scenarioId: string;
-  newScenario: { title: string; author: string; policy: Policy } | null;
+  newScenario: { title: string; author: string } | null;
+  /** 記録する本人以外の参加者 */
   players: { userId: string; characterIds: string[] }[];
-  derived: { dates: string[]; t0: number; t1: number } | null;
-  /** ログなしパスのときのみ入る */
-  manual: { dates: string[]; start: string; end: string } | null;
+  /**
+   * 記録する本人。記録するのは遊んだ人なので既定で参加者（P1）。人の代わりに記録するときだけ played を外す。
+   * 役割はログから推す: 本人に結び付いた GM の発言者がいれば GM、本人のキャラの発言があれば PL
+   */
+  self: SelfFields /**
+   * 遊んだ時間帯。ログの発言時刻から導き、利用者が直せる。発言に時刻のないログ（CCFOLIA の HTML）や
+   * ログなしの記録では空から入れてもらう
+   */;
+  sittings: Sitting[];
+}
+
+export interface SelfFields {
+  played: boolean;
+  role: SelfRole;
+  characterIds: string[];
 }
 
 export function compactName(s: string): string {
@@ -142,16 +155,15 @@ export interface AvatarResolvers {
 }
 
 export function buildDraft(opts: {
-  fileName: string | null;
+  fileNames: string[];
   channels: Channel[];
   attachLog: Log | null;
   presetTable: string;
   presetScenario: string;
-  manual: Draft["manual"];
   state: Pick<State, "me" | "characters" | "users" | "tables" | "scenarios">;
   avatars: AvatarResolvers;
 }): Draft {
-  const { fileName, channels, attachLog, presetTable, presetScenario, manual, state, avatars } = opts;
+  const { fileNames, channels, attachLog, presetTable, presetScenario, state, avatars } = opts;
   const inferred = channels.length ? inferSystem(channels) : null;
   const guess = inferred ? { id: inferred.id } : null;
   const presetSc = presetScenario ? state.scenarios[presetScenario] : undefined;
@@ -184,6 +196,10 @@ export function buildDraft(opts: {
     table.memberIds.filter((m) => m !== state.me).forEach((m) => playerMap.set(m, []));
   }
   const participantIds = [...playerMap.keys(), state.me];
+  const prevSelf = attachLog?.players[state.me];
+  const selfChars: string[] = [...(prevSelf?.characterIds ?? [])];
+  let selfGm = false;
+  let selfPl = false;
 
   for (const sp of speakerOrder) {
     const matched = matchSpeakerToState(sp, state, {
@@ -199,6 +215,9 @@ export function buildDraft(opts: {
         const list = playerMap.get(ch.ownerId) ?? [];
         if (!list.includes(ch.id)) list.push(ch.id);
         playerMap.set(ch.ownerId, list);
+      } else {
+        if (!selfChars.includes(ch.id)) selfChars.push(ch.id);
+        selfPl = true;
       }
     } else if (matched.user) {
       const u = matched.user;
@@ -211,16 +230,15 @@ export function buildDraft(opts: {
       speakerLinks[sp] = { userId: u.id };
       if (!speakerIcons[sp]) speakerIcons[sp] = avatars.user(u);
       if (u.id !== state.me && !playerMap.has(u.id)) playerMap.set(u.id, []);
+      if (u.id === state.me && (kinds[sp] === "GM" || kinds[sp] === "KP")) selfGm = true;
     }
   }
 
   const players = Array.from(playerMap.entries()).map(([userId, characterIds]) => ({ userId, characterIds }));
-  const rawDerived = deriveSessionFromMessages(channels);
-  // t1 >= t0 なので「どちらかが正」は「t1 が正」と同じ
-  const derived = rawDerived && rawDerived.t1 > 0 ? rawDerived : null;
+  const derived = deriveSittings(channels);
 
   return {
-    fileName,
+    fileNames,
     channels,
     kinds,
     speakerIcons,
@@ -232,63 +250,45 @@ export function buildDraft(opts: {
     scenarioId: attachLog?.scenarioId ?? presetScenario,
     newScenario: null,
     players,
-    derived,
-    manual,
+    self: {
+      played: true,
+      role: selfGm ? "GM" : selfPl ? "PL" : (prevSelf?.role ?? "PL"),
+      characterIds: selfChars,
+    },
+    sittings: derived.length > 0 ? derived : (attachLog?.sittings ?? []),
   };
 }
 
 /**
- * 実施日と開始・終了時刻を手で直したとき、ログの発言時刻を新しい範囲へ写す。
- * 発言の順序は保ち、複数日のときは発言を日ごとに均等に割り振る。
+ * ログを足した・外したときに作り直した下書き（fresh）へ、利用者がすでに決めたこと（prev）を引き継ぐ。
+ * タイトル・システム・シナリオ・卓・共有範囲・参加者はそのまま、発言者ごとの設定は残っている発言者の分だけ残す。
+ * 遊んだ時間帯はログの発言時刻から導き直す（導けなければ前の値）
  */
-export function remapChannelTimestamps(
-  channels: Channel[],
-  dates: string[],
-  newT0: number,
-  newT1: number,
-): Channel[] {
-  const flat: { chIdx: number; msgIdx: number; ts: number }[] = [];
-  channels.forEach((c, chIdx) => c.msgs.forEach((m, msgIdx) => flat.push({ chIdx, msgIdx, ts: m.ts })));
-  if (flat.length === 0) return channels;
-  // flat はチャンネル順・発言順に積んであり、sort は安定なので同時刻の順序はそのまま保たれる
-  flat.sort((a, b) => a.ts - b.ts);
-
-  const next = channels.map((c) => ({ ...c, msgs: c.msgs.map((m) => ({ ...m })) }));
-  const total = flat.length;
-
-  if (dates.length <= 1) {
-    const oldMin = flat[0]!.ts;
-    const oldMax = flat[total - 1]!.ts;
-    flat.forEach((item, i) => {
-      const ratio =
-        oldMax > oldMin ? (item.ts - oldMin) / (oldMax - oldMin) : total > 1 ? i / (total - 1) : 0;
-      next[item.chIdx]!.msgs[item.msgIdx]!.ts = Math.round(newT0 + ratio * (newT1 - newT0));
-    });
-    return next;
-  }
-
-  const dayCount = dates.length;
-  flat.forEach((item, i) => {
-    // i < total なので bucket は dayCount - 1 を超えない
-    const bucket = Math.floor((i * dayCount) / total);
-    const bucketStartIdx = Math.floor((bucket * total) / dayCount);
-    const bucketEndIdx = Math.floor(((bucket + 1) * total) / dayCount) - 1;
-    const bucketLen = Math.max(1, bucketEndIdx - bucketStartIdx);
-    const pos = Math.min(1, (i - bucketStartIdx) / bucketLen);
-
-    const d = dates[bucket]!;
-    const dayMin =
-      bucket === 0
-        ? newT0
-        : bucket === dayCount - 1
-          ? Math.max(jstEpoch(d, "06:00"), Math.min(jstEpoch(d, "20:00"), newT1 - 3600))
-          : jstEpoch(d, "21:00");
-    const dayMax =
-      bucket === dayCount - 1
-        ? newT1
-        : Math.max(dayMin + 1800, Math.min(jstEpoch(d, "23:55"), dayMin + 3 * 3600));
-
-    next[item.chIdx]!.msgs[item.msgIdx]!.ts = Math.round(dayMin + pos * (dayMax - dayMin));
-  });
-  return next;
+export function carryDraftEdits(prev: Draft, fresh: Draft): Draft {
+  const keep = <T>(fromPrev: Record<string, T>, fromFresh: Record<string, T>, keys: string[]) => {
+    const out: Record<string, T> = {};
+    for (const k of keys) {
+      const v = k in fromPrev ? fromPrev[k] : fromFresh[k];
+      if (v !== undefined) out[k] = v;
+    }
+    return out;
+  };
+  const speakers = Object.keys(fresh.kinds);
+  const players = [...prev.players];
+  for (const p of fresh.players) if (!players.some((x) => x.userId === p.userId)) players.push(p);
+  return {
+    ...fresh,
+    kinds: keep(prev.kinds, fresh.kinds, speakers),
+    speakerIcons: keep(prev.speakerIcons, fresh.speakerIcons, speakers),
+    speakerLinks: keep(prev.speakerLinks, fresh.speakerLinks, speakers),
+    meta: prev.meta,
+    guess: prev.guess,
+    scope: prev.scope,
+    tableId: prev.tableId,
+    scenarioId: prev.scenarioId,
+    newScenario: prev.newScenario,
+    players,
+    self: prev.self,
+    sittings: fresh.sittings.length > 0 ? fresh.sittings : prev.sittings,
+  };
 }

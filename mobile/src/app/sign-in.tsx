@@ -5,7 +5,7 @@ import * as Google from "expo-auth-session/providers/google";
 import * as WebBrowser from "expo-web-browser";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ProviderIcon } from "../components/identity";
-import { IconFileText, IconIdBadge, IconLock } from "../components/icons";
+import { IconFileText, IconCharacter, IconLock } from "../components/icons";
 import { Button, LogoMark, Surface } from "../components/ui";
 import {
   googleAuthClientIds,
@@ -24,10 +24,10 @@ const POINTS = [
   {
     Icon: IconFileText,
     title: "ログを取り込んで記録",
-    body: "CCFOLIA・Udonarium・テキストのログから、日時と発言者を読み取ります。",
+    body: "CCFOLIA・Udonarium のログから、日時と発言者を読み取ります。",
   },
   {
-    Icon: IconIdBadge,
+    Icon: IconCharacter,
     title: "探索者ごとの履歴",
     body: "参加したセッションと成長の記録を、キャラクターごとに並べます。",
   },

@@ -2,15 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { fmtDateShort, todayStr } from "@shared/lib/format";
-import { toCharacterFields } from "@shared/lib/importers";
 import {
+  applyCandidateRsvp,
+  applyConfirmCandidate,
+  busyChecker,
   canConfirmPoll,
-  eventDurationMinutes,
   myScheduleView,
   pollCandidates,
   relativeDayLabel,
 } from "@shared/lib/schedule";
-import { uid } from "@shared/lib/time";
+import { sessionStart } from "@shared/lib/time";
 import type { Availability, TableEvent, TableEventCandidate } from "@shared/types";
 import { EventDetailSheet, EventRow, PollReplySheet } from "../../components/EventComponents";
 import { ScreenShell } from "../../components/ScreenShell";
@@ -21,7 +22,7 @@ import {
   IconClipboard,
   IconPlus,
   IconUpload,
-  IconUsersGroup,
+  IconTable,
   IconX,
 } from "../../components/icons";
 import {
@@ -35,10 +36,10 @@ import {
 } from "../../components/ui";
 import { readClipboardSuggestion, type ClipboardSuggestion } from "../../native/clipboard-import";
 import { fetchDeviceBusyDates, type DeviceBusySummary } from "../../native/native-calendar";
-import { hapticSelection, hapticSuccess } from "../../native/haptics";
+import { hapticSelection } from "../../native/haptics";
 import { sessionsOfMe, useMobileStore } from "../../store/mobile-store";
 import { useTheme } from "../../theme/ThemeProvider";
-import { DEFAULT_ENTITY_COLOR, RADII } from "../../theme/tokens";
+import { RADII } from "../../theme/tokens";
 
 const RECENT_SESSIONS = 3;
 const NEXT_EVENTS = 3;
@@ -64,7 +65,10 @@ export default function HomeScreen() {
   const [dismissedClip, setDismissedClip] = useState<string | null>(null);
 
   const schedule = useMemo(() => myScheduleView(state, today), [state, today]);
-  const recent = useMemo(() => [...sessionsOfMe(state)].sort((a, b) => b.t0 - a.t0), [state]);
+  const recent = useMemo(
+    () => [...sessionsOfMe(state)].sort((a, b) => sessionStart(b) - sessionStart(a)),
+    [state],
+  );
   const myChars = useMemo(() => {
     const lastPlayedDate = (char: (typeof state.characters)[string]) =>
       char.sessions.reduce<string | undefined>((m, s) => (!m || s.date > m ? s.date : m), undefined);
@@ -76,7 +80,10 @@ export default function HomeScreen() {
   const hasTables = Object.values(state.tables).some(
     (t) => t.memberIds.includes(state.me) || t.ownerId === state.me,
   );
-  const busyDates = useMemo(() => new Set(state.prefs.busyDates ?? []), [state.prefs.busyDates]);
+  const busyCheck = useMemo(
+    () => busyChecker({ googleBusy: state.prefs.googleBusy }),
+    [state.prefs.googleBusy],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -114,30 +121,11 @@ export default function HomeScreen() {
   };
 
   function setCandidateRsvp(eventId: string, candidateId: string, value: Availability) {
-    update((s) => {
-      const target = s.events?.[eventId];
-      if (!target) return;
-      if (target.candidates && target.candidates.length > 0) {
-        const cand = target.candidates.find((c) => c.id === candidateId);
-        if (cand) cand.responses[s.me] = value;
-      } else {
-        target.responses[s.me] = value;
-      }
-    });
+    update((s) => applyCandidateRsvp(s, eventId, candidateId, value));
   }
 
   function confirmCandidate(eventId: string, cand: TableEventCandidate) {
-    update((s) => {
-      const target = s.events?.[eventId];
-      if (!target) return;
-      target.status = "confirmed";
-      target.date = cand.date;
-      target.startTime = cand.startTime;
-      target.endTime = cand.endTime;
-      target.durationMin = eventDurationMinutes(cand.startTime, cand.endTime, target.durationMin);
-      target.responses = { ...cand.responses };
-      delete target.candidates;
-    });
+    update((s) => applyConfirmCandidate(s, eventId, cand));
   }
 
   function applyClipboardSuggestion() {
@@ -157,36 +145,8 @@ export default function HomeScreen() {
       router.push(`/share/c/${suggestion.id}` as never);
       return;
     }
-    if (suggestion.kind === "character") {
-      const fields = toCharacterFields(suggestion.result.character, "general");
-      const id = `ch_${uid()}`;
-      update((s) => {
-        s.characters[id] = {
-          id,
-          ownerId: s.me,
-          name: fields.name || "名前未設定",
-          systemId: fields.systemId ?? "general",
-          color: fields.color ?? DEFAULT_ENTITY_COLOR,
-          image: fields.image,
-          archetype: "",
-          bio: fields.bio ?? "",
-          tags: [],
-          stats: { ...fields.stats },
-          sessions: [],
-          growth: [],
-          share: {
-            enabled: false,
-            scope: "private",
-            includeProfile: true,
-            includeStats: true,
-            includeGrowth: true,
-            includeSessions: true,
-          },
-          import: { source: suggestion.sourceLabel, importedAt: today },
-        };
-      });
-      hapticSuccess();
-      router.push(`/characters/${id}` as never);
+    if (suggestion.kind === "sheetUrl") {
+      router.push({ pathname: "/characters", params: { sheetUrl: suggestion.url } });
       return;
     }
     if (suggestion.kind === "log") {
@@ -199,7 +159,7 @@ export default function HomeScreen() {
   const isNewUser = recent.length === 0 && myChars.length === 0 && !hasTables;
 
   return (
-    <ScreenShell showOnboarding>
+    <ScreenShell>
       <PageHead title="ホーム" />
 
       {clip && (
@@ -208,8 +168,8 @@ export default function HomeScreen() {
             <IconClipboard size={18} color={tokens.primary} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ fontSize: 14, fontWeight: "700", color: tokens.ink }} numberOfLines={1}>
-                {clip.suggestion.kind === "character"
-                  ? `クリップボードの「${clip.suggestion.previewName}」を取り込む`
+                {clip.suggestion.kind === "sheetUrl"
+                  ? "コピーしたキャラシを取り込む"
                   : clip.suggestion.kind === "log"
                     ? `クリップボードのログ（${clip.suggestion.messageCount}行）を取り込む`
                     : clip.suggestion.kind === "invite"
@@ -217,7 +177,7 @@ export default function HomeScreen() {
                       : "コピーした共有ページを開く"}
               </Text>
               <Text style={{ fontSize: 12, color: tokens.ink2 }}>
-                {clip.suggestion.kind === "character" || clip.suggestion.kind === "log"
+                {clip.suggestion.kind === "sheetUrl" || clip.suggestion.kind === "log"
                   ? clip.suggestion.sourceLabel
                   : "卓譜のリンク"}
               </Text>
@@ -254,7 +214,7 @@ export default function HomeScreen() {
                 </Button>
                 <Button
                   variant="secondary"
-                  icon={<IconUsersGroup size={16} color={tokens.ink} />}
+                  icon={<IconTable size={16} color={tokens.ink} />}
                   onPress={() => router.push("/tables")}
                 >
                   いつものメンバーで卓をつくる
@@ -262,7 +222,7 @@ export default function HomeScreen() {
               </>
             }
           >
-            CCFOLIA・Udonarium・テキストのログを入れると、日時と参加者がそのまま記録になります。
+            CCFOLIA・Udonarium のログを入れると、日時と参加者がそのまま記録になります。
           </EmptyState>
         </Surface>
       ) : (
@@ -508,7 +468,7 @@ export default function HomeScreen() {
         ev={activeReplyPoll}
         state={state}
         canConfirm={activeReplyPoll ? canConfirmPoll(activeReplyPoll, state) : false}
-        busyDates={busyDates}
+        busyCheck={busyCheck}
         deviceBusy={deviceBusy}
         onRsvp={(candId, val) => activeReplyPoll && setCandidateRsvp(activeReplyPoll.id, candId, val)}
         onConfirm={(cand) => activeReplyPoll && confirmCandidate(activeReplyPoll.id, cand)}

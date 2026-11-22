@@ -2,9 +2,10 @@
  * 開発サーバー。Next.js（5173）と、画面上でコメントを残すレビュー用のブリッジ（4319）を一緒に起動する。
  * ブリッジは ~/.agents/skills/live-ui-review にあるときだけ起動し、無ければ Next.js だけ動かす。
  * レビューを使うときは http://127.0.0.1:5173/?review=1 を一度開く（以後はブラウザが覚える）。
+ * Discord 連携の秘密（.env.discord.local。Next.js は読まない名前）も、環境変数にないものだけ Next.js に渡す。
  */
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,12 +29,24 @@ if (existsSync(REVIEW_SERVER) && !(await reviewServerRunning())) {
   );
 }
 
+function discordEnv(): Record<string, string> {
+  const path = join(ROOT, ".env.discord.local");
+  const out: Record<string, string> = {};
+  if (!existsSync(path)) return out;
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+    const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
+    if (m && process.env[m[1]!] === undefined) out[m[1]!] = m[2]!.replace(/^(["'])(.*)\1$/, "$2");
+  }
+  return out;
+}
+
 const next = spawn(
   "pnpm",
   ["exec", "next", "dev", "-p", "5173", "-H", "127.0.0.1", ...process.argv.slice(2)],
   {
     cwd: ROOT,
     stdio: "inherit",
+    env: { ...process.env, ...discordEnv() },
   },
 );
 children.push(next);

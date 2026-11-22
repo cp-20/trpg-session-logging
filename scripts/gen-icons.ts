@@ -1,12 +1,11 @@
 /**
  * アイコンを iconify のデータから React / React Native 部品として書き出し、
- * モバイルアプリ用の PNG アセット（アイコン・スプラッシュ）も生成する。
+ * モバイルアプリが使う外部サービスのロゴ画像も mobile/assets に写す。
  * 使うアイコンを足すときは ICONS に 1 行足して `pnpm run gen:icons` を実行する。
  * tabler = UI 用、logos / simple-icons = ブランド用。
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { deflateSync } from "node:zlib";
 
 const require = createRequire(import.meta.url);
 
@@ -20,8 +19,8 @@ const ICONS: Record<string, string> = {
   IconUpload: "tabler/upload",
   IconFileText: "tabler/file-text",
   IconUserPlus: "tabler/user-plus",
-  IconUsersGroup: "tabler/users-group",
-  IconIdBadge: "tabler/id-badge",
+  IconTable: "custom/table",
+  IconCharacter: "tabler/masks-theater",
   IconBooks: "tabler/books",
   IconSettings: "tabler/settings",
   IconCalendarTime: "tabler/calendar-time",
@@ -87,7 +86,21 @@ interface IconSet {
   aliases?: Record<string, { parent: string }>;
 }
 
-const sets = new Map<string, IconSet>();
+/**
+ * tabler に合うものがない概念は、tabler と同じ約束（24 四方・線のみ・stroke-width 2・丸い端）で描いてここに置く。
+ * - table: 卓（卓を囲む人）。tabler の users-group は「人の集まり」で、卓（テーブルを囲む場）に見えない
+ */
+const CUSTOM: IconSet = {
+  width: 24,
+  height: 24,
+  icons: {
+    table: {
+      body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="7.5" cy="4.75" r="2.25"/><circle cx="16.5" cy="4.75" r="2.25"/><path d="M3.75 11c.55-1.75 1.95-2.75 3.75-2.75s3.2 1 3.75 2.75m1.5 0c.55-1.75 1.95-2.75 3.75-2.75s3.2 1 3.75 2.75"/><ellipse cx="12" cy="17.5" rx="9" ry="3.5"/></g>',
+    },
+  },
+};
+
+const sets = new Map<string, IconSet>([["custom", CUSTOM]]);
 function load(prefix: string): IconSet {
   if (!sets.has(prefix)) {
     const path = require.resolve(`@iconify-json/${prefix}/icons.json`);
@@ -114,13 +127,14 @@ const webOut: string[] = [
   "export type IconProps = SVGProps<SVGSVGElement>;",
   "",
   "/**",
-  " * 線の太さ。tabler の線は 24 四方で 2 なので、14〜16px に縮めると 1.2px ほどに痩せて見える。",
-  " * 小さく描くほど太くして、どの大きさでも 1.4px 前後の線に揃える。strokeWidth を渡せば上書きできる。",
+  " * 線の太さ（画面上の px）。線には vector-effect: non-scaling-stroke を付けているので、",
+  " * stroke-width は viewBox の単位ではなく描画後の px になる。どの大きさ・どの指定方法（width 属性・CSS・em）で",
+  " * 描いても 1.8px を下回らない（P13: 16px で 1.53px でも細いと言われた。検査は audit:icon-stroke の 1.75px）。",
+  " * 大きく描くときは tabler 本来の比率（24 で 2）まで太くする。strokeWidth を渡せば上書きできる（px）。",
   " */",
   'function iconStroke(size: IconProps["width"]): number {',
   '  const n = typeof size === "number" ? size : Number(size);',
-  "  if (!Number.isFinite(n)) return 2;",
-  "  return n <= 14 ? 2.5 : n <= 16 ? 2.3 : n <= 20 ? 2.1 : 2;",
+  "  return Number.isFinite(n) ? Math.max(1.8, Math.round((n / 12) * 100) / 100) : 1.85;",
   "}",
   "",
 ];
@@ -154,13 +168,20 @@ for (const [name, ref] of Object.entries(ICONS)) {
   const w = icon.width ?? set.width ?? 16;
   const h = icon.height ?? set.height ?? 16;
   // tabler の線アイコンは線の太さを <svg> に持たせ、大きさに応じて変える（iconStroke）
-  const stroked = prefix === "tabler" && icon.body.includes('stroke-width="2"');
+  const stroked = (prefix === "tabler" || prefix === "custom") && icon.body.includes('stroke-width="2"');
+  // 線を描く要素に non-scaling-stroke を付ける（vector-effect は継承されないので要素ごと）
+  const body = stroked
+    ? icon.body.replace(
+        /<(path|circle|ellipse|rect|line|polyline|polygon)\b/g,
+        '<$1 vector-effect="non-scaling-stroke"',
+      )
+    : icon.body;
 
   webOut.push(
     `export function ${name}(props: IconProps) {`,
     `  return (`,
     `    <svg xmlns="http://www.w3.org/2000/svg" width="1.2em" height="1.2em" viewBox="0 0 ${w} ${h}" aria-hidden${stroked ? " strokeWidth={iconStroke(props.width)}" : ""} {...props}>`,
-    `      ${stroked ? toJsx(icon.body).replace(/\sstrokeWidth="2"/g, "") : toJsx(icon.body)}`,
+    `      ${stroked ? toJsx(body).replace(/\sstrokeWidth="2"/g, "") : toJsx(body)}`,
     `    </svg>`,
     `  );`,
     `}`,
@@ -183,108 +204,8 @@ const mobileIconsDir = new URL("../mobile/src/components", import.meta.url);
 mkdirSync(mobileIconsDir, { recursive: true });
 writeFileSync(new URL("../mobile/src/components/icons.tsx", import.meta.url), mobileOut.join("\n"));
 
-/* ---------- 卓譜モバイル PNG アセット生成（純粋 TypeScript + zlib） ---------- */
-function crc32(buf: Uint8Array): number {
-  let c = 0xffffffff;
-  for (let i = 0; i < buf.length; i++) {
-    c ^= buf[i]!;
-    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (c & 1 ? 0xedb88320 : 0);
-  }
-  return (c ^ 0xffffffff) >>> 0;
-}
-
-function pngChunk(type: string, data: Uint8Array): Buffer {
-  const out = Buffer.alloc(12 + data.length);
-  out.writeUInt32BE(data.length, 0);
-  out.write(type, 4, 4, "ascii");
-  Buffer.from(data).copy(out, 8);
-  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
-  return out;
-}
-
-function encodePngRgba(width: number, height: number, rgba: Uint8Array): Buffer {
-  const stride = width * 4 + 1;
-  const raw = Buffer.alloc(stride * height);
-  for (let y = 0; y < height; y++) {
-    raw[y * stride] = 0;
-    Buffer.from(rgba.subarray(y * width * 4, (y + 1) * width * 4)).copy(raw, y * stride + 1);
-  }
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 6;
-  const idat = deflateSync(raw, { level: 9 });
-  return Buffer.concat([
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-    pngChunk("IHDR", ihdr),
-    pngChunk("IDAT", idat),
-    pngChunk("IEND", Buffer.alloc(0)),
-  ]);
-}
-
-function distSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
-  const vx = bx - ax;
-  const vy = by - ay;
-  const wx = px - ax;
-  const wy = py - ay;
-  const lenSq = vx * vx + vy * vy || 1;
-  const t = Math.max(0, Math.min(1, (wx * vx + wy * vy) / lenSq));
-  return Math.hypot(px - (ax + t * vx), py - (ay + t * vy));
-}
-
-function renderTakufuMarkPng(size: number, transparentBg: boolean): Buffer {
-  const rgba = new Uint8Array(size * size * 4);
-  const bg = transparentBg ? [242, 235, 224, 0] : [242, 235, 224, 255];
-  const fg = [184, 71, 36]; // #b84724 terracotta
-  const scale = size / 24;
-
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const gx = (x + 0.5) / scale;
-      const gy = (y + 0.5) / scale;
-
-      const staffDist = Math.min(
-        distSegment(gx, gy, 4, 7.2, 20, 7.2),
-        distSegment(gx, gy, 4, 11.4, 20, 11.4),
-        distSegment(gx, gy, 4, 15.6, 20, 15.6),
-      );
-      const staffAlpha = Math.max(0, Math.min(1, (0.72 - staffDist) / 0.35)) * 0.45;
-
-      const stemDist = Math.min(
-        distSegment(gx, gy, 11.4, 14.5, 11.4, 5.8),
-        distSegment(gx, gy, 11.4, 5.8, 16.5, 7.2),
-      );
-      const head1 = Math.hypot(gx - 9.0, gy - 14.5) - 2.4;
-      const head2 = Math.hypot(gx - 16.4, gy - 10.2) - 2.05;
-      const noteDist = Math.min(stemDist - 0.85, head1, head2);
-      const noteAlpha = Math.max(0, Math.min(1, (0.25 - noteDist) / 0.35));
-
-      const a = Math.max(staffAlpha, noteAlpha);
-      const idx = (y * size + x) * 4;
-      if (transparentBg) {
-        rgba[idx] = fg[0]!;
-        rgba[idx + 1] = fg[1]!;
-        rgba[idx + 2] = fg[2]!;
-        rgba[idx + 3] = Math.round(a * 255);
-      } else {
-        rgba[idx] = Math.round(bg[0]! * (1 - a) + fg[0]! * a);
-        rgba[idx + 1] = Math.round(bg[1]! * (1 - a) + fg[1]! * a);
-        rgba[idx + 2] = Math.round(bg[2]! * (1 - a) + fg[2]! * a);
-        rgba[idx + 3] = 255;
-      }
-    }
-  }
-  return encodePngRgba(size, size, rgba);
-}
-
-const assetsDir = new URL("../mobile/assets", import.meta.url);
-mkdirSync(assetsDir, { recursive: true });
-writeFileSync(new URL("../mobile/assets/icon.png", import.meta.url), renderTakufuMarkPng(256, false));
-writeFileSync(new URL("../mobile/assets/adaptive-icon.png", import.meta.url), renderTakufuMarkPng(256, true));
-writeFileSync(new URL("../mobile/assets/splash-icon.png", import.meta.url), renderTakufuMarkPng(256, true));
-writeFileSync(new URL("../mobile/assets/favicon.png", import.meta.url), renderTakufuMarkPng(64, false));
-
+/* モバイルアプリのアイコン・スプラッシュは scripts/gen-brand.ts がブランドマークから書き出す */
+mkdirSync(new URL("../mobile/assets", import.meta.url), { recursive: true });
 for (const name of ["booth-icon.png", "talto-icon.png"]) {
   const src = new URL(`../public/${name}`, import.meta.url);
   if (existsSync(src)) {

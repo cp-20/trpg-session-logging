@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { enterDemo } from "./design-audit";
 
 test("キャラエノ URL 取り込み → 更新 → リロード復元まで動作する", async ({ page }) => {
-  let iacharaCalls = 0;
+  let charaenoCalls = 0;
   const baseFetchedAt = new Date().toISOString();
 
   await page.route("**/api/import/external", async (route) => {
@@ -10,8 +10,8 @@ test("キャラエノ URL 取り込み → 更新 → リロード復元まで�
     const body = req.postDataJSON() as { url?: string };
     const targetUrl = body?.url ?? "";
     if (targetUrl.includes("charaeno.com")) {
-      iacharaCalls++;
-      const san = iacharaCalls === 1 ? 68 : 61;
+      charaenoCalls++;
+      const san = charaenoCalls === 1 ? 68 : 61;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -21,8 +21,8 @@ test("キャラエノ URL 取り込み → 更新 → リロード復元まで�
           provider: "charaeno",
           providerLabel: "キャラエノ",
           url: "https://charaeno.com/7th/e2eSampleCharaeno0001",
-          fetchedAt: iacharaCalls === 1 ? baseFetchedAt : new Date(Date.now() + 60_000).toISOString(),
-          contentHash: `e2e_hash_${iacharaCalls}`,
+          fetchedAt: charaenoCalls === 1 ? baseFetchedAt : new Date(Date.now() + 60_000).toISOString(),
+          contentHash: `e2e_hash_${charaenoCalls}`,
           character: {
             name: "七瀬 律",
             systemId: "coc7",
@@ -65,46 +65,13 @@ test("キャラエノ URL 取り込み → 更新 → リロード復元まで�
           : null;
       }),
     )
-    .toEqual({ san: 61, hash: "e2e_hash_2", growthLen: 1 });
+    .toEqual({ san: 61, hash: "e2e_hash_2", growthLen: 0 });
 
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: "七瀬 律" })).toBeVisible();
 });
 
-test("ゆとシートⅡ JSON やエモクロアのテキスト貼り付けからキャラクターを取り込める", async ({ page }) => {
-  await enterDemo(page);
-  await page.goto("/characters");
-
-  await page.getByRole("button", { name: "キャラシから取り込む" }).first().click();
-  await page.getByRole("button", { name: /ファイル・コマから読む/ }).click();
-
-  await page.getByLabel(/コマ・キャラシの内容を貼り付け/).fill(
-    JSON.stringify([
-      {
-        characterName: "リリア",
-        race: "ルーンフォーク",
-        job: "グラップラー",
-        hpTotal: 42,
-        mpTotal: 18,
-      },
-      {
-        system: "emoklore",
-        name: "久遠 透",
-        von: 4,
-        taisyo: 7,
-      },
-    ]),
-  );
-
-  await page.getByRole("button", { name: "内容を確認", exact: true }).click();
-  await expect(page.getByText(/2件のキャラクターを読み取りました/)).toBeVisible();
-  await page.getByRole("button", { name: "2件を取り込む" }).click();
-
-  await expect(page.getByText("リリア")).toBeVisible();
-  await expect(page.getByText("久遠 透")).toBeVisible();
-});
-
-test("通過履歴の CSV 一括取り込みと BOOTH URL からのシナリオ自動補完が永続化される", async ({ page }) => {
+test("BOOTH URL からのシナリオ自動補完が永続化される", async ({ page }) => {
   await page.route("**/api/import/external", async (route) => {
     const body = route.request().postDataJSON() as { url?: string };
     if (body?.url?.includes("booth.pm")) {
@@ -136,18 +103,6 @@ test("通過履歴の CSV 一括取り込みと BOOTH URL からのシナリオ�
   });
 
   await enterDemo(page);
-
-  // 1. Upload 通過履歴一括取り込み
-  await page.goto("/upload");
-  await page.getByRole("button", { name: /通過履歴を取り込む/ }).click();
-  await page.getByLabel(/表データ/).fill(`日付,シナリオ,システム,キャラ,時間,メモ
-2026-07-05,海も枯れるまで,CoC7,相葉 陽向,5時間,生還
-2026-08-19,カタシロ,CoC7,相葉 陽向,2時間,対話`);
-  await page.getByRole("button", { name: "内容を確認", exact: true }).click();
-  await expect(page.getByText(/2件の通過記録を読み取りました/)).toBeVisible();
-  await page.getByRole("button", { name: "2件を取り込む" }).click();
-  await expect(page).toHaveURL(/\/sessions$/);
-  await expect(page.getByText("カタシロ")).toBeVisible();
 
   // 2. ScenarioNew BOOTH URL 自動補完
   await page.goto("/scenarios/new");

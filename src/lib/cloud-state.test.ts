@@ -42,11 +42,13 @@ describe("cloud boundaries", () => {
     expect(state.logs[source.id]).toEqual(source);
   });
 
-  it("never publishes unknown policies as public and preserves private cloud copies without changing local logs", () => {
+  it("publishes public scope regardless of scenario and preserves private cloud copies without changing local logs", () => {
     const state = seedState();
     const log = Object.values(state.logs)[0];
     log.scope = "public";
     log.scenarioId = "missing-policy";
+    expect(publicLogProjection(log, state)).not.toBeNull();
+    log.scope = "members";
     expect(publicLogProjection(log, state)).toBeNull();
     Object.values(state.characters)[0].sessions[0].rolls.push({
       cmd: "secret",

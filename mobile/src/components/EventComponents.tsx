@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
-import { eventDurationMinutes, pollCandidates, pollMemberIds } from "@shared/lib/schedule";
+import { eventDurationMinutes, pollCandidates, pollMemberIds, type BusyCheck } from "@shared/lib/schedule";
 import { fmtDate, fmtDur } from "@shared/lib/time";
 import type { Availability, Scenario, State, Table, TableEvent, TableEventCandidate } from "@shared/types";
 import { hasTimeConflictWithDevice, type DeviceBusySummary } from "../native/native-calendar";
@@ -73,7 +73,7 @@ export function PollCard({
   ev,
   state,
   canConfirm,
-  busyDates,
+  busyCheck,
   deviceBusy,
   onRsvp,
   onConfirm,
@@ -81,7 +81,8 @@ export function PollCard({
   ev: TableEvent;
   state: State;
   canConfirm: boolean;
-  busyDates: Set<string>;
+  /** Google カレンダーの空き時間（Web の設定で許可したときだけ）との重なり */
+  busyCheck: BusyCheck;
   deviceBusy?: DeviceBusySummary | null;
   onRsvp: (candidateId: string, value: Availability) => void;
   onConfirm: (cand: TableEventCandidate) => void;
@@ -174,7 +175,7 @@ export function PollCard({
                         未回答 {pending}
                       </Text>
                     )}
-                    {(deviceConflict || busyDates.has(cand.date)) && (
+                    {(deviceConflict || busyCheck(cand.date, cand.startTime, durMin)) && (
                       <Text style={[styles.tallyText, { color: tokens.warning, fontWeight: "700" }]}>
                         {deviceConflict ? "端末の予定あり" : "自分の予定あり"}
                       </Text>
@@ -266,7 +267,7 @@ export function PollReplySheet({
   ev,
   state,
   canConfirm,
-  busyDates,
+  busyCheck,
   deviceBusy,
   onRsvp,
   onConfirm,
@@ -275,7 +276,7 @@ export function PollReplySheet({
   ev: TableEvent | null;
   state: State;
   canConfirm: boolean;
-  busyDates: Set<string>;
+  busyCheck: BusyCheck;
   deviceBusy?: DeviceBusySummary | null;
   onRsvp: (candidateId: string, value: Availability) => void;
   onConfirm: (cand: TableEventCandidate) => void;
@@ -297,7 +298,7 @@ export function PollReplySheet({
           ev={ev}
           state={state}
           canConfirm={canConfirm}
-          busyDates={busyDates}
+          busyCheck={busyCheck}
           deviceBusy={deviceBusy}
           onRsvp={onRsvp}
           onConfirm={(cand) => {

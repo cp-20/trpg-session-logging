@@ -3,6 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // LOLIPOP! Deploy Now はサーバー動作に standalone 出力を要求する
   output: "standalone",
+  // 別の開発サーバー（pnpm run test:e2e:discord）が同じフォルダーで動けるよう、出力先を差し替えられる
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   devIndicators: false,
   // 開発サーバーを 127.0.0.1 で開いたときの HMR を許可する（E2E・レビューで使う）
   allowedDevOrigins: ["127.0.0.1"],

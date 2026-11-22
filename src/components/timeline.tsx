@@ -1,5 +1,7 @@
 import { createContext, memo, useContext, useDeferredValue, useEffect, useMemo } from "react";
 import type { ReactNode } from "react";
+import { identiconDataUri } from "../lib/identicon";
+import { roleLabel } from "../lib/roles";
 import { fmtDate, fmtDateShort, jstTime, sessionDay } from "../lib/time";
 import type { Character, Log, Msg, State, User } from "../types";
 import { IconCalendarTime, IconDice, IconFileText, IconLock, IconSearch } from "./icons";
@@ -12,42 +14,10 @@ export interface SpeakerMeta {
   roleLabel: string;
 }
 
-function hashString(input: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-const fallbackSvgCache = new Map<string, string>();
-
-function speakerFallbackSvg(sp: string, kind: Msg["kind"], color: string): string {
-  const key = `${kind}:${sp}:${color}`;
-  const hit = fallbackSvgCache.get(key);
-  if (hit !== undefined) return hit;
-  const hash = hashString(`${kind}:${sp}`);
-  const warmBg = ["#f3e5d8", "#ebe3d5", "#e8e0d8", "#f0dfd5", "#e4e6dc", "#e6e1ea"][hash % 6]!;
+/** 誰とも結び付かない発言者の顔。発言者名を種にした既定の画像（GM 側は円印、ほかはコマ） */
+function speakerFallbackSvg(sp: string, kind: Msg["kind"]): string {
   const isKeeper = kind === "KP" || kind === "GM" || kind === "SYSTEM";
-  const inner = isKeeper
-    ? `
-      <rect x="26" y="28" width="48" height="44" rx="6" fill="${color}" fill-opacity="0.9"/>
-      <path d="M50 28 L50 72" stroke="${warmBg}" stroke-width="2.4"/>
-      <path d="M33 38 L44 38 M33 46 L44 46 M56 38 L67 38 M56 46 L67 46" stroke="${warmBg}" stroke-width="2.2" stroke-linecap="round"/>
-    `
-    : `
-      <circle cx="50" cy="39" r="14" fill="${color}" fill-opacity="0.88"/>
-      <path d="M24 82 C26 63 36 56 50 56 C64 56 74 63 76 82 Z" fill="${color}" fill-opacity="0.88"/>
-    `;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="50" fill="${warmBg}"/><circle cx="50" cy="50" r="46" fill="none" stroke="${color}" stroke-opacity="0.22" stroke-width="2"/>${inner}</svg>`;
-  const uri = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-  if (fallbackSvgCache.size >= 500) {
-    const first = fallbackSvgCache.keys().next().value;
-    if (first !== undefined) fallbackSvgCache.delete(first);
-  }
-  fallbackSvgCache.set(key, uri);
-  return uri;
+  return identiconDataUri(sp, isKeeper ? "user" : "character");
 }
 
 type SpeakerNameIndex = {
@@ -108,14 +78,14 @@ function resolveSpeakerMetaWithIndex(
     iconUrl = userByName.image;
   }
   if (!iconUrl) {
-    iconUrl = speakerFallbackSvg(sp, kind, color);
+    iconUrl = speakerFallbackSvg(sp, kind);
   }
 
   return {
     iconUrl,
     color,
     plName,
-    roleLabel: kind,
+    roleLabel: roleLabel(log?.systemId, kind),
   };
 }
 
@@ -154,14 +124,14 @@ export function resolveSpeakerMeta(sp: string, kind: Msg["kind"], log: Log, stat
     iconUrl = userByName.image;
   }
   if (!iconUrl) {
-    iconUrl = speakerFallbackSvg(sp, kind, color);
+    iconUrl = speakerFallbackSvg(sp, kind);
   }
 
   return {
     iconUrl,
     color,
     plName,
-    roleLabel: kind,
+    roleLabel: roleLabel(log?.systemId, kind),
   };
 }
 
@@ -173,15 +143,6 @@ export function makeColorOf(state: State) {
     return charByName.get(sp) ?? userByName.get(sp) ?? "#856e5c";
   };
 }
-
-const ROLE_LABEL: Record<Msg["kind"], string> = {
-  PC: "PC",
-  NPC: "NPC",
-  KP: "GM",
-  GM: "GM",
-  PL: "PL",
-  SYSTEM: "システム",
-};
 
 /** 判定結果: 例外的な結果（クリティカル・ファンブル）だけを目立たせる */
 function RollResult({ result }: { result: string }) {
@@ -253,9 +214,7 @@ const MessageRow = memo(function MessageRow({
             >
               {m.sp}
             </span>
-            <span className="text-xs text-ink2">
-              {meta.plName ? `PC · ${meta.plName}` : (ROLE_LABEL[m.kind] ?? meta.roleLabel)}
-            </span>
+            <span className="text-xs text-ink2">{meta.plName ? `PC · ${meta.plName}` : meta.roleLabel}</span>
             {secret && chName && <SecretMark name={chName} />}
             {!secret && chName && <span className="text-xs text-ink3">#{chName}</span>}
             <MsgTime ts={m.ts} className="ml-auto text-xs tabular-nums text-ink3" />

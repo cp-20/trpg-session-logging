@@ -17,11 +17,13 @@ import {
   updateSharedMembership,
 } from "@shared/lib/cloud-state";
 import { parseSavedState } from "@shared/lib/state-schema";
+import { TablePollSync } from "@shared/lib/table-polls";
 import { todayStr } from "@shared/lib/time";
 import type { State, User } from "@shared/types";
 import { ensureMobileCloudRuntime, firebaseUserProfile, observeAuth } from "../lib/firebase-mobile";
 import { reconcileWorkspaceStates } from "./reconcile";
 import { nextRetryDelayMs, useDelayedSyncIndicator } from "./sync-controller";
+import { userFacingError } from "@shared/lib/user-error";
 
 const DEMO_KEY = "takufu-mobile-demo-v4";
 const LAST_UID_KEY = "takufu-mobile-last-uid";
@@ -155,6 +157,7 @@ export function MobileStoreProvider({ children }: { children: ReactNode }) {
   const publishedLogsRef = useRef(new Map<string, string>());
   const publishedCharsRef = useRef(new Map<string, string>());
   const lastCalendarFeedKeyRef = useRef<string | null>(null);
+  const pollSyncRef = useRef<TablePollSync | null>(null);
 
   useEffect(() => {
     stateRef.current = state;
@@ -213,6 +216,8 @@ export function MobileStoreProvider({ children }: { children: ReactNode }) {
       await publishSharedCharacter(ch, snapshot);
       publishedCharsRef.current.set(ch.id, sig);
     }
+
+    await pollSyncRef.current?.push(snapshot);
 
     const feedToken = snapshot.prefs.calendarFeedToken;
     if (feedToken) {
@@ -335,10 +340,11 @@ export function MobileStoreProvider({ children }: { children: ReactNode }) {
           }
         } catch (err) {
           if (!aliveRef.current) return;
-          const message =
-            err instanceof Error
-              ? err.message
-              : "記録を同期できませんでした。端末内の記録は保持されています。";
+          console.error("[cloud] sync failed", err);
+          const message = userFacingError(
+            err,
+            "記録を同期できませんでした。端末内の記録は保持されています。",
+          );
           setSyncError(message);
           setSyncStatus("error");
           const delay = nextRetryDelayMs(retryAttemptRef.current);
@@ -511,6 +517,34 @@ export function MobileStoreProvider({ children }: { children: ReactNode }) {
     },
     [persistLocalNow, runSyncCycle],
   );
+
+  /* ---------- 卓の日程調整: 共有の文書を見張り、回答と確定を記録へ取り込む（@shared/lib/table-polls） ---------- */
+  const authUid = authUser?.uid;
+  useEffect(() => {
+    if (!authUid) return;
+    const sync = new TablePollSync(
+      authUid,
+      (merge) => {
+        const events = merge(stateRef.current);
+        if (!events) return;
+        const next = { ...stateRef.current, events };
+        stateRef.current = next;
+        persistLocalNow(next, true);
+        setState(next);
+        if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = setTimeout(() => {
+          void runSyncCycle("mutation");
+        }, 650);
+      },
+      { onReady: () => void sync.push(stateRef.current).catch(() => undefined) },
+    );
+    pollSyncRef.current = sync;
+    const stop = sync.start();
+    return () => {
+      stop();
+      pollSyncRef.current = null;
+    };
+  }, [authUid, persistLocalNow, runSyncCycle]);
 
   const api = useMemo<MobileStoreApi>(
     () => ({

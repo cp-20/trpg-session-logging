@@ -1,62 +1,93 @@
 import { expect, test } from "@playwright/test";
+import { auditPage, enterDemo } from "./design-audit";
 
-test("ココフォリアの実データを画像付きで取り込み、失敗時は架空のキャラクターを作らない", async ({ page }) => {
-  await page.goto("/home");
-  await page.getByRole("button", { name: /サンプルデータをそのまま見る/ }).click({ force: true });
-  await page.goto("/characters");
-  await page.getByRole("button", { name: "キャラシから取り込む" }).first().click({ force: true });
-  await page.getByRole("button", { name: /ファイル・コマから読む/ }).click({ force: true });
-  await page.getByLabel(/コマ・キャラシの内容を貼り付け/).fill("not-json");
-  await page.getByRole("button", { name: "内容を確認", exact: true }).click({ force: true });
-  await expect(
-    page.getByRole("alert").filter({ hasText: "キャラクターを読み取れませんでした" }),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "取り込む", exact: true })).toHaveCount(0);
-  const image =
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cC20AAAAASUVORK5CYII=";
-  await page.getByLabel(/コマ・キャラシの内容を貼り付け/).fill(
-    JSON.stringify({
-      kind: "character",
-      data: {
-        name: "実データの探索者",
-        iconUrl: image,
-        memo: "観測所で働く天文学者",
-        commands: "CC<=70 目星",
-        status: [
-          { label: "SAN", value: 0 },
-          { label: "HP", value: 12 },
-        ],
-      },
-    }),
-  );
-  await page.getByRole("button", { name: "内容を確認", exact: true }).click({ force: true });
-  await expect(page.getByRole("img", { name: "取り込んだキャラクター画像" })).toHaveAttribute("src", image);
-  // 名前・技能はキャラシのまま見せる（入力欄にしない）
-  await expect(page.getByRole("heading", { name: "実データの探索者" })).toBeVisible();
-  await expect(page.getByText("目星")).toBeVisible();
-  await page.getByRole("button", { name: "取り込む", exact: true }).click({ force: true });
-  await expect(page).toHaveURL(/\/characters\/ch_/);
-  await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const state = JSON.parse(localStorage.getItem("takufu-state-v4") ?? "{}");
-        const character = Object.values(state.characters ?? {}).find(
-          (value: any) => value.name === "実データの探索者",
-        ) as any;
-        return (
-          character && {
-            image: character.image,
-            stats: character.stats,
-            bio: character.bio,
-            skill: character.sheet?.sections?.find((x: any) => x.id === "skills")?.entries?.[0],
-          }
-        );
+/**
+ * キャラクターはキャラシの URL からだけ取り込む（P6）。ファイル・コマ出力の入口はない。
+ * 取り込み・キャラシと結び付いたキャラの編集・キャラシのないキャラの成長の記録の各段をデザイン検査にかける。
+ */
+test("キャラシの URL からだけ取り込み、編集と成長の記録はキャラシを正にする", async ({ page }) => {
+  await page.route("**/api/import/external", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        kind: "character",
+        provider: "iachara",
+        providerLabel: "いあきゃら",
+        url: "https://iachara.com/view/3000000",
+        fetchedAt: new Date().toISOString(),
+        contentHash: "h1",
+        character: { name: "実データの探索者", systemId: "coc7", memo: "職業: 天文学者", stats: { san: 60 } },
       }),
-    )
-    .toEqual({
-      image,
-      stats: { san: 0, hp: 12 },
-      bio: "観測所で働く天文学者",
-      skill: { label: "目星", value: 70, group: "探索技能" },
     });
+  });
+  const report: string[] = [];
+  const audit = async (step: string) => {
+    for (const issue of await auditPage(page)) report.push(`${step} [${issue.rule}] ${issue.detail}`);
+  };
+
+  await enterDemo(page);
+  await page.goto("/characters");
+  await page.getByRole("button", { name: "キャラシから取り込む" }).first().click();
+  const dialog = page.getByRole("dialog");
+  const sites = dialog.getByRole("list", { name: "対応しているキャラシサイト" });
+  await expect(sites).toBeVisible();
+  await expect(sites.getByRole("listitem").filter({ hasText: "いあきゃら" })).toHaveCount(1);
+  await expect(dialog.getByRole("button", { name: /ファイル|コマ/ })).toHaveCount(0);
+  await audit("取り込み");
+
+  // キャラクターの個別ページ以外は例を添えて断る。いあきゃらも閲覧 URL から読む
+  const urlBox = dialog.getByPlaceholder("https://charaeno.com/7th/…");
+  await urlBox.fill("https://iachara.com/mypage");
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "いあきゃらのキャラクター URL（例: https://iachara.com/view/…）を指定してください。",
+  );
+  await urlBox.fill("https://iachara.com/view/3000000");
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
+  await expect(dialog.getByText("いあきゃら", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "読み込む", exact: true }).click();
+  await expect(dialog.getByRole("heading", { name: "実データの探索者" })).toBeVisible();
+  await expect(dialog.getByRole("textbox")).toHaveCount(0);
+  await audit("取り込みの確認");
+  await dialog.getByRole("button", { name: "取り込む", exact: true }).click();
+  await expect(page).toHaveURL(/\/characters\/ch_/);
+
+  // キャラシと結び付いたキャラの編集: 名前・能力値の欄はなく、キャラシで直す入口だけ
+  await page.getByRole("button", { name: "編集" }).click();
+  await expect(page.getByRole("dialog").getByLabel("名前")).toHaveCount(0);
+  await expect(page.getByRole("dialog").getByRole("link", { name: /で直す/ })).toBeVisible();
+  await audit("キャラシと結び付いたキャラの編集");
+  await page.getByRole("button", { name: "キャンセル" }).click();
+  await expect(page.getByRole("button", { name: /を記録/ })).toHaveCount(0);
+
+  // キャラシのないキャラの成長: セッション・技能・新しい値だけ
+  await page.goto("/characters");
+  await page.getByRole("button", { name: "キャラシから取り込む" }).first().click();
+  await page.getByRole("button", { name: "キャラシなしで作る" }).click();
+  await page.getByRole("dialog").getByLabel("名前").fill("手入力の探索者");
+  await page.getByRole("button", { name: "登録する" }).click();
+  await expect(page).toHaveURL(/\/characters\/ch_/);
+  const id = page.url().split("/").pop()!;
+  await page.evaluate((cid) => {
+    const state = JSON.parse(localStorage.getItem("takufu-state-v4") ?? "{}");
+    state.characters[cid].sessions.push({
+      logId: "s02",
+      date: "2026-09-27",
+      title: "深淵の呼び声",
+      delta: {},
+      rolls: [],
+      memo: "",
+    });
+    localStorage.setItem("takufu-state-v4", JSON.stringify(state));
+  }, id);
+  await page.reload();
+  await page.getByRole("button", { name: "成長ロールを記録" }).click();
+  const growth = page.getByRole("dialog");
+  await expect(growth).not.toContainText("セッションに紐付けない");
+  await expect(growth.getByLabel("日付")).toHaveCount(0);
+  await expect(growth.getByLabel("補足")).toHaveCount(0);
+  await audit("成長の記録");
+
+  expect(report).toEqual([]);
 });

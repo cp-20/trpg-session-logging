@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   parseCcfoliaHtmlEntriesFallback as parseHtml,
-  parseUdonariumCharacterFallback as parseChar,
   parseUdonariumChatsFallback as parseChats,
 } from "./html-xml-fallback";
 
@@ -29,10 +28,10 @@ describe("文字実体の展開", () => {
 
 describe("属性の読み取り", () => {
   it("引用符なし・単引用符・二重引用符・値なしの属性を読む", () => {
-    const xml = `<character><data name=HP type='numberResource' currentValue>12</data><data NAME="MP" currentValue="">3</data></character>`;
-    expect(parseChar(xml)?.leafData).toEqual([
-      { dataName: "HP", dataType: "numberResource", currentValue: "", text: "12" },
-      { dataName: "MP", dataType: "", currentValue: "", text: "3" },
+    const xml = `<chat-log><chat name=HP type='Note' time>12</chat><chat NAME="MP" time="">3</chat></chat-log>`;
+    expect(parseChats(xml)).toEqual([
+      { name: "HP", tab: "", time: "", type: "note", text: "12" },
+      { name: "MP", tab: "", time: "", type: "", text: "3" },
     ]);
   });
 
@@ -85,8 +84,8 @@ describe("閉じタグと末尾", () => {
   });
 
   it("XML の自己終了タグは子を持たない", () => {
-    const xml = `<character><data name="a"/><data name="b">x</data></character>`;
-    expect(parseChar(xml)?.leafData.map((d) => [d.dataName, d.text])).toEqual([
+    const xml = `<chat-log><chat name="a"/><chat name="b">x</chat></chat-log>`;
+    expect(parseChats(xml).map((c) => [c.name, c.text])).toEqual([
       ["a", ""],
       ["b", "x"],
     ]);
@@ -94,7 +93,6 @@ describe("閉じタグと末尾", () => {
 
   it("XML では <br> も script も普通の要素として扱う", () => {
     expect(chatText("a<br/>b<script>c</script>")).toBe("abc");
-    expect(parseChar(`<character><chat-palette>a<br/>b</chat-palette></character>`)?.paletteText).toBe("ab");
   });
 });
 
@@ -198,21 +196,6 @@ describe("CCFOLIA 新整形ログ (section.tab > .player)", () => {
   it("class=tab の section だけをタブにする", () => {
     expect(parseHtml(`<section>${row("太郎", "本文")}</section>`)).toEqual([]);
     expect(parseHtml(`<article class="tab">${row("太郎", "本文")}</article>`)).toEqual([]);
-  });
-});
-
-describe("Udonarium character.xml", () => {
-  it("子の data を持たない data だけを葉として読み、chat-palette は葉にしない", () => {
-    const xml = `<character><data name="detail"><data name=" HP " type=" numberResource "> 12 </data><data>名無し</data><data name="メモ">a<b>強調</b></data></data><chat-palette dicebot="DiceBot"> 1d6 </chat-palette></character>`;
-    expect(parseChar(xml)).toEqual({
-      leafData: [
-        { dataName: "HP", dataType: "numberResource", currentValue: null, text: "12" },
-        { dataName: "", dataType: "", currentValue: null, text: "名無し" },
-        { dataName: "メモ", dataType: "", currentValue: null, text: "a強調" },
-      ],
-      dicebot: "DiceBot",
-      paletteText: " 1d6 ",
-    });
   });
 });
 

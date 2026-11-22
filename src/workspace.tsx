@@ -6,6 +6,7 @@ import { observeAuth, firebaseUserProfile, signOutAccount } from "./lib/auth";
 import { idbGet, idbSet, LOCAL_STORAGE_MAX_CHARS } from "./lib/local-db";
 import { parseSavedState, validateSavedState } from "./lib/state-schema";
 import { download, todayStr } from "./lib/time";
+import { userFacingError } from "./lib/user-error";
 
 async function readLocalSnapshot(storageKey: string): Promise<{
   state: State | null;
@@ -167,8 +168,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           };
           setSession({ user, state, revision: effectiveRevision, issue: "none" });
         } catch (cause) {
-          if (alive && run === generation)
-            setError(cause instanceof Error ? cause.message : "記録を読み込めませんでした。");
+          if (alive && run === generation) console.error("[workspace] load failed", cause);
+          setError(userFacingError(cause, "記録を読み込めませんでした。"));
         }
       },
       () => {

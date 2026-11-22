@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { SYSTEMS } from "@shared/data/systems";
+import { SYSTEMS, carriedStats } from "@shared/data/systems";
+import { carriedDeltas, currentCarriedValue } from "@shared/lib/character-growth";
 import { fetchSharedCharacter, type SharedCharacterData } from "@shared/lib/cloud-state";
 import { fmtDate } from "@shared/lib/time";
 import type { Character, User } from "@shared/types";
@@ -140,13 +141,6 @@ export default function ShareCharacterScreen() {
   const sessionsAsc = [...c.sessions].sort((a, b) => a.date.localeCompare(b.date));
   const sessions = [...sessionsAsc].reverse();
   const growth = [...c.growth].sort((a, b) => b.date.localeCompare(a.date));
-  const sanKey = sys?.stats[0]?.key;
-  const sanNow = sanKey
-    ? sessionsAsc
-        .map((s) => s.delta[sanKey]?.after)
-        .filter((n): n is number => n != null)
-        .at(-1)
-    : undefined;
 
   return (
     <ScreenShell>
@@ -189,10 +183,10 @@ export default function ShareCharacterScreen() {
         </View>
       )}
 
-      {share.includeStats && sys && sys.stats.length > 0 && (
+      {share.includeStats && sys && carriedStats(sys).length > 0 && (
         <Surface style={{ marginBottom: 22 }}>
           <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-            {sys.stats.map((st, idx) => (
+            {carriedStats(sys).map((st, idx) => (
               <View
                 key={st.key}
                 style={{
@@ -213,7 +207,7 @@ export default function ShareCharacterScreen() {
                     fontVariant: ["tabular-nums"],
                   }}
                 >
-                  {st.key === "san" && sanNow != null ? sanNow : (c.stats[st.key] ?? "-")}
+                  {currentCarriedValue(c, st.key) ?? "-"}
                   {st.max ? <Text style={{ fontSize: 13, color: tokens.ink2 }}>{` / ${st.max}`}</Text> : null}
                 </Text>
               </View>
@@ -244,9 +238,9 @@ export default function ShareCharacterScreen() {
                         {fmtDate(s.date)}
                       </Text>
                     </View>
-                    {Object.keys(s.delta).length > 0 && (
+                    {carriedDeltas(c.systemId, s.delta).length > 0 && (
                       <MetaRow>
-                        {Object.entries(s.delta).map(([k, d]) => {
+                        {carriedDeltas(c.systemId, s.delta).map(({ key: k, ...d }) => {
                           const def = sys?.stats.find((x) => x.key === k);
                           const diff = d.after - d.before;
                           return (

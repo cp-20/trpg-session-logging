@@ -29,28 +29,23 @@ describe("state-schema", () => {
     expect(parsed?.scenarios[scKey]?.externalSync?.provider).toBe("booth");
   });
 
-  it("許可なしで Google カレンダーから混ぜていた予定日は捨て、許可済みの googleBusy は残す", () => {
+  it("以前の「予定のある日」（許可なしの取り込み・手入力）は捨て、許可済みの googleBusy は残す", () => {
     const old = seedState() as unknown as { prefs: Record<string, unknown> };
     old.prefs.busyDates = ["2026-11-21"];
     old.prefs.googleCalendarSyncedAt = "2026-11-01T00:00:00Z";
-    const migrated = parseSavedState(JSON.stringify(old))!;
-    expect(migrated.prefs.busyDates).toBeUndefined();
-    expect("googleCalendarSyncedAt" in migrated.prefs).toBe(false);
-
-    const now = seedState();
-    now.prefs.busyDates = ["2026-11-21"];
-    now.prefs.googleBusy = {
+    old.prefs.googleBusy = {
       consentedAt: "2026-11-20T00:00:00Z",
       calendars: [],
       countAllDay: false,
       ranges: [],
     };
-    const kept = parseSavedState(JSON.stringify(now))!;
-    expect(kept.prefs.busyDates).toEqual(["2026-11-21"]);
-    expect(kept.prefs.googleBusy?.consentedAt).toBe("2026-11-20T00:00:00Z");
+    const migrated = parseSavedState(JSON.stringify(old))!;
+    expect("busyDates" in migrated.prefs).toBe(false);
+    expect("googleCalendarSyncedAt" in migrated.prefs).toBe(false);
+    expect(migrated.prefs.googleBusy?.consentedAt).toBe("2026-11-20T00:00:00Z");
   });
 
-  it("既知の旧形式（slug なし、dates/t0/t1 なし、tables/prefs/editRequests なし）を補完する", () => {
+  it("既知の旧形式（slug なし、dates/t0/t1 の時間帯、tables/prefs/editRequests なし）を補完する", () => {
     const state = structuredClone(seedState()) as unknown as Record<string, any>;
     state.futureField = "keep";
     delete state.prefs;
@@ -58,15 +53,14 @@ describe("state-schema", () => {
     delete state.tables;
     delete state.events;
     for (const log of Object.values(state.logs) as any[]) delete log.slug;
-    // ログメッセージから dates / t0 / t1 を逆算するレガシーパス（一部のみ欠損でも発火する）
+    // 以前の持ち方（dates + t0 + t1）。ログに発言時刻があればそれから、なければ t0〜t1 から集まりを作る
     const s01 = state.logs.s01;
-    delete s01.dates;
-    delete s01.t0;
-    delete s01.t1;
+    delete s01.sittings;
+    Object.assign(s01, { dates: ["2026-01-01"], t0: 1, t1: 2 });
     const s02 = state.logs.s02;
-    delete s02.t0;
-    const s03 = state.logs.s03;
-    delete s03.t1;
+    const t0 = 1_789_000_000;
+    Object.assign(s02, { dates: ["2026-09-10"], t0, t1: t0 + 3600, channels: [] });
+    delete s02.sittings;
     const okRestored = validateSavedState(state);
     expect(okRestored).not.toBeNull();
     expect((okRestored as any).futureField).toBe("keep");
@@ -74,10 +68,11 @@ describe("state-schema", () => {
     expect(okRestored?.tables).toEqual({});
     expect(okRestored?.events).toEqual({});
     expect(okRestored?.logs.s03.slug).toBe("s03");
-    expect(okRestored?.logs.s01.dates.length).toBeGreaterThan(0);
-    expect(Number.isFinite(okRestored?.logs.s01.t0)).toBe(true);
-    expect(Number.isFinite(okRestored?.logs.s02.t0)).toBe(true);
-    expect(Number.isFinite(okRestored?.logs.s03.t1)).toBe(true);
+    expect(okRestored?.logs.s01.sittings.length).toBeGreaterThan(0);
+    expect(okRestored?.logs.s01.sittings[0]!.start).toBeGreaterThan(1_000_000_000);
+    expect(okRestored?.logs.s02.sittings).toEqual([{ start: t0, end: t0 + 3600 }]);
+    expect(okRestored?.logs.s01).not.toHaveProperty("dates");
+    expect(okRestored?.logs.s02).not.toHaveProperty("t0");
   });
 
   it("不正な入力型・空チャンネルでの欠損復元・欠損参照ユーザー・壊れた roll メッセージ・不正 JSON をすべて拒否する", () => {
@@ -97,13 +92,11 @@ describe("state-schema", () => {
     expect(parseSavedState('{"logs":')).toBeNull();
     expect(parseSavedState("null")).toBeNull();
 
-    // channels が空で dates 欠損のときは derived が null となり、不正として弾かれる
-    const noMsgLegacy = structuredClone(seedState()) as unknown as Record<string, any>;
-    noMsgLegacy.logs.s01.channels = [{ id: "m", name: "メイン", secret: false, msgs: [] }];
-    delete noMsgLegacy.logs.s01.dates;
-    delete noMsgLegacy.logs.s01.t0;
-    delete noMsgLegacy.logs.s01.t1;
-    expect(validateSavedState(noMsgLegacy)).toBeNull();
+    // 時間帯が読めない（壊れた sittings）ものは不合格
+    const badSittings = structuredClone(seedState()) as unknown as Record<string, any>;
+    badSittings.logs.s01.sittings = [{ start: "x", end: 1 }];
+    badSittings.logs.s01.channels = [];
+    expect(validateSavedState(badSittings)?.logs.s01.sittings).toEqual([]);
 
     // logs に null エントリが含まれていたら全体が不合格になる
     const withNullLog = structuredClone(seedState()) as unknown as Record<string, any>;

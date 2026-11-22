@@ -4,13 +4,61 @@
 
 :root {
   font-size: 100%;
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  /*
+   * 動きのトークン（DESIGN.md「動き」）。動かすのは状態が変わった所だけ。
+   *   fast   150ms  ホバー・押下の色、行が入る
+   *   normal 200ms  現れる（fade + rise）、浮かぶ層
+   *   slow   300ms  モーダルが開く
+   *   stamp  380ms  完了の印を押す（少し浮いてから押し込む）
+   */
   --dur-fast: 150ms;
   --dur-normal: 200ms;
+  --dur-slow: 300ms;
+  --dur-stamp: 380ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
+  /* わずかに行き過ぎて戻る。完了の印だけに使う */
+  --ease-pop: cubic-bezier(0.34, 1.45, 0.64, 1);
+
+  /* スクロールバー（暖色の墨を薄く）。ダークは [data-theme="takufuDark"] で上書き */
+  --scrollbar-thumb: oklch(0.45 0.03 55 / 0.32);
+  --scrollbar-thumb-hover: oklch(0.45 0.03 55 / 0.5);
+}
+[data-theme="takufuDark"] {
+  --scrollbar-thumb: oklch(0.8 0.025 60 / 0.22);
+  --scrollbar-thumb-hover: oklch(0.8 0.025 60 / 0.38);
 }
 
 html {
   scrollbar-gutter: stable;
+}
+
+/* ---------- スクロールバー: 細く、地の色に溶ける墨の色。溝（track）は塗らない ---------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+/* scrollbar-color に対応したブラウザ（Chrome 121+・Firefox）は上を使う。古い WebKit だけ ::-webkit-scrollbar で整える */
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
 
 html,
@@ -107,8 +155,11 @@ body {
   ):not(.btn-quiet),
 .btn.btn-outline {
   background-color: oklch(var(--b1));
-  /* 静止時の枠はごく控えめに、ホバーで枠と面をはっきりさせる */
-  border: 1px solid oklch(var(--bc) / 0.1);
+  /*
+   * 枠は隣の主ボタン（塗り）と同じ大きさに見える濃さにする（P13:「編集」が隣の「共有」より小さく見えた）。
+   * 薄すぎる枠は地に溶けて、ボタンの見かけが文字の幅まで縮む。ホバーで枠と面をさらにはっきりさせる
+   */
+  border: 1px solid oklch(var(--bc) / 0.22);
   color: oklch(var(--bc));
 }
 
@@ -322,20 +373,38 @@ input[type="date"] {
   @apply h-px flex-1 bg-base-300;
 }
 
-/* ---------- キャラクター履歴タイムライン ---------- */
+/* ---------- キャラクター履歴タイムライン ----------
+ * 行（.tlrow）が面の端から端までを持つ。ホバーの面は行の見た目の範囲（左の線と点を含む）と一致させ、
+ * 端の行だけ面の角に合わせて丸める（P13）。区切り線は本文の左端から引く。
+ */
 .tl {
-  @apply relative pl-8 sm:pl-9;
+  @apply relative;
 }
 .tl::before {
   content: "";
-  @apply absolute left-[15px] sm:left-[19px] top-6 bottom-6 w-px bg-base-300;
+  @apply pointer-events-none absolute left-[15px] sm:left-[19px] top-6 bottom-6 z-[1] w-px bg-base-300;
 }
 .tlitem {
-  @apply relative border-b border-base-300/80 last:border-0;
+  @apply relative;
 }
-.tlitem::before {
+.tlrow {
+  @apply relative block py-4 pl-8 pr-4 sm:pl-9 sm:pr-5;
+}
+.tlrow::before {
   content: "";
-  @apply absolute -left-[21px] top-[1.35rem] size-2.5 rounded-full bg-base-100 border-2 border-primary;
+  @apply pointer-events-none absolute left-[11px] sm:left-[15px] top-[1.35rem] z-[2] size-2.5 rounded-full bg-base-100 border-2 border-primary;
+}
+.tlitem:not(:last-child) > .tlrow::after {
+  content: "";
+  @apply pointer-events-none absolute bottom-0 left-8 right-0 h-px bg-base-300/80 sm:left-9;
+}
+.tl > :first-child > .row-interactive {
+  border-top-left-radius: calc(var(--rounded-box, 0.75rem) - 1px);
+  border-top-right-radius: calc(var(--rounded-box, 0.75rem) - 1px);
+}
+.tl > :last-child > .row-interactive {
+  border-bottom-left-radius: calc(var(--rounded-box, 0.75rem) - 1px);
+  border-bottom-right-radius: calc(var(--rounded-box, 0.75rem) - 1px);
 }
 
 /* ---------- ドロップゾーン ---------- */
@@ -433,10 +502,6 @@ main#main-content:focus {
     outline-offset: 2px;
   }
 }
-input,
-textarea {
-  caret-color: oklch(var(--p));
-}
 .badge {
   height: auto;
   min-height: 1.5rem;
@@ -445,13 +510,102 @@ textarea {
   font-size: 0.75rem;
 }
 
-*::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* ============================================================
+ * 動き（DESIGN.md「動き」）
+ *   .motion-enter   現れる: fade + 少し上がる（200ms）
+ *   .motion-fade    暗幕などの fade だけ
+ *   .motion-pop     浮かぶ層・モーダル: 少し縮んだ所から（300ms）
+ *   .motion-insert  一覧に足された行（150ms）
+ *   .motion-stamp   完了の印: 浮いて（溜め）→ 押し込む → 落ち着く。朱が滲む輪が 1 回広がる
+ * ボタンはホバーで動かさない。押したときだけ scale(0.98)（.btn:active）
+ * ============================================================ */
+@keyframes tk-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
-*::-webkit-scrollbar-thumb {
-  background: oklch(var(--bc) / 0.2);
-  border-radius: 4px;
+@keyframes tk-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes tk-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+@keyframes tk-insert {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes tk-stamp {
+  0% {
+    opacity: 0;
+    transform: translateY(-10px) scale(1.5) rotate(-18deg);
+  }
+  /* 溜め: 紙の上で一瞬止まる */
+  38% {
+    opacity: 1;
+    transform: translateY(-14px) scale(1.42) rotate(-14deg);
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
+  }
+  /* 押す。離すときは少し行き過ぎて戻る */
+  70% {
+    transform: translateY(0) scale(0.9) rotate(-8deg);
+    animation-timing-function: var(--ease-pop);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(-8deg);
+  }
+}
+@keyframes tk-stamp-ink {
+  0%,
+  68% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  76% {
+    opacity: 0.35;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
+}
+.motion-enter {
+  animation: tk-enter var(--dur-normal) var(--ease-out) both;
+}
+.motion-fade {
+  animation: tk-fade var(--dur-normal) var(--ease-out) both;
+}
+.motion-pop {
+  animation: tk-pop var(--dur-slow) var(--ease-out) both;
+}
+.motion-insert {
+  animation: tk-insert var(--dur-fast) var(--ease-out) both;
+}
+.motion-stamp {
+  position: relative;
+  display: inline-flex;
+  transform: rotate(-8deg);
+  /* モーダルが開き切ってから押す */
+  animation: tk-stamp var(--dur-stamp) linear 160ms both;
+}
+.motion-stamp::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  /* 角印（Seal）の角に合わせる */
+  border-radius: 18%;
+  border: 3px solid oklch(var(--p));
+  opacity: 0;
+  pointer-events: none;
+  animation: tk-stamp-ink 560ms var(--ease-out) 160ms both;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -459,7 +613,16 @@ textarea {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
     transition-duration: 0.01ms !important;
+  }
+  .motion-enter,
+  .motion-fade,
+  .motion-pop,
+  .motion-insert,
+  .motion-stamp,
+  .motion-stamp::after {
+    animation: none !important;
   }
 }
 

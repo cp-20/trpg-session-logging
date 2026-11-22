@@ -2,12 +2,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from "react";
 import type { User as FirebaseUser } from "firebase/auth";
 import type { Character, Log, State, User } from "./types";
+import type { TablePollSync } from "./lib/table-polls";
 import { parseSavedState, RestoredStateSchema } from "./lib/state-schema";
 export { RestoredStateSchema };
 import { firebaseUserProfile } from "./lib/auth";
 import { ENTERED_HINT_KEY, writeEnteredHint } from "./lib/entered-hint";
 import { produceDraft } from "./lib/draft";
 import { idbDelete, idbSet, LOCAL_STORAGE_MAX_CHARS } from "./lib/local-db";
+import { userFacingError } from "./lib/user-error";
 
 const KEY = "takufu-state-v4";
 
@@ -97,9 +99,7 @@ function characterPublishSignature(character: Character, state: State, uid: stri
   const ownProfile = state.users[uid];
   const sessionScopeRefs = character.sessions.map((s) => {
     const l = state.logs[s.logId];
-    return l
-      ? [l.id, l.slug, l.scope, l.scenarioId ? state.scenarios[l.scenarioId]?.policy : null]
-      : [s.logId];
+    return l ? [l.id, l.slug, l.scope] : [s.logId];
   });
   return JSON.stringify([
     character,
@@ -159,8 +159,10 @@ export function StoreProvider({
   cloudRevision?: string | null;
 }) {
   const initial = useMemo<RestoreResult>(() => {
-    if (initialState) return { state: initialState, issue: initialIssue ?? "none" };
-    return restore(storageKey);
+    const restored: RestoreResult = initialState
+      ? { state: initialState, issue: initialIssue ?? "none" }
+      : restore(storageKey);
+    return restored;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -218,6 +220,38 @@ export function StoreProvider({
 
   const stateRef = useRef(state);
   stateRef.current = state;
+  const pollSync = useRef<TablePollSync | null>(null);
+
+  /* 卓の日程調整: 自分が回答できる共有の文書を見張り、回答と確定を記録へ取り込む（src/lib/table-polls.ts） */
+  useEffect(() => {
+    if (!authUser) return;
+    let cancelled = false;
+    let stop: (() => void) | null = null;
+    void import("./lib/table-polls").then(({ TablePollSync }) => {
+      if (cancelled) return;
+      const sync = new TablePollSync(
+        authUser.uid,
+        (merge) => {
+          setState((prev) => {
+            const events = merge(prev);
+            if (!events) return prev;
+            dirtyLocalRef.current = true;
+            return { ...prev, events };
+          });
+        },
+        {
+          onReady: () => void sync.push(stateRef.current).catch(() => undefined),
+        },
+      );
+      pollSync.current = sync;
+      stop = sync.start();
+    });
+    return () => {
+      cancelled = true;
+      stop?.();
+      pollSync.current = null;
+    };
+  }, [authUser]);
   const staleRef = useRef(false);
   const blockedRef = useRef(persistBlocked || initial.issue === "corrupt");
 
@@ -368,16 +402,20 @@ export function StoreProvider({
             publishedCharacters.current.set(character.id, signature);
           }
 
+          await pollSync.current?.push(state);
+
           if (alive.current) {
             setSaveError(null);
             setCloudStatus(stateRef.current === state ? "saved" : "saving");
           }
         } catch (error) {
+          console.error("[cloud] save failed", error);
           if (alive.current) {
             setSaveError(
-              error instanceof Error
-                ? error.message
-                : "記録を同期できませんでした。通信状態を確認して、もう一度保存してください。",
+              userFacingError(
+                error,
+                "記録を同期できませんでした。通信状態を確認して、もう一度保存してください。",
+              ),
             );
             setCloudStatus("error");
           }
@@ -438,7 +476,9 @@ export function StoreProvider({
 
   const update = useCallback((fn: (s: State) => void) => {
     dirtyLocalRef.current = true;
-    setState((prev) => produceDraft(prev, fn));
+    setState((prev) => {
+      return produceDraft(prev, fn);
+    });
   }, []);
 
   const enterDemo = useCallback((userId = "u_mikan") => {

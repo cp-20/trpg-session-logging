@@ -18,7 +18,7 @@ import { useTheme } from "../theme/ThemeProvider";
 import { RADII } from "../theme/tokens";
 import { Avatar } from "./identity";
 import { IconAlert } from "./icons";
-import { AppTopBar, Button, Surface } from "./ui";
+import { AppTopBar, Button } from "./ui";
 
 function StatusBanners() {
   const { tokens } = useTheme();
@@ -73,46 +73,12 @@ function StatusBanners() {
   );
 }
 
-function OnboardingNotice() {
-  const { tokens } = useTheme();
-  const { state, update } = useMobileStore();
-  const router = useRouter();
-  if (state.prefs?.onboardingDone) return null;
-
-  return (
-    <Surface style={{ padding: 16, marginBottom: 20 }}>
-      <Text style={{ fontSize: 16, fontWeight: "700", color: tokens.ink }}>卓譜へようこそ</Text>
-      <Text style={{ fontSize: 14, lineHeight: 20, color: tokens.ink2, marginTop: 4 }}>
-        プロフィールと記録は、はじめは一緒に遊んだ人に見える設定です。設定からいつでも変えられます。
-      </Text>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
-        <Button size="sm" variant="secondary" onPress={() => router.push("/settings")}>
-          公開設定
-        </Button>
-        <Button
-          size="sm"
-          variant="quiet"
-          onPress={() =>
-            update((s) => {
-              s.prefs.onboardingDone = true;
-            })
-          }
-        >
-          閉じる
-        </Button>
-      </View>
-    </Surface>
-  );
-}
-
 export function ScreenShell({
   children,
-  showOnboarding = false,
   contentStyle,
   withTopBar = true,
 }: {
   children: ReactNode;
-  showOnboarding?: boolean;
   contentStyle?: StyleProp<ViewStyle>;
   withTopBar?: boolean;
 }) {
@@ -162,7 +128,6 @@ export function ScreenShell({
         ]}
       >
         <StatusBanners />
-        {showOnboarding && <OnboardingNotice />}
         {children}
       </ScrollView>
     </View>

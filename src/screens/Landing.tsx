@@ -12,7 +12,7 @@ import { Field, FieldError, LegalLinks, LogoMark, RightsNotice, Seg, cx } from "
 import {
   IconCalendar,
   IconDice,
-  IconIdBadge,
+  IconCharacter,
   IconLock,
   IconPlayerPlay,
   IconSearch,
@@ -22,7 +22,7 @@ import { DICETOUS_COMMONS, FEEDBACK_PATH, OSS_LICENSES } from "../lib/rights";
 import { FEEDBACK_KINDS, FEEDBACK_LIMITS, type FeedbackKind } from "../lib/feedback-kinds";
 
 /** 規約・ポリシーの制定日。改定したら更新する */
-const LEGAL_UPDATED = "2026年11月21日";
+const LEGAL_UPDATED = "2026年11月22日";
 
 /* ---------- 公開ページの外枠（ヘッダーとフッター） ---------- */
 /** 公開ページから記録を使う画面（/signin・/demo・/home）へのリンクは prefetch={false}（先読みで Firebase を落とさない） */
@@ -51,7 +51,7 @@ export function PublicFrame({
             className={cx("flex items-center gap-2", poster ? "pst-logo" : "text-primary")}
             aria-label="卓譜 トップ"
           >
-            <LogoMark size={22} />
+            <LogoMark size={22} on={poster ? "var(--pst-field)" : undefined} />
             <span className={cx("font-bold tracking-tight", !poster && "text-base-content")}>卓譜</span>
           </Link>
           <span className="ml-auto" />
@@ -229,10 +229,10 @@ const SYSTEMS = [
 const SOURCES = [
   "CCFOLIA",
   "キャラエノ",
+  "いあきゃら",
   "キャラクター保管所",
   "ゆとシートⅡ",
   "キャラッシュ",
-  "いあきゃら",
   "YouTube",
   "ニコニコ",
   "Twitch",
@@ -272,7 +272,7 @@ export default function Landing() {
             ぜんぶここ。
           </h1>
           <p className="pst-lead mt-6">
-            CCFOLIA のログ、探索者の成長、録画や感想、次の日程まで。
+            CCFOLIA のログ、探索者の成長、録画や感想、次の日程まで、
             <br className="hidden sm:inline" />
             TRPG のセッション記録をひとつのページにまとめる無料アプリです。
           </p>
@@ -312,7 +312,7 @@ export default function Landing() {
           </h2>
           <p className="pst-body mt-5">
             CCFOLIA の HTML や ZIP
-            を入れると、発言・ダイス・秘匿タブを読みやすく整理。録画や探索者の変化も同じページに並びます。
+            を入れると、発言・ダイス・秘匿タブを読みやすく整理します。録画や探索者の変化も同じページに並びます。
           </p>
           <SessionSheet />
         </div>
@@ -331,7 +331,7 @@ export default function Landing() {
               </div>
               <p className="pst-spec-desc">
                 CCFOLIA
-                のログを取り込むと、発言者・ダイス・チャンネルごとに見やすく整理。秘匿タブは許可された人だけに表示し、全文検索やダイスだけの抽出にも対応しています。
+                のログを取り込むと、発言者・ダイス・チャンネルごとに見やすく整理します。秘匿タブは許可された人だけに表示し、全文検索やダイスだけの抽出にも対応しています。
               </p>
               <div className="pst-spec-sample" aria-hidden="true">
                 <span className="pst-log-dice">
@@ -343,12 +343,11 @@ export default function Landing() {
 
             <article className="pst-spec">
               <div className="pst-spec-head">
-                <IconIdBadge width={20} height={20} aria-hidden />
+                <IconCharacter width={20} height={20} aria-hidden />
                 <h3 className="pst-spec-title">探索者の歩みを残す</h3>
               </div>
               <p className="pst-spec-desc">
-                キャラエノ・キャラクター保管所・ゆとシートⅡ・キャラッシュの URL
-                から取り込み（いあきゃらは駒出力を貼り付け）。卓ごとの SAN
+                キャラシの URL から取り込みます。卓ごとの SAN
                 や技能の変化が積み上がり、キャラシサイトとも自動同期します。
               </p>
               <div className="pst-spec-sample" aria-hidden="true">
@@ -364,7 +363,7 @@ export default function Landing() {
                 <h3 className="pst-spec-title">録画・感想・絵をつなぐ</h3>
               </div>
               <p className="pst-spec-desc">
-                録画・配信アーカイブ・リプレイ動画・卓報告・ふせったー・イラストをセッションに紐付け。ものごとの公開範囲とネタバレ設定、目次つきで、ログの時刻を押すと録画のその場面が開きます。
+                録画・配信アーカイブ・リプレイ動画・卓報告・ふせったー・イラストをセッションに紐付けます。ものごとの公開範囲とネタバレ設定、目次つきで、ログの時刻を押すと録画のその場面が開きます。
               </p>
               <div className="pst-spec-sample" aria-hidden="true">
                 <span className="pst-mini-time">23:41</span>
@@ -379,8 +378,8 @@ export default function Landing() {
               </div>
               <p className="pst-spec-desc">
                 卓メンバーでの日程調整、カレンダー購読、許可したときだけの Google
-                カレンダー空き時間照合。共有範囲はメンバー限定・プレイした人・公開から選べ、未通過の人にはネタバレを伏せます。X
-                用の卓報告カードも出力。
+                カレンダーとの空き時間の照合に対応しています。共有範囲はメンバー限定・プレイした人・公開から選べ、未通過の人にはネタバレを伏せます。X
+                用の卓報告カードも作れます。
               </p>
               <div className="pst-spec-sample" aria-hidden="true">
                 <IconLock width={16} height={16} aria-hidden />
@@ -439,7 +438,7 @@ export default function Landing() {
             <Link to={FEEDBACK_PATH} className="underline underline-offset-2">
               ご意見フォーム
             </Link>
-            から。
+            からお寄せください。
           </p>
         </div>
       </section>
@@ -600,7 +599,8 @@ function SessionSheet() {
               <IconShare width={14} height={14} aria-hidden /> 共有とネタバレ配慮
             </div>
             <p className="text-sm leading-relaxed">
-              <b>プレイした人</b>だけに公開。未通過の人には本文を伏せます。X 用の卓報告カードもここから。
+              <b>プレイした人</b>だけに公開します。未通過の人には本文を伏せます。X
+              用の卓報告カードもここから作れます。
             </p>
           </div>
         </div>
@@ -863,14 +863,14 @@ export function Licenses() {
             "改変利用: 許可",
             "公演利用（配信・動画など）: 許可（収益化してもよい）",
             <>
-              営利利用: 許諾制。{DICETOUS_COMMONS.contactLabel}は{" "}
+              営利利用: 許諾制です。{DICETOUS_COMMONS.contactLabel}は{" "}
               <Link
                 to={DICETOUS_COMMONS.contactUrl}
                 className="underline underline-offset-2 hover:text-primary"
               >
                 ご意見フォーム
-              </Link>{" "}
-              へ。
+              </Link>
+              からお寄せください。
             </>,
           ]}
         />
@@ -933,6 +933,7 @@ export function Terms() {
           items={[
             "ログには、他の参加者の発言・名前・キャラクターが含まれます。記録や共有の前に、同卓者の了解を得てください。",
             "共有範囲は、同卓者の意向とシナリオのネタバレに配慮して選んでください。",
+            "セッションの共有範囲を広げる前に、シナリオの作者が定めるリプレイやログの公開・共有に関する規約を、ご自身で確認してください。卓譜はシナリオごとの共有方針を扱わず、選んだ範囲どおりに共有します。",
             "同卓者から記録の削除や非公開を求められた場合は、速やかに対応してください。",
           ]}
         />
@@ -1009,6 +1010,9 @@ export function Privacy() {
           items={[
             "Google アカウントの情報: 表示名、メールアドレス、プロフィール画像、Google のユーザー ID（ログイン時）",
             "X アカウントの情報: X のユーザー ID、表示名、プロフィール画像（設定で X を連携した場合のみ）",
+            "Discord アカウントの情報: 設定で Discord を連携した場合だけ、Discord のユーザー ID・ユーザー名・表示名を取得します。連携に使う Discord の許可は名前を読むことだけで、読んだあとはすぐに取り消して保存しません",
+            "卓とつないだ Discord のサーバー・チャンネルの ID と名前（卓を作った人が Discord でつないだ場合のみ）と、そこに投稿したメッセージ・イベントの ID",
+            "利用者が決めた卓譜のユーザー ID: プロフィールの URL になり、ほかの利用者にも見えます。一度決めると変えられません",
             "利用者が入力・取り込みした記録: セッション、ログ（同卓者の発言や名前を含む）、キャラクター、シナリオ、卓、予定、日程調整の回答、画像",
             "Google カレンダーの空き時間: 設定で許可した場合のみ、カレンダーの一覧（名前と、メインのカレンダーかどうか）と、選んだカレンダーに予定が入っている時間帯（開始と終了だけ、今日から 90 日先まで）を読みます。予定の件名・内容・場所・参加者は読みません。読み取りに使う許可は空き時間とカレンダー一覧の閲覧だけで、予定を書き換えることはありません",
             "外部サイトから取り込むために利用者が指定した URL と、その取得結果",
@@ -1024,6 +1028,7 @@ export function Privacy() {
             "本サービスを提供し、記録を端末間で同期するため",
             "利用者が設定した共有範囲に従って、共有ページを表示するため",
             "日程調整で、予定が重なる候補日を知らせるため",
+            "卓とつないだ Discord のチャンネルで、日程調整に回答してもらい、決まった予定と前日のお知らせを届けるため",
             "不具合の調査、不正な利用の防止、お問い合わせへの対応のため",
           ]}
         />
@@ -1034,6 +1039,8 @@ export function Privacy() {
           items={[
             "利用者が共有範囲を設定して公開した記録を、その範囲の人が閲覧する場合",
             "利用者が発行したカレンダー購読 URL を通じて、予定が読まれる場合",
+            "卓の招待リンクを開いた人が、卓の名前とメンバーの表示名・ユーザー ID を見る場合",
+            "卓を Discord のチャンネルとつないだ場合: その卓の日程調整（題名・候補日・回答の数）と決まった予定を、そのチャンネルに投稿します。セッションの記録は、記録した人が選んだときだけ投稿し、題名などは公開の共有ページに出る範囲だけを載せます",
             "法令に基づく場合",
           ]}
         />
@@ -1043,15 +1050,15 @@ export function Privacy() {
         <Bullets
           items={[
             <>
-              Google（Firebase Authentication・Cloud Firestore）: ログインと記録の保存。
+              Google（Firebase Authentication・Cloud Firestore）: ログインと記録の保存に使います。
               <ExternalLink href="https://policies.google.com/privacy">
                 Google のプライバシーポリシー
               </ExternalLink>
             </>,
             "Google Fonts: ログイン画面の「Google でログイン」ボタンの書体（Google Sans）を読み込むとき、ブラウザが Google のサーバーにアクセスします",
-            "Google カレンダー API: 空き時間とカレンダー一覧の読み取り（許可した場合のみ）。読み取った時間帯は自分の記録の中にだけ保存し、他の利用者には見せず、日程調整の回答やカレンダー購読にも含めません。設定をオフにすると、保存した時間帯とカレンダーの一覧を消します",
+            "Google カレンダー API: 許可した場合だけ、空き時間とカレンダー一覧を読み取ります。読み取った時間帯は自分の記録の中にだけ保存し、他の利用者には見せず、日程調整の回答やカレンダー購読にも含めません。設定をオフにすると、保存した時間帯とカレンダーの一覧を消します",
             <>
-              GMO ペパボ（LOLIPOP! Deploy Now）: 本サービスの配信。アクセス時の IP
+              GMO ペパボ（LOLIPOP! Deploy Now）: 本サービスの配信に使います。アクセス時の IP
               アドレスなどが記録されることがあります。
               <ExternalLink href="https://pepabo.com/privacy/">GMO ペパボのプライバシーポリシー</ExternalLink>
             </>,
@@ -1059,7 +1066,9 @@ export function Privacy() {
             "X: 卓報告の投稿画面を開くとき、投稿文と共有ページの URL を X に渡します",
             <>
               Discord: ご意見・不具合の報告フォームの内容を、運営者だけが読む Discord
-              のチャンネルに送ります。アカウントの情報や記録は送りません。
+              のチャンネルに送ります。卓を Discord
+              とつないだ場合は、卓譜のボットが上に書いた範囲の日程調整・予定・記録をそのチャンネルに投稿し、Discord
+              のイベントを作ります。
               <ExternalLink href="https://discord.com/privacy">Discord のプライバシーポリシー</ExternalLink>
             </>,
           ]}

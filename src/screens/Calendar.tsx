@@ -20,6 +20,7 @@ import {
   PageHead,
   SectionTitle,
   Seg,
+  Combobox,
   Select,
   SplitLayout,
   cx,
@@ -27,7 +28,8 @@ import {
   DateInput,
   NumberInput,
 } from "../components/ui";
-import { Avatar, AvatarStack, ProviderIcon } from "../components/identity";
+import { Avatar, AvatarStack } from "../components/identity";
+import { GoogleBusySettings } from "../components/google-busy";
 import { getJapaneseHolidayName } from "../lib/holidays";
 import { buildFeedIcs, feedUrl, newFeedToken, publishFeed, revokeFeed } from "../lib/calendar-feed";
 import {
@@ -40,6 +42,7 @@ import {
   busyChecker,
   calendarSubscribeLinks,
   canConfirmPoll,
+  canEditPoll,
   computeEndTime,
   eventDurationMinutes,
   groupBy,
@@ -54,9 +57,9 @@ import {
   shiftYearMonth,
   unansweredCount,
 } from "../lib/schedule";
-import { fmtDate, fmtDur, sessionPlayMinutes, todayStr, uid } from "../lib/time";
+import { fmtDate, fmtDur, sessionPlayMinutes, todayStr, uid, sessionDays } from "../lib/time";
 import { useStore } from "../store";
-import type { SelectOption } from "../components/ui";
+import type { ComboboxOption } from "../components/ui";
 import type { Availability, Log, Scenario, State, Table, TableEvent, TableEventCandidate } from "../types";
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"] as const;
@@ -222,29 +225,30 @@ export default function Calendar() {
       .filter(
         (ev) =>
           !myLogs.some(
-            (l) => l.dates.includes(ev.date) && (!ev.tableId || !l.tableId || l.tableId === ev.tableId),
+            (l) =>
+              sessionDays(l).includes(ev.date) && (!ev.tableId || !l.tableId || l.tableId === ev.tableId),
           ),
       )
       .reverse();
   }, [confirmedEvents, myLogs, today]);
 
-  const tableOptions = useMemo<SelectOption[]>(
+  const tableOptions = useMemo<ComboboxOption[]>(
     () => [{ value: "all", label: "すべての卓" }, ...myTables.map((t) => ({ value: t.id, label: t.name }))],
     [myTables],
   );
-  const formTableOptions = useMemo<SelectOption[]>(
+  const formTableOptions = useMemo<ComboboxOption[]>(
     () => [
       { value: "", label: "卓なし（個人の予定）" },
       ...myTables.map((t) => ({ value: t.id, label: t.name })),
     ],
     [myTables],
   );
-  const scenarioOptions = useMemo<SelectOption[]>(
+  const scenarioOptions = useMemo<ComboboxOption[]>(
     () => [
       { value: "", label: "選択しない" },
       ...Object.values(state.scenarios)
         .sort((a, b) => a.title.localeCompare(b.title, "ja"))
-        .map((s) => ({ value: s.id, label: s.title })),
+        .map((s) => ({ value: s.id, label: s.title, keywords: [s.author] })),
     ],
     [state.scenarios],
   );
@@ -522,13 +526,10 @@ export default function Calendar() {
 /** 自分の予定と照らし合わせる関数（設定での許可・カレンダーの選択・終日の扱いを反映） */
 export function useBusyCheck(): { check: BusyCheck; hasSource: boolean } {
   const { state } = useStore();
-  const { busyDates, googleBusy } = state.prefs;
+  const { googleBusy } = state.prefs;
   return useMemo(
-    () => ({
-      check: busyChecker({ busyDates, googleBusy }),
-      hasSource: hasBusySource({ busyDates, googleBusy }),
-    }),
-    [busyDates, googleBusy],
+    () => ({ check: busyChecker({ googleBusy }), hasSource: hasBusySource({ googleBusy }) }),
+    [googleBusy],
   );
 }
 
@@ -815,6 +816,7 @@ export function PollDetailModal({
   const durMin = pollDurationMinutes(event);
   const isBusy = (c: TableEventCandidate) => check(c.date, c.startTime, durMin);
   const canManage = canConfirmPoll(event, state);
+  const canEdit = canEditPoll(event, state);
   const myAnswers = () =>
     Object.fromEntries(
       pollCandidates(event)
@@ -849,7 +851,7 @@ export function PollDetailModal({
         <button key="close" type="button" className="btn btn-quiet" onClick={onClose}>
           閉じる
         </button>
-        {canManage && (
+        {canEdit && (
           <button key="edit" type="button" className="btn" onClick={() => setMode("edit")}>
             <IconPencil width={16} height={16} /> 編集
           </button>
@@ -1006,10 +1008,19 @@ type GridEntry =
   | { kind: "poll"; key: string; ev: ExtendedTableEvent; cand: TableEventCandidate }
   | { kind: "log"; key: string; log: Log };
 
-function entryLabel(e: GridEntry): string {
+/** 種類を示す語。凡例を置かず、印の横にこの語を出して分からせる（確定した予定は時刻が付くので語なし） */
+function entryKindWord(e: GridEntry): string | null {
+  return e.kind === "poll" ? "候補" : e.kind === "log" ? "記録" : null;
+}
+
+function entryTitle(e: GridEntry): string {
   if (e.kind === "event") return `${e.ev.startTime} ${e.ev.title}`;
-  if (e.kind === "poll") return e.ev.title;
-  return e.log.title;
+  return e.kind === "poll" ? e.ev.title : e.log.title;
+}
+
+function entryLabel(e: GridEntry): string {
+  const word = entryKindWord(e);
+  return word ? `${word} ${entryTitle(e)}` : entryTitle(e);
 }
 
 function EntryCard({ entry, state }: { entry: GridEntry; state: State }) {
@@ -1083,7 +1094,7 @@ const MonthCalendar = memo(function MonthCalendar({
   onSelectDay: (d: string) => void;
   onChangeMonth: (ym: string) => void;
   tableFilter: string;
-  tableOptions: SelectOption[] | null;
+  tableOptions: ComboboxOption[] | null;
   onChangeTableFilter: (v: string) => void;
   events: ExtendedTableEvent[];
   polls: ExtendedTableEvent[];
@@ -1120,7 +1131,7 @@ const MonthCalendar = memo(function MonthCalendar({
     }
     const byDate = groupBy(
       logs.filter((l) => inFilter(l.tableId)),
-      (l) => l.dates,
+      (l) => sessionDays(l),
     );
     for (const [d, ls] of byDate) for (const l of ls) push(d, { kind: "log", key: l.id, log: l });
     return map;
@@ -1209,7 +1220,7 @@ const MonthCalendar = memo(function MonthCalendar({
         </div>
         <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto">
           {tableOptions && (
-            <Select
+            <Combobox
               size="sm"
               ariaLabel="カレンダーに表示する卓"
               value={tableFilter}
@@ -1304,6 +1315,7 @@ const MonthCalendar = memo(function MonthCalendar({
                         <button
                           type="button"
                           tabIndex={-1}
+                          aria-label={entryLabel(e)}
                           onClick={() => openEntry(e)}
                           className={cx(
                             "block w-full truncate rounded px-1.5 py-0.5 text-left text-xs leading-tight",
@@ -1314,7 +1326,10 @@ const MonthCalendar = memo(function MonthCalendar({
                             e.kind === "log" && "bg-base-200 text-ink2 hover:bg-base-300/60",
                           )}
                         >
-                          {entryLabel(e)}
+                          {entryKindWord(e) && (
+                            <span className="mr-1 font-semibold text-ink2">{entryKindWord(e)}</span>
+                          )}
+                          {entryTitle(e)}
                         </button>
                       </HoverCard>
                     ))}
@@ -1326,17 +1341,6 @@ const MonthCalendar = memo(function MonthCalendar({
               </div>
             );
           })}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-b-box border-t border-base-300 px-4 py-2 text-xs text-ink2">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="size-2 rounded-full bg-primary" aria-hidden /> 予定
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="size-2 rounded-full bg-warning" aria-hidden /> 日程調整の候補
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="size-2 rounded-full bg-base-content/40" aria-hidden /> 記録
-          </span>
         </div>
       </div>
 
@@ -1393,10 +1397,10 @@ const MonthCalendar = memo(function MonthCalendar({
                     <span className={cx("size-2 shrink-0 rounded-full", dot)} aria-hidden />
                     <span className="w-24 shrink-0 tabular-nums text-ink2">{when}</span>
                     <span className="min-w-0 flex-1 truncate font-semibold">
-                      {title}
-                      {e.kind === "poll" && (
-                        <span className="ml-2 text-xs font-normal text-ink2">候補日</span>
+                      {entryKindWord(e) && (
+                        <span className="mr-1.5 font-semibold text-ink2">{entryKindWord(e)}</span>
                       )}
+                      {title}
                     </span>
                     {tableId && state.tables[tableId] && (
                       <span className="hidden shrink-0 text-xs text-ink2 sm:inline">
@@ -1608,8 +1612,8 @@ function ConfirmedEventForm({
   onCreated,
 }: {
   formId: string;
-  tableOptions: SelectOption[];
-  scenarioOptions: SelectOption[];
+  tableOptions: ComboboxOption[];
+  scenarioOptions: ComboboxOption[];
   defaultTableId: string;
   selectedDate: string;
   onCreated: (date: string) => void;
@@ -1730,7 +1734,7 @@ function ConfirmedEventForm({
             control={control}
             name="tableId"
             render={({ field }) => (
-              <Select
+              <Combobox
                 ariaLabel="卓"
                 className="w-full"
                 value={field.value}
@@ -1745,7 +1749,7 @@ function ConfirmedEventForm({
             control={control}
             name="scenarioId"
             render={({ field }) => (
-              <Select
+              <Combobox
                 ariaLabel="シナリオ"
                 className="w-full"
                 value={field.value}
@@ -1886,8 +1890,8 @@ function PollForm({
   onCreated,
 }: {
   formId: string;
-  tableOptions: SelectOption[];
-  scenarioOptions: SelectOption[];
+  tableOptions: ComboboxOption[];
+  scenarioOptions: ComboboxOption[];
   defaultTableId: string;
   today: string;
   firstDate?: string;
@@ -1976,7 +1980,7 @@ function PollForm({
             control={control}
             name="tableId"
             render={({ field }) => (
-              <Select
+              <Combobox
                 ariaLabel="卓"
                 className="w-full"
                 value={field.value}
@@ -1991,7 +1995,7 @@ function PollForm({
             control={control}
             name="scenarioId"
             render={({ field }) => (
-              <Select
+              <Combobox
                 ariaLabel="シナリオ"
                 className="w-full"
                 value={field.value}
@@ -2039,27 +2043,18 @@ function PollForm({
 }
 
 /* ============================================================
- * カレンダー連携: 卓譜の予定を自分のカレンダーへ / 自分の予定と照らし合わせる
- *   普段使わないのでダイアログにしまう。リンクを先に出し、使い方はその下に。
- * ============================================================ */
-
-/* ============================================================
- * カレンダー連携モーダル（購読リンク配信 + Google カレンダー予定同期）
+ * カレンダー連携（普段使わないのでダイアログにしまう）
+ *   卓譜の予定を自分のカレンダーへ（購読リンク）/ 自分の予定と照らし合わせる（Google の空き時間）。
+ *   アプリごとの登録のしかたは、要る人が開くガイドにする
  * ============================================================ */
 
 function CalendarSyncDialog({ onClose }: { onClose: () => void }) {
   const { state, update, authUser } = useStore();
   const today = todayStr();
-  const [manualDate, setManualDate] = useState(today);
   const [feedBusy, setFeedBusy] = useState(false);
   const [feedError, setFeedError] = useState<string | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
   const feedToken = state.prefs.calendarFeedToken;
-  const googleBusy = state.prefs.googleBusy;
-  const busyDates = useMemo(
-    () => [...new Set(state.prefs.busyDates ?? [])].filter((d) => d >= today).sort(),
-    [state.prefs.busyDates, today],
-  );
-  const busySet = new Set(state.prefs.busyDates ?? []);
   const origin = typeof location !== "undefined" ? location.origin : "";
   const activeToken = authUser ? feedToken : "demo";
   const links = activeToken ? calendarSubscribeLinks(feedUrl(origin, activeToken)) : null;
@@ -2077,23 +2072,11 @@ function CalendarSyncDialog({ onClose }: { onClose: () => void }) {
         s.prefs.calendarFeedToken = token;
       });
     } catch {
-      setFeedError("リンクを作れませんでした。通信状態を確かめて、もう一度押してください。");
+      setFeedError("リンクを作れませんでした。通信状態を確かめて、もう一度お試しください。");
     } finally {
       setFeedBusy(false);
     }
   }
-
-  function toggleBusy(date: string) {
-    if (!VALID_DATE.test(date)) return;
-    update((s) => {
-      const next = new Set(s.prefs.busyDates ?? []);
-      if (next.has(date)) next.delete(date);
-      else next.add(date);
-      s.prefs.busyDates = [...next].sort();
-    });
-  }
-
-  const linkCls = "font-semibold text-base-content underline underline-offset-2";
 
   return (
     <Modal
@@ -2107,131 +2090,98 @@ function CalendarSyncDialog({ onClose }: { onClose: () => void }) {
       }
     >
       <section aria-labelledby="sync-out">
-        <h3 id="sync-out" className="font-bold">
-          卓譜の予定を自分のカレンダーに表示する
-        </h3>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h3 id="sync-out" className="min-w-0 flex-1 font-bold">
+            卓譜の予定を自分のカレンダーに表示する
+          </h3>
+          <button type="button" className="btn btn-quiet btn-sm -mr-2" onClick={() => setGuideOpen(true)}>
+            登録のしかた
+          </button>
+        </div>
         {links ? (
           <>
-            <p className="mt-1 text-sm text-ink2">
-              {authUser
-                ? "このリンクをカレンダーアプリに登録すると、確定した予定が自動で反映されます。"
-                : "お試し中はサンプルの予定を配信するリンクです。ログインすると自分専用のリンクを作れます。"}
-            </p>
+            {!authUser && <p className="mt-1 text-sm text-ink2">お試し中はサンプルの予定のリンクです。</p>}
             <div className="mt-3">
               <CopyBox text={links.feed} />
             </div>
-            <ol className="mt-4 space-y-3 text-sm leading-relaxed">
-              <li>
-                <b className="block">Google カレンダー</b>
-                <a href={links.google} target="_blank" rel="noreferrer" className={linkCls}>
-                  Google カレンダーで開く
-                </a>
-                を押し、開いた画面で「追加」を押します。スマートフォンのアプリからは登録できないので、パソコンで行います。
-              </li>
-              <li>
-                <b className="block">Apple カレンダー（Mac・iPhone）</b>
-                <a href={links.apple} className={linkCls}>
-                  Apple カレンダーで開く
-                </a>
-                を押し、「照会」（iPhone では「登録」）を押します。iPhone ではこの画面を iPhone
-                で開いてから押してください。
-              </li>
-            </ol>
-            {authUser && (
-              <p className="mt-4 text-sm text-ink2">
-                リンクを知っている人は誰でも予定を見られます。他の人に知られたときは
-                <button type="button" className={linkCls} onClick={createFeed} disabled={feedBusy}>
-                  リンクを作り直す
+            <div className="mt-3 flex flex-wrap gap-2">
+              <a href={links.google} target="_blank" rel="noreferrer" className="btn btn-sm">
+                Google カレンダーに追加
+              </a>
+              <a href={links.apple} className="btn btn-sm">
+                Apple カレンダーに追加
+              </a>
+              {authUser && (
+                <button
+                  type="button"
+                  className="btn btn-quiet btn-sm sm:ml-auto"
+                  onClick={createFeed}
+                  disabled={feedBusy}
+                >
+                  {feedBusy ? "作り直し中…" : "リンクを作り直す"}
                 </button>
-                と、古いリンクは使えなくなります。
-              </p>
-            )}
-            <FieldError text={feedError} />
+              )}
+            </div>
           </>
         ) : (
-          <>
-            <p className="mt-1 text-sm text-ink2">
-              リンクをカレンダーアプリに登録すると、卓譜で確定した予定が自動で反映されます。
-            </p>
-            <button type="button" className="btn btn-sm mt-3" onClick={createFeed} disabled={feedBusy}>
-              {feedBusy ? "作成中…" : "リンクを作る"}
-            </button>
-            <FieldError text={feedError} />
-          </>
+          <button type="button" className="btn btn-sm mt-3" onClick={createFeed} disabled={feedBusy}>
+            {feedBusy ? "作成中…" : "リンクを作る"}
+          </button>
         )}
+        <FieldError text={feedError} />
       </section>
 
       <section aria-labelledby="sync-in" className="mt-6 border-t border-base-300 pt-5">
-        <h3 id="sync-in" className="font-bold">
+        <h3 id="sync-in" className="mb-3 font-bold">
           自分の予定と照らし合わせる
         </h3>
-        <p className="mt-1 text-sm text-ink2">自分の予定と重なる候補には「自分の予定あり」と出ます。</p>
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-          <ProviderIcon provider="google" size={18} />
-          <span>
-            Google カレンダー:{" "}
-            {googleBusy
-              ? `${googleBusy.calendars.filter((c) => c.on).length}件のカレンダーの空き時間を使用中`
-              : "使っていません"}
-          </span>
-          <Link to="/settings#google-calendar" onClick={onClose} className={linkCls}>
-            設定で変える
-          </Link>
-        </div>
-
-        <h4 className="mt-5 text-sm font-semibold">予定のある日を手で入れる</h4>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <DateInput
-            aria-label="予定のある日"
-            size="sm"
-            className="w-44"
-            value={manualDate}
-            onChange={(e) => setManualDate(e.target.value)}
-          />
-          <button type="button" className="btn btn-sm" onClick={() => toggleBusy(manualDate)}>
-            {busySet.has(manualDate) ? "予定ありを外す" : "予定ありにする"}
-          </button>
-        </div>
-
-        {busyDates.length > 0 && (
-          <div className="mt-4">
-            <div className="flex items-center gap-2">
-              <span className="eyebrow">予定のある日</span>
-              <button
-                type="button"
-                className="btn btn-quiet btn-xs ml-auto"
-                onClick={() =>
-                  update((s) => {
-                    s.prefs.busyDates = [];
-                  })
-                }
-              >
-                すべて外す
-              </button>
-            </div>
-            <ul className="mt-1.5 grid grid-cols-2 gap-x-4 sm:grid-cols-3">
-              {busyDates.map((d) => (
-                <li
-                  key={d}
-                  className="flex items-center justify-between gap-1 border-b border-base-300 py-0.5 text-sm"
-                >
-                  <span className={cx("tabular-nums", weekdayTone(d) !== "text-ink2" && weekdayTone(d))}>
-                    {fmtDate(d)}
-                  </span>
-                  <button
-                    type="button"
-                    className="icon-btn size-8"
-                    aria-label={`${fmtDate(d)} の予定ありを外す`}
-                    onClick={() => toggleBusy(d)}
-                  >
-                    <IconX width={14} height={14} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <GoogleBusySettings frame="plain" />
       </section>
+
+      {guideOpen && <SubscribeGuide onClose={() => setGuideOpen(false)} />}
+    </Modal>
+  );
+}
+
+/** アプリごとの登録のしかた。要る人だけが開く */
+function SubscribeGuide({ onClose }: { onClose: () => void }) {
+  const steps: { app: string; body: string }[] = [
+    {
+      app: "Google カレンダー",
+      body: "パソコンで「Google カレンダーに追加」を押し、開いた画面で「追加」を押します。スマートフォンのアプリからは登録できません。",
+    },
+    {
+      app: "Apple カレンダー（Mac・iPhone）",
+      body: "登録する端末でこの画面を開き、「Apple カレンダーに追加」→「照会」（iPhone では「登録」）を押します。",
+    },
+    {
+      app: "そのほかのアプリ",
+      body: "リンクをコピーして、アプリの「URL で購読」や「照会カレンダーを追加」に貼り付けます。",
+    },
+  ];
+  return (
+    <Modal
+      title="登録のしかた"
+      onClose={onClose}
+      foot={
+        <button type="button" className="btn btn-quiet" onClick={onClose}>
+          閉じる
+        </button>
+      }
+    >
+      <div data-guide className="grid gap-4 text-sm leading-relaxed">
+        <ol className="space-y-3">
+          {steps.map((s) => (
+            <li key={s.app}>
+              <b className="block">{s.app}</b>
+              <span className="text-ink2">{s.body}</span>
+            </li>
+          ))}
+        </ol>
+        <p className="border-t border-base-300 pt-3 text-ink2">
+          確定した予定が自動で反映されます。リンクを知っている人は誰でも予定を見られるので、知られたときは「リンクを作り直す」を押してください。古いリンクは使えなくなります。
+        </p>
+      </div>
     </Modal>
   );
 }

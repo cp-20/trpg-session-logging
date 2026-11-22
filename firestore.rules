@@ -4,6 +4,13 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function ownUser(userId) { return signedIn() && request.auth.uid == userId; }
     function owner(data) { return signedIn() && data.ownerId == request.auth.uid; }
+    // Discord 連携のサーバーがログインする「ボットの利用者」（メールとパスワード。src/lib/discord/bot-account.ts）。
+    // uid は node scripts/discord.ts setup-bot が利用者を作って書き込む。利用者の登録では uid を選べないので、ほかの人はボットになれない
+    function botUid() { return 'sn0k0ZTt6KXjYnPf46cZ6UqrYCo2'; }
+    function isBot() {
+      return request.auth != null && request.auth.uid == botUid()
+        && request.auth.token.firebase.sign_in_provider == 'password';
+    }
 
     match /users/{userId} {
       allow read, write: if ownUser(userId);
@@ -34,8 +41,8 @@ service cloud.firestore {
           exists(/databases/$(database)/documents/sharedLogs/$(slug)/members/$(request.auth.uid))
             ? get(/databases/$(database)/documents/sharedLogs/$(slug)/members/$(request.auth.uid)).data.linked == true
             : request.auth.uid in data.memberIds))
-        || (data.scope == 'public' && data.scenarioPolicy == 'public')
-        || (signedIn() && data.scope == 'passed' && data.scenarioPolicy == 'public'
+        || data.scope == 'public'
+        || (signedIn() && data.scope == 'passed'
           && exists(/databases/$(database)/documents/sharedLogs/$(slug)/access/$(request.auth.uid)))
       );
     }
@@ -49,11 +56,10 @@ service cloud.firestore {
     }
     function validShare() {
       let data = request.resource.data;
+      // scenarioPolicy は旧クライアントが書いていた欄。受け付けるだけで、読み書きの条件には使わない
       return data.keys().hasOnly(['ownerId', 'scope', 'memberIds', 'scenarioPolicy', 'revision', 'chunkCount'])
         && data.ownerId == request.auth.uid
         && data.scope in ['members', 'passed', 'public']
-        && data.scenarioPolicy in ['unknown', 'members', 'public']
-        && (data.scope == 'members' || data.scenarioPolicy == 'public')
         && data.memberIds is list && data.memberIds.size() <= 500
         && data.revision is string
         && data.chunkCount is int && data.chunkCount > 0 && data.chunkCount <= 200;
@@ -79,7 +85,7 @@ service cloud.firestore {
       match /access/{userId} {
         allow get, delete: if ownUser(userId);
         allow create, update: if ownUser(userId)
-          && share(slug).scope == 'passed' && share(slug).scenarioPolicy == 'public'
+          && share(slug).scope == 'passed'
           && request.resource.data.keys().hasOnly(['passed'])
           && request.resource.data.passed == true;
       }
@@ -133,9 +139,135 @@ service cloud.firestore {
         && request.resource.data.updatedAt is timestamp;
       allow delete: if owner(resource.data);
     }
+    // ユーザー ID: 半角の英小文字・数字・_ で 3〜20 文字。handles と userHandles を同じ書き込みで一度だけ作り、変えも消しもできない（P14）。
+    // handles は ID が空いているかの確かめとプロフィールの URL のために 1 件ずつ読める（一覧は不可。名前では探せない）
+    function validHandle(handle) {
+      return handle.size() >= 3 && handle.size() <= 20
+        && handle.matches('^[a-z][a-z0-9_]*[a-z0-9]$') && !handle.matches('.*__.*')
+        && !(handle in ['admin', 'administrator', 'api', 'app', 'calendar', 'characters', 'demo', 'edit', 'feedback', 'help', 'home', 'invite', 'join', 'licenses', 'login', 'logout', 'me', 'mod', 'moderator', 'new', 'null', 'official', 'privacy', 'root', 'scenarios', 'sessions', 'settings', 'share', 'signin', 'signup', 'staff', 'support', 'system', 'tables', 'takufu', 'terms', 'undefined', 'upload', 'user', 'users', 'welcome']);
+    }
+    match /handles/{handle} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if signedIn() && validHandle(handle)
+        && request.resource.data.keys().hasOnly(['uid', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt is timestamp
+        && !exists(/databases/$(database)/documents/userHandles/$(request.auth.uid))
+        && getAfter(/databases/$(database)/documents/userHandles/$(request.auth.uid)).data.handle == handle;
+      allow update, delete: if false;
+    }
+    match /userHandles/{userId} {
+      allow get: if ownUser(userId);
+      allow list: if false;
+      allow create: if ownUser(userId)
+        && request.resource.data.keys().hasOnly(['handle', 'createdAt'])
+        && request.resource.data.handle is string
+        && request.resource.data.createdAt is timestamp
+        && !exists(/databases/$(database)/documents/handles/$(request.resource.data.handle))
+        && getAfter(/databases/$(database)/documents/handles/$(request.resource.data.handle)).data.uid == userId;
+      allow update, delete: if false;
+    }
+
+    // 卓の招待リンク: 推測できないトークン名の文書を、リンクを知るログイン済みの人だけが 1 件ずつ読める（一覧は不可）。
+    // 加わる人は自分の joins だけを書け、卓を作った人だけが joins を一覧して取り込む
+    function tableInvite(token) {
+      return get(/databases/$(database)/documents/tableInvites/$(token)).data;
+    }
+    function inviteOpen(data) {
+      return !('expiresAt' in data) || data.expiresAt > request.time;
+    }
+    function validTableInvite() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['ownerId', 'tableId', 'tableName', 'image', 'members', 'createdAt', 'expiresAt'])
+        && data.ownerId == request.auth.uid
+        && data.tableId is string && data.tableId.size() > 0 && data.tableId.size() <= 100
+        && data.tableName is string && data.tableName.size() > 0 && data.tableName.size() <= 100
+        && data.image is string && data.image.size() <= 4096
+        && data.members is list && data.members.size() <= 50
+        && data.createdAt is timestamp
+        && (!('expiresAt' in data) || (data.expiresAt is timestamp && data.expiresAt > request.time
+          && data.expiresAt <= request.time + duration.value(31, 'd')));
+    }
+    match /tableInvites/{token} {
+      allow get: if signedIn() && (owner(resource.data) || inviteOpen(resource.data));
+      allow list: if false;
+      allow create: if signedIn() && token.size() >= 32 && validTableInvite();
+      allow update: if owner(resource.data) && validTableInvite()
+        && request.resource.data.tableId == resource.data.tableId;
+      allow delete: if owner(resource.data);
+      match /joins/{userId} {
+        allow get: if ownUser(userId) || owner(tableInvite(token));
+        allow list: if owner(tableInvite(token));
+        allow create, update: if ownUser(userId) && inviteOpen(tableInvite(token))
+          && request.resource.data.keys().hasOnly(['handle', 'displayName', 'color', 'image', 'joinedAt'])
+          && request.resource.data.handle == get(/databases/$(database)/documents/userHandles/$(userId)).data.handle
+          && request.resource.data.displayName is string
+          && request.resource.data.displayName.size() > 0 && request.resource.data.displayName.size() <= 100
+          && request.resource.data.color is string && request.resource.data.color.matches('^#[0-9a-fA-F]{6}$')
+          && request.resource.data.image is string && request.resource.data.image.size() <= 4096
+          && request.resource.data.joinedAt is timestamp;
+        allow delete: if ownUser(userId) || owner(tableInvite(token));
+      }
+    }
+    // 卓の日程調整（src/lib/table-polls.ts）: 定義は作った人だけが書き、回答は memberIds の人が自分の分だけ書く。
+    // 読めるのは memberIds の人だけ（一覧も「memberIds に自分を含む」問い合わせに限る）
+    function validPoll() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['tableId', 'ownerId', 'tableOwnerId', 'memberIds', 'title', 'note', 'systemId',
+          'candidates', 'responses', 'status', 'confirmedCandidateId', 'discord', 'updatedAt'])
+        && data.ownerId == request.auth.uid
+        && data.tableId is string && data.tableId.size() > 0 && data.tableId.size() <= 100
+        && (!('tableOwnerId' in data) || (data.tableOwnerId is string && data.tableOwnerId.size() <= 128))
+        && data.memberIds is list && data.memberIds.size() <= 50 && request.auth.uid in data.memberIds
+        && data.title is string && data.title.size() <= 200
+        && (!('note' in data) || (data.note is string && data.note.size() <= 2000))
+        && (!('systemId' in data) || (data.systemId is string && data.systemId.size() <= 100))
+        && data.candidates is list && data.candidates.size() > 0 && data.candidates.size() <= 30
+        && data.responses is map && data.responses.size() <= 50
+        && data.status in ['poll', 'confirmed']
+        && (!('confirmedCandidateId' in data) || data.confirmedCandidateId is string)
+        && (!('discord' in data) || data.discord is map)
+        && data.updatedAt == request.time;
+    }
+    function validAnswers(answers) {
+      return answers is map && answers.size() <= 30 && answers.values().hasOnly(['ok', 'maybe', 'ng']);
+    }
+    match /tablePolls/{eventId} {
+      // まだない文書を読めるのは、作った人がはじめて書き出すとき（トランザクションで中身を確かめる）のため
+      allow get: if (signedIn() && (resource == null || request.auth.uid in resource.data.memberIds)) || isBot();
+      allow list: if (signedIn() && request.auth.uid in resource.data.memberIds) || isBot();
+      allow create: if signedIn() && eventId.size() <= 100 && validPoll();
+      allow update: if (owner(resource.data) && validPoll() && request.resource.data.tableId == resource.data.tableId)
+        // 卓の作成者は確定だけできる（canConfirmPoll と同じ）
+        || (signedIn() && resource.data.get('tableOwnerId', '') == request.auth.uid && resource.data.status == 'poll'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'confirmedCandidateId', 'updatedAt'])
+          && request.resource.data.status == 'confirmed' && request.resource.data.confirmedCandidateId is string
+          && request.resource.data.updatedAt == request.time)
+        // メンバーは調整中のあいだ、自分の回答だけを書ける
+        || (signedIn() && request.auth.uid in resource.data.memberIds && resource.data.status == 'poll'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['responses', 'updatedAt'])
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.responses.diff(resource.data.responses).affectedKeys().hasOnly([request.auth.uid])
+          && (!(request.auth.uid in request.resource.data.responses)
+            || validAnswers(request.resource.data.responses[request.auth.uid])))
+        // Discord 連携のボット: 調整中のあいだ、メンバー 1 人の回答だけを書ける（Discord で回答した人。src/lib/discord/firestore-store.ts）
+        || (isBot() && resource.data.status == 'poll'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['responses', 'updatedAt'])
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.responses.diff(resource.data.responses).affectedKeys().size() == 1
+          && request.resource.data.responses.diff(resource.data.responses).affectedKeys().hasOnly(resource.data.memberIds))
+        // Discord 連携のボット: Discord に出したメッセージの在りかだけを書ける
+        || (isBot() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['discord'])
+          && request.resource.data.discord is map
+          && request.resource.data.discord.keys().hasOnly(['guildId', 'channelId', 'messageId', 'scheduledEventId']));
+      allow delete: if owner(resource.data);
+    }
     match /sharedCharacters/{characterId} {
       allow get: if true;
-      allow list, delete: if false;
+      // Discord 連携のボット: 本人の公開中のキャラクターを並べる（`/卓譜 キャラクター`。問い合わせに enabled == true が要る）
+      allow list: if isBot() && resource.data.enabled == true;
+      allow delete: if false;
       allow create, update: if signedIn()
         && (!exists(/databases/$(database)/documents/sharedCharacters/$(characterId)) || owner(resource.data))
         && request.resource.data.keys().hasOnly(['ownerId', 'enabled', 'revision', 'chunkCount'])
@@ -154,6 +286,32 @@ service cloud.firestore {
             || owner(get(/databases/$(database)/documents/sharedCharacters/$(characterId)).data));
         allow delete: if owner(resource.data);
       }
+    }
+
+    // Discord 連携（src/lib/discord/）: Discord の利用者・チャンネルとのつながり、出したメッセージ、お知らせの印。
+    // 読み書きできるのはボットだけ。利用者は、自分の Discord とのつながり（userDiscord）を読む・消すことだけできる
+    // （消すと、Discord からの回答はもうその人として扱わない。src/lib/discord/rules.emulator.test.ts）
+    match /userDiscord/{userId} {
+      allow read, write: if isBot();
+      allow get, delete: if ownUser(userId);
+    }
+    match /discordLinks/{discordUserId} {
+      allow read, write: if isBot();
+    }
+    match /discordOAuthStates/{state} {
+      allow read, write: if isBot();
+    }
+    match /discordLinkCodes/{code} {
+      allow read, write: if isBot();
+    }
+    match /tableDiscord/{tableId} {
+      allow read, write: if isBot();
+    }
+    match /discordEvents/{eventId} {
+      allow read, write: if isBot();
+    }
+    match /discordReminders/{key} {
+      allow read, write: if isBot();
     }
   }
 }

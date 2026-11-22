@@ -6,17 +6,18 @@
  */
 import { useMemo, useState } from "react";
 import { AvatarStack, CharAvatar } from "../components/identity";
-import { IconChevronRight, IconPlus, IconUpload, IconUsersGroup } from "../components/icons";
+import { IconChevronRight, IconPlus, IconUpload, IconTable } from "../components/icons";
 import { EmptyState, PageHead, SectionTitle, SplitLayout } from "../components/ui";
-import { SYSTEMS } from "../data/systems";
 import { fmtDateShort, todayStr } from "../lib/format";
 import { Link, useNavigate } from "../lib/router";
 import { myScheduleView, pollCandidates, relativeDayLabel } from "../lib/schedule";
 import { sessionsOfMe, useStore } from "../store";
 import type { TableEvent, User } from "../types";
 import { EventDetailModal, EventRow, PollDetailModal } from "./Calendar";
-import { currentStat, lastPlayed } from "./Characters";
+import { lastPlayed } from "./Characters";
+import { carriedValues } from "../lib/character-growth";
 import { SessionRow } from "./Sessions";
+import { sessionStart } from "../lib/sittings";
 
 const RECENT_SESSIONS = 6;
 const NEXT_EVENTS = 3;
@@ -47,7 +48,10 @@ export default function Home() {
   const [answerPollId, setAnswerPollId] = useState<string | null>(null);
 
   const schedule = useMemo(() => myScheduleView(state, today), [state, today]);
-  const recent = useMemo(() => [...sessionsOfMe(state)].sort((a, b) => b.t0 - a.t0), [state]);
+  const recent = useMemo(
+    () => [...sessionsOfMe(state)].sort((a, b) => sessionStart(b) - sessionStart(a)),
+    [state],
+  );
   const myChars = useMemo(
     () =>
       Object.values(state.characters)
@@ -81,12 +85,12 @@ export default function Home() {
                   <IconUpload width={16} height={16} /> ログを取り込む
                 </Link>
                 <Link to="/tables" className="btn">
-                  <IconUsersGroup width={16} height={16} /> いつものメンバーで卓をつくる
+                  <IconTable width={16} height={16} /> いつものメンバーで卓をつくる
                 </Link>
               </>
             }
           >
-            CCFOLIA・Udonarium・テキストのログを入れると、日時と参加者がそのまま記録になります。
+            CCFOLIA・Udonarium のログを入れると、日時と参加者がそのまま記録になります。
           </EmptyState>
         </div>
       </>
@@ -217,9 +221,8 @@ export default function Home() {
         <ul className="surface list">
           {myChars.slice(0, 4).map((c) => {
             const last = lastPlayed(c);
-            const sys = SYSTEMS[c.systemId];
-            const mainStat = sys?.stats[0];
-            const mainVal = mainStat ? currentStat(c, mainStat.key) : undefined;
+            /* 卓をまたいで続く値（SAN など）だけ。続かない値（共鳴・幸運・HP）は出さない（P3） */
+            const mainStat = carriedValues(c)[0];
             return (
               <li key={c.id}>
                 <Link
@@ -231,9 +234,9 @@ export default function Home() {
                     <div className="truncate text-sm font-bold leading-snug">{c.name}</div>
                     {c.archetype && <div className="truncate text-xs text-ink2">{c.archetype}</div>}
                     <div className="meta mt-0.5 text-xs tabular-nums">
-                      {mainStat && mainVal != null && (
+                      {mainStat && (
                         <span>
-                          {mainStat.label} <b className="text-base-content">{mainVal}</b>
+                          {mainStat.label} <b className="text-base-content">{mainStat.value}</b>
                         </span>
                       )}
                       <span>{last ? `${fmtDateShort(last)} に遊んだ` : "まだ遊んでいない"}</span>

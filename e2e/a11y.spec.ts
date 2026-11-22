@@ -79,24 +79,32 @@ test("スキップリンクでメインコンテンツへ直接移動でき、�
   await expect(dialog).toHaveCount(0);
   await expect(importBtn).toBeFocused();
 
-  // Select keyboard navigation on /scenarios/new
+  // Combobox keyboard navigation on /scenarios/new（システムは BCDice の全システムから探して選ぶ）
   await page.goto("/scenarios/new");
   // URL 読み込みが主。手入力の欄は「手で入力する」で開く
   await page.getByRole("button", { name: "手で入力する" }).click();
-  const systemTrigger = page.getByRole("button", { name: "システム" });
-  await systemTrigger.focus();
-  await page.keyboard.press("Enter");
+  const systemBox = page.getByRole("combobox", { name: "システム" });
+  await expect(systemBox).toHaveValue("クトゥルフ神話TRPG 7版");
+  await systemBox.focus();
+  await page.keyboard.press("ArrowDown");
   await expect(page.getByRole("listbox")).toBeVisible();
+  await expect(systemBox).toHaveAttribute("aria-expanded", "true");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("listbox")).toHaveCount(0);
-  await expect(systemTrigger).toBeFocused();
-  await expect(systemTrigger).not.toContainText("クトゥルフ神話TRPG 7版");
+  await expect(systemBox).toBeFocused();
+  await expect(systemBox).not.toHaveValue("クトゥルフ神話TRPG 7版");
+  // 読みで探せる
+  await systemBox.fill("だぶるくろす");
+  await expect(page.getByRole("option", { name: "ダブルクロス2nd,3rd" })).toBeVisible();
   await page.keyboard.press("Enter");
+  await expect(systemBox).toHaveValue("ダブルクロス2nd,3rd");
+  await page.keyboard.press("ArrowDown");
   await expect(page.getByRole("listbox")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("listbox")).toHaveCount(0);
-  await expect(systemTrigger).toBeFocused();
+  await expect(systemBox).toBeFocused();
+  await expect(systemBox).toHaveValue("ダブルクロス2nd,3rd");
 
   // MonthCalendar roving focus & arrow key navigation on /calendar
   await page.goto("/calendar");
@@ -132,16 +140,6 @@ test("200% 拡大相当（640x400）でもモーダルの見出しと操作が�
   expect(charBox!.y).toBeGreaterThanOrEqual(0);
   expect(charBox!.y + charBox!.height).toBeLessThanOrEqual(402);
   await expect(charDialog.getByRole("button", { name: "閉じる" })).toBeVisible();
-  await page.keyboard.press("Escape");
-
-  await page.goto("/upload");
-  await page.getByRole("button", { name: /通過履歴を取り込む/ }).click();
-  const histDialog = page.getByRole("dialog");
-  await expect(histDialog).toBeVisible();
-  const histBox = await histDialog.boundingBox();
-  expect(histBox).not.toBeNull();
-  expect(histBox!.y).toBeGreaterThanOrEqual(0);
-  expect(histBox!.y + histBox!.height).toBeLessThanOrEqual(402);
   await page.keyboard.press("Escape");
 });
 

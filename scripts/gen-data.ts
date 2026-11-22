@@ -641,7 +641,6 @@ const scenarios = [
     systemId: "coc7",
     source: "booth",
     sourceUrl: "https://booth.pm/ja/items/4710900",
-    policy: "public",
     emoji: "CoC7",
     bg: "#efe6d8",
     tags: ["学校", "クローズド", "4〜5時間"],
@@ -657,7 +656,6 @@ const scenarios = [
     systemId: "coc7",
     source: "booth",
     sourceUrl: "https://booth.pm/ja/items/4821337",
-    policy: "public",
     emoji: "CoC7",
     bg: "#e8dfd5",
     tags: ["港町", "キャンペーン", "全3話"],
@@ -672,7 +670,6 @@ const scenarios = [
     author: "夜霜（自作）",
     systemId: "coc7",
     source: "manual",
-    policy: "members",
     emoji: "CoC7",
     bg: "#ede4d7",
     tags: ["学校", "短編"],
@@ -688,7 +685,6 @@ const scenarios = [
     systemId: "coc7",
     source: "booth",
     sourceUrl: "https://booth.pm/ja/items/4501922",
-    policy: "passed",
     emoji: "CoC7",
     bg: "#efe8da",
     tags: ["旧家", "調査"],
@@ -703,7 +699,6 @@ const scenarios = [
     systemId: "coc7",
     source: "talto",
     sourceUrl: "https://talto.io/works/19220",
-    policy: "public",
     emoji: "CoC7",
     bg: "#e8e2d8",
     tags: ["音楽", "シティ"],
@@ -718,7 +713,6 @@ const scenarios = [
     systemId: "emoklore",
     source: "talto",
     sourceUrl: "https://talto.io/works/20113",
-    policy: "public",
     emoji: "エモ",
     bg: "#f0e1dc",
     tags: ["夜祭", "2〜3PL"],
@@ -734,7 +728,6 @@ const scenarios = [
     systemId: "sw25",
     source: "talto",
     sourceUrl: "https://talto.io/works/18842",
-    policy: "public",
     emoji: "SW",
     bg: "#f0e6d2",
     tags: ["初期作成", "1回完結"],
@@ -749,7 +742,6 @@ const scenarios = [
     systemId: "sw25",
     source: "booth",
     sourceUrl: "https://booth.pm/ja/items/4630221",
-    policy: "passed",
     emoji: "SW",
     bg: "#e7eadc",
     tags: ["野外探索", "Lv3〜4"],
@@ -763,7 +755,6 @@ const scenarios = [
     author: "雨宿り文庫",
     systemId: "madamis",
     source: "manual",
-    policy: "passed",
     emoji: "MM",
     bg: "#e6e2da",
     tags: ["館もの", "4人用"],
@@ -778,7 +769,6 @@ const scenarios = [
     author: "宵待舎",
     systemId: "madamis",
     source: "manual",
-    policy: "members",
     emoji: "MM",
     bg: "#e6eadb",
     tags: ["和風", "4人用"],
@@ -794,7 +784,6 @@ const scenarios = [
     systemId: "coc7",
     source: "booth",
     sourceUrl: "https://booth.pm/ja/items/4910880",
-    policy: "members",
     emoji: "CoC7",
     bg: "#ece0d2",
     tags: ["温泉宿", "伝奇"],
@@ -809,7 +798,6 @@ const scenarios = [
     systemId: "coc7",
     source: "talto",
     sourceUrl: "https://talto.io/works/20500",
-    policy: "passed",
     emoji: "CoC7",
     bg: "#ebe5dc",
     tags: ["2PL", "冬"],
@@ -824,7 +812,6 @@ const scenarios = [
     systemId: "coc7",
     source: "booth",
     sourceUrl: "https://booth.pm/ja/items/5012410",
-    policy: "public",
     emoji: "CoC7",
     bg: "#e6e1d9",
     tags: ["鉄道", "タイマン可", "2〜3時間"],
@@ -840,7 +827,6 @@ const scenarios = [
     systemId: "emoklore",
     source: "talto",
     sourceUrl: "https://talto.io/works/21405",
-    policy: "passed",
     emoji: "エモ",
     bg: "#ebd9df",
     tags: ["現代", "田舎", "3〜4時間"],
@@ -857,7 +843,6 @@ const scenarios = [
     systemId: "emoklore",
     source: "talto",
     sourceUrl: "https://talto.io/works/22018",
-    policy: "public",
     emoji: "エモ",
     bg: "#e9dfe6",
     tags: ["天文台", "2PL"],
@@ -873,7 +858,6 @@ const scenarios = [
     systemId: "sw25",
     source: "booth",
     sourceUrl: "https://booth.pm/ja/items/5104200",
-    policy: "public",
     emoji: "SW",
     bg: "#e5ebd6",
     tags: ["遺跡探索", "Lv5〜6", "4人向け"],
@@ -889,7 +873,6 @@ const scenarios = [
     systemId: "madamis",
     source: "booth",
     sourceUrl: "https://booth.pm/ja/items/5189300",
-    policy: "passed",
     emoji: "MM",
     bg: "#eae2d8",
     tags: ["劇場", "5人用", "密室"],
@@ -2021,19 +2004,22 @@ for (const s of sessions) {
   }
 
   let channels: ReturnType<typeof genMessages> = [];
-  let dates = s.dates;
-  let t0: number;
-  let t1: number;
+  /** 遊んだ時間帯（集まり）。ログがあれば発言時刻から、4 時間以上空いたところで区切る（src/lib/sittings.ts と同じ） */
+  let sittings: { start: number; end: number }[];
   if (s.hasLog) {
     channels = genMessages(s);
     const all = channels.flatMap((c) => c.msgs.map((m) => m.ts)).sort((a, b) => a - b);
-    t0 = all[0]!;
-    t1 = all[all.length - 1]!;
-    dates = [...new Set(all.map((x) => new Date((x + JST - 6 * 3600) * 1000).toISOString().slice(0, 10)))];
+    sittings = [];
+    for (const ts of all) {
+      const cur = sittings.at(-1);
+      if (cur && ts - cur.end < 4 * 3600) cur.end = ts;
+      else sittings.push({ start: ts, end: ts });
+    }
   } else {
-    t0 = jstEpoch(s.dates[0]!, s.start);
-    t1 = t0 + ri(3, 5) * 3600 + ri(0, 45) * 60;
+    const start = jstEpoch(s.dates[0]!, s.start);
+    sittings = [{ start, end: start + ri(3, 5) * 3600 + ri(0, 45) * 60 }];
   }
+  const t1 = sittings.at(-1)!.end;
 
   const speakerIcons: Record<string, string> = {};
   const owner = users.find((u) => u.id === s.ownerId);
@@ -2069,12 +2055,12 @@ for (const s of sessions) {
     players,
     speakerIcons,
     createdAt: new Date((t1 + JST) * 1000).toISOString().slice(0, 19),
-    dates,
-    t0,
-    t1,
+    sittings,
     ...(IMPRESSIONS_BY_LOG[s.id] ? { impressions: IMPRESSIONS_BY_LOG[s.id] } : {}),
   };
 }
+
+const firstStart = (l: Record<string, unknown>) => (l.sittings as { start: number }[])[0]!.start;
 
 const characters: Record<string, Record<string, unknown>> = {};
 for (const [, [id, owner, name, systemId, color, archetype, bio, tags, stats]] of charsDef.entries()) {
@@ -2099,7 +2085,7 @@ for (const [, [id, owner, name, systemId, color, archetype, bio, tags, stats]] o
 
   Object.values(logs)
     .filter((l) => Boolean(l.hasLog))
-    .sort((a, b) => Number(a.t0) - Number(b.t0))
+    .sort((a, b) => firstStart(a) - firstStart(b))
     .forEach((l) => {
       const playersMap = l.players as Record<string, { linked: boolean; characterIds: string[] }>;
       const p = playersMap[owner];
@@ -2112,7 +2098,7 @@ for (const [, [id, owner, name, systemId, color, archetype, bio, tags, stats]] o
         }),
       );
       if (rolls.length === 0 && systemId !== "madamis") return;
-      const date = (l.dates as string[])[0]!;
+      const date = new Date((firstStart(l) + JST - 6 * 3600) * 1000).toISOString().slice(0, 10);
       const delta: Record<string, { before: number; after: number }> = {};
       if (systemId === "coc7" && stats.san != null) {
         const prevAfter = sessionsStat.at(-1)?.delta.san?.after ?? stats.san;

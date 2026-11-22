@@ -7,13 +7,14 @@ import {
   LoadMore,
   PageHead,
   Seg,
-  Select,
+  Combobox,
   SysBadge,
   useVisibleCount,
 } from "../components/ui";
 import { AvatarStack } from "../components/identity";
 import { SYSTEMS, SYSTEM_LIST } from "../data/systems";
-import { fmtDur, sessionPlayMinutes, todayStr } from "../lib/time";
+import { systemOptions } from "../lib/system-options";
+import { fmtDur, sessionPlayMinutes, todayStr, sessionStart, sessionDays } from "../lib/time";
 import { sessionsOfMe, useStore } from "../store";
 import type { Log } from "../types";
 
@@ -67,7 +68,11 @@ export const SessionRow = memo(function SessionRow({
 
   return (
     <Link to={href} className="group row-interactive flex items-start gap-4 px-4 py-4 sm:px-5">
-      <DateBlock date={log.dates[0] ?? "2026-01-01"} days={log.dates.length} showMonth={showMonth} />
+      <DateBlock
+        date={sessionDays(log)[0] ?? "2026-01-01"}
+        times={log.sittings.length}
+        showMonth={showMonth}
+      />
       <div className="min-w-0 flex-1">
         <h3 className="truncate text-base font-bold leading-snug transition-colors group-hover:text-primary">
           {log.title}
@@ -135,7 +140,7 @@ export default function Sessions() {
       if (needle && !(searchIndex.get(l.id) ?? "").includes(needle)) return false;
       return true;
     });
-    return list.sort((a, b) => b.t0 - a.t0);
+    return list.sort((a, b) => sessionStart(b) - sessionStart(a));
   }, [myLogs, deferredQ, sys, tableFilter, role, state.me, searchIndex]);
 
   const shownLogs = useMemo(() => logs.slice(0, visibleCount), [logs, visibleCount]);
@@ -145,7 +150,7 @@ export default function Sessions() {
     const out: { key: string; label: string; items: Log[] }[] = [];
     const thisYear = Number(todayStr().slice(0, 4));
     for (const l of shownLogs) {
-      const [y, m] = (l.dates[0] ?? "2026-01-01").split("-").map(Number);
+      const [y, m] = (sessionDays(l)[0] ?? "2026-01-01").split("-").map(Number);
       const key = `${y}-${m}`;
       let g = out[out.length - 1];
       if (!g || g.key !== key) {
@@ -160,7 +165,7 @@ export default function Sessions() {
   const sysOptions = useMemo(
     () => [
       { value: "all", label: "すべてのシステム" },
-      ...SYSTEM_LIST.filter((s) => usedSystems.has(s.id)).map((s) => ({ value: s.id, label: s.name })),
+      ...systemOptions(SYSTEM_LIST.filter((s) => usedSystems.has(s.id))),
     ],
     [usedSystems],
   );
@@ -186,16 +191,14 @@ export default function Sessions() {
             action={
               <div className="flex flex-wrap justify-center gap-2">
                 <button className="btn btn-primary" onClick={() => nav({ to: "/upload" })}>
-                  <IconUpload width={16} height={16} /> ログを取り込む
+                  <IconUpload width={16} height={16} /> ログから記録
                 </button>
                 <button className="btn" onClick={() => nav({ to: "/upload?manual=1" })}>
-                  <IconPlus width={16} height={16} /> 日時と参加者だけ記録
+                  <IconPlus width={16} height={16} /> ログなしで記録
                 </button>
               </div>
             }
-          >
-            CCFOLIA・Udonarium・テキストのログに対応しています。ログがなくても記録は残せます。
-          </EmptyState>
+          />
         </div>
       </div>
     );
@@ -234,7 +237,7 @@ export default function Sessions() {
         {(sysOptions.length > 2 || tableOptions.length > 2) && (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {sysOptions.length > 2 && (
-              <Select
+              <Combobox
                 ariaLabel="システムで絞り込み"
                 value={sys}
                 options={sysOptions}
@@ -243,7 +246,7 @@ export default function Sessions() {
               />
             )}
             {tableOptions.length > 2 && (
-              <Select
+              <Combobox
                 ariaLabel="卓で絞り込み"
                 value={tableFilter}
                 options={tableOptions}

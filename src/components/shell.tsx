@@ -2,21 +2,22 @@ import { useEffect, useMemo, useRef } from "react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 import { buildFeedIcs, publishFeed } from "../lib/calendar-feed";
 import { Link, usePathname } from "../lib/router";
-import { download, todayStr } from "../lib/time";
+import { download, todayStr, sessionStart } from "../lib/time";
 import { useStoreState, useSyncStatus } from "../store";
 import {
   IconAlert,
   IconBooks,
   IconCalendar,
   IconHome,
-  IconIdBadge,
+  IconCharacter,
   IconListDetails,
   IconPlus,
   IconSettings,
-  IconUsersGroup,
+  IconTable,
 } from "./icons";
 import { LogoMark, TableMark, cx } from "./ui";
 import { Avatar, CharAvatar } from "./identity";
+import { userHref } from "../lib/people";
 
 type NavItem = { to: string; label: string; short: string; Icon: ComponentType<SVGProps<SVGSVGElement>> };
 
@@ -25,8 +26,8 @@ const NAV: NavItem[] = [
   { to: "/home", label: "ホーム", short: "ホーム", Icon: IconHome },
   { to: "/sessions", label: "セッション", short: "記録", Icon: IconListDetails },
   { to: "/calendar", label: "カレンダー", short: "予定", Icon: IconCalendar },
-  { to: "/tables", label: "卓", short: "卓", Icon: IconUsersGroup },
-  { to: "/characters", label: "キャラクター", short: "キャラ", Icon: IconIdBadge },
+  { to: "/tables", label: "卓", short: "卓", Icon: IconTable },
+  { to: "/characters", label: "キャラクター", short: "キャラ", Icon: IconCharacter },
   { to: "/scenarios", label: "シナリオ", short: "シナリオ", Icon: IconBooks },
 ];
 
@@ -52,17 +53,16 @@ function SaveBanners() {
     });
   }
   if (banners.length === 0) return null;
+  // 本文の列（画面ごとに幅が違う）に合わせず、画面の枠（上部バー）に沿う帯にする（P13: 幅のずれたカードを本文の上に置かない）
   return (
-    <div className="space-y-2 mb-6">
+    <div className="divide-y divide-base-300 border-b border-base-300">
       {banners.map((b, i) => (
         <div
           key={i}
           role="alert"
           className={cx(
-            "flex flex-wrap items-center gap-3 rounded-box border px-4 py-3 text-sm",
-            b.kind === "error"
-              ? "border-error/40 bg-error/10 text-base-content"
-              : "border-warning/40 bg-warning/10 text-base-content",
+            "flex flex-wrap items-center gap-3 px-4 py-3 text-sm sm:px-8",
+            b.kind === "error" ? "bg-error/10 text-base-content" : "bg-warning/10 text-base-content",
           )}
         >
           <IconAlert
@@ -94,43 +94,6 @@ function SaveBanners() {
         </div>
       ))}
     </div>
-  );
-}
-
-function OnboardingBanner() {
-  const { state, update } = useStoreState();
-  if (state.prefs?.onboardingDone) return null;
-  return (
-    <section
-      aria-label="はじめに"
-      className="mb-8 rounded-box border border-base-300 bg-base-100 p-5 flex flex-col gap-4 sm:flex-row sm:items-center"
-    >
-      <div className="flex-1 min-w-0">
-        <h2 className="font-bold">卓譜へようこそ</h2>
-        <p className="text-sm text-ink2 leading-relaxed mt-1">
-          プロフィールと記録は、はじめは一緒に遊んだ人に見える設定です。設定からいつでも変えられます。
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2 shrink-0">
-        <Link to="/upload" className="btn btn-sm">
-          最初のセッションを記録
-        </Link>
-        <Link to="/settings" className="btn btn-sm">
-          公開設定
-        </Link>
-        <button
-          type="button"
-          className="btn btn-sm btn-quiet"
-          onClick={() =>
-            update((s) => {
-              s.prefs.onboardingDone = true;
-            })
-          }
-        >
-          閉じる
-        </button>
-      </div>
-    </section>
   );
 }
 
@@ -168,13 +131,13 @@ function Sidebar() {
     for (const l of Object.values(state.logs)) {
       if (l.tableId) {
         const prev = latestByTable.get(l.tableId) ?? 0;
-        if (l.t0 > prev) latestByTable.set(l.tableId, l.t0);
+        if (sessionStart(l) > prev) latestByTable.set(l.tableId, sessionStart(l));
       }
       const myCharIds = l.players[state.me]?.characterIds;
       if (myCharIds) {
         for (const cid of myCharIds) {
           const prev = latestByChar.get(cid) ?? 0;
-          if (l.t0 > prev) latestByChar.set(cid, l.t0);
+          if (sessionStart(l) > prev) latestByChar.set(cid, sessionStart(l));
         }
       }
     }
@@ -228,12 +191,6 @@ function Sidebar() {
                       : "text-base-content/75 font-medium hover:bg-base-200 hover:text-base-content",
                   )}
                 >
-                  {active && (
-                    <span
-                      className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-primary"
-                      aria-hidden
-                    />
-                  )}
                   <Icon width={20} height={20} className="shrink-0" />
                   {label}
                 </Link>
@@ -263,7 +220,7 @@ function Sidebar() {
                             : "text-base-content/75 font-medium hover:bg-base-200 hover:text-base-content",
                         )}
                       >
-                        <TableMark name={t.name} size={20} />
+                        <TableMark table={t} size={20} />
                         <span className="truncate">{t.name}</span>
                       </Link>
                     );
@@ -306,10 +263,10 @@ function Sidebar() {
         <SyncStatus />
         <div className="flex items-center gap-1">
           <Link
-            to={`/users/${state.me}`}
+            to={userHref(me)}
             className={cx(
               "flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 transition-colors hover:bg-base-200",
-              isActive(`/users/${state.me}`) && "bg-primary/10 text-primary",
+              isActive(userHref(me)) && "bg-primary/10 text-primary",
             )}
           >
             <Avatar u={me} size={28} />
@@ -432,13 +389,12 @@ export function Shell({ children }: { children: ReactNode }) {
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileTopBar />
+        <SaveBanners />
         <main
           id="main-content"
           tabIndex={-1}
           className="mx-auto w-full max-w-6xl flex-1 px-4 pb-28 pt-6 sm:px-8 sm:pt-8 lg:pb-16"
         >
-          <SaveBanners />
-          <OnboardingBanner />
           {children}
         </main>
       </div>

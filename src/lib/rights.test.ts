@@ -1,10 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { SYSTEMS } from "../data/systems";
+import { DETAILED_SYSTEM_IDS, SYSTEMS } from "../data/systems";
 import { RIGHTS_NOTICES, RIGHTS_ORDER, SYSTEM_RIGHTS, rightsNoticesFor } from "./rights";
 
 describe("権利表記", () => {
-  it("すべてのシステムに権利表記の要否が決まっている", () => {
-    expect(Object.keys(SYSTEM_RIGHTS).sort()).toEqual(Object.keys(SYSTEMS).sort());
+  it("能力値・技能まで持つシステムには権利表記の要否が決まっている", () => {
+    for (const id of DETAILED_SYSTEM_IDS) expect(SYSTEM_RIGHTS, id).toHaveProperty([id]);
+  });
+
+  it("権利者を書いたシステムはすべて実在する", () => {
+    for (const id of Object.keys(SYSTEM_RIGHTS)) expect(SYSTEMS, id).toHaveProperty([id]);
+  });
+
+  it("BCDice の一覧から作ったシステムも、表記が分からないものは何も出さずに通る", () => {
+    expect(rightsNoticesFor(Object.keys(SYSTEMS)).map((n) => n.id)).toEqual([...RIGHTS_ORDER]);
+    expect(rightsNoticesFor(["DoubleCross", "Cthulhu:Korean"])).toEqual([]);
+    expect(rightsNoticesFor(["PulpCthulhu", "SwordWorld2.0"]).map((n) => n.id)).toEqual([
+      "cthulhu",
+      "sword-world",
+    ]);
   });
 
   it("引数なしならすべての権利表記を表示順で返す", () => {

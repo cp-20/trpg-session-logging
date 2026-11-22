@@ -33,7 +33,7 @@ import {
   IconVideo,
   IconWorld,
 } from "./icons";
-import { DateInput, Field, Menu, Modal, SectionTitle, Seg, Select, Toggle, cx } from "./ui";
+import { Combobox, DateInput, Field, Menu, Modal, SectionTitle, Seg, Select, Toggle, cx } from "./ui";
 import { todayStr, uid } from "../lib/format";
 import {
   MEDIA_KINDS,
@@ -55,6 +55,7 @@ import {
   type SessionMedia,
 } from "../lib/session-media";
 import type { Log, State } from "../types";
+import { sessionStart, sessionDays } from "../lib/sittings";
 
 type Icon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -393,8 +394,8 @@ interface Draft {
 }
 
 function toDraft(m: SessionMedia | null, log: Log): Draft {
-  const start = m?.startedAt ?? (log.t0 || undefined);
-  const parts = start ? jstParts(start) : { date: log.dates[0] ?? "", time: "" };
+  const start = m?.startedAt ?? (sessionStart(log) || undefined);
+  const parts = start ? jstParts(start) : { date: sessionDays(log)[0] ?? "", time: "" };
   return {
     url: m?.url ?? "",
     kind: m?.kind ?? "recording",
@@ -541,7 +542,8 @@ function MediaEditor({
             />
           </Field>
           <Field label="誰の視点か" hint="秘匿 HO の視点録画など">
-            <Select
+            <Combobox
+              ariaLabel="誰の視点か"
               value={d.povUserId}
               options={[
                 { value: "", label: "指定しない" },

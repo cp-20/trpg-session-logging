@@ -5,12 +5,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 type TransportMode = "tunnel" | "tailscale" | "lan";
+/** 端末で開くアプリ。go は Expo Go、dev-client は expo-dev-client を入れた開発ビルド（Google ログインはこちらでしか試せない） */
+type DeviceClient = "go" | "dev-client";
 
 interface DeviceSessionInfo {
   mode: TransportMode;
+  client: DeviceClient;
   port: number;
   proxyUrl: string;
   expoGoUrl: string;
+  devClientUrl: string;
   loadingUrl: string;
   tailscaleUrl: string | null;
 }
@@ -47,13 +51,19 @@ function detectTailscaleIp(): string | null {
   }
 }
 
-function parseArgs(argv: string[], tailscaleIp: string | null): { port: number; mode: TransportMode } {
+function parseArgs(
+  argv: string[],
+  tailscaleIp: string | null,
+): { port: number; mode: TransportMode; client: DeviceClient } {
   let port = 8081;
+  let client: DeviceClient = "go";
   let explicitMode: TransportMode | null = null;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
-    if (arg === "--lan") {
+    if (arg === "--dev-client") {
+      client = "dev-client";
+    } else if (arg === "--lan") {
       explicitMode = "lan";
     } else if (arg === "--tailscale") {
       explicitMode = "tailscale";
@@ -78,7 +88,7 @@ function parseArgs(argv: string[], tailscaleIp: string | null): { port: number; 
 
   const mode: TransportMode =
     explicitMode ?? (commandExists("cloudflared") ? "tunnel" : tailscaleIp ? "tailscale" : "lan");
-  return { port, mode };
+  return { port, mode, client };
 }
 
 function startCloudflareTunnel(port: number): Promise<{ child: ChildProcess; url: string }> {
@@ -172,7 +182,7 @@ async function waitForPackager(port: number, expoChild: ChildProcess): Promise<v
 
 async function main(): Promise<void> {
   const tailscaleIp = detectTailscaleIp();
-  const { port, mode } = parseArgs(process.argv.slice(2), tailscaleIp);
+  const { port, mode, client } = parseArgs(process.argv.slice(2), tailscaleIp);
 
   let tunnelChild: ChildProcess | null = null;
   let tunnelUrl: string | null = null;
@@ -217,10 +227,14 @@ async function main(): Promise<void> {
     childEnv.REACT_NATIVE_PACKAGER_HOSTNAME = tailscaleIp;
   }
 
-  expoChild = spawn("pnpm", ["--dir", MOBILE_DIR, "exec", "expo", "start", "--go", "--port", String(port)], {
-    stdio: "inherit",
-    env: childEnv,
-  });
+  expoChild = spawn(
+    "pnpm",
+    ["--dir", MOBILE_DIR, "exec", "expo", "start", `--${client}`, "--port", String(port)],
+    {
+      stdio: "inherit",
+      env: childEnv,
+    },
+  );
 
   const exitPromise = new Promise<number>((resolve) => {
     expoChild!.on("exit", (code) => {
@@ -237,11 +251,16 @@ async function main(): Promise<void> {
   const baseHttpUrl = tunnelUrl ?? `http://${fallbackHost}:${port}`;
   const expoGoUrl = tunnelUrl ? `exps://${new URL(tunnelUrl).hostname}:443` : `exp://${fallbackHost}:${port}`;
 
+  /* 開発ビルドはアプリの URL スキーム経由で Metro の URL を受け取る */
+  const devClientUrl = `takufu://expo-development-client/?url=${encodeURIComponent(baseHttpUrl)}`;
+
   const session: DeviceSessionInfo = {
     mode,
+    client,
     port,
     proxyUrl: baseHttpUrl,
     expoGoUrl,
+    devClientUrl,
     loadingUrl: `${baseHttpUrl}/_expo/loading`,
     tailscaleUrl: tailscaleIp ? `exp://${tailscaleIp}:${port}` : null,
   };
@@ -251,7 +270,12 @@ async function main(): Promise<void> {
 
   console.log("\n[mobile:device] Real-device server is ready:");
   console.log(`  Mode          : ${session.mode}`);
-  console.log(`  Expo Go URL   : ${session.expoGoUrl}`);
+  if (client === "go") {
+    console.log(`  Expo Go URL   : ${session.expoGoUrl}`);
+  } else {
+    console.log(`  Dev client URL: ${session.devClientUrl}`);
+    console.log(`  (or enter in dev client): ${session.proxyUrl}`);
+  }
   console.log(`  Proxy / HTTPS : ${session.proxyUrl}`);
   if (session.tailscaleUrl) {
     console.log(`  Tailscale URL : ${session.tailscaleUrl}`);

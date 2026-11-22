@@ -8,42 +8,30 @@ vi.mock("expo-clipboard", () => ({
 import { classifyClipboardContent } from "./clipboard-import";
 
 describe("classifyClipboardContent", () => {
-  it("CCFOLIA 駒出力 JSON を探索者候補として認識する", () => {
-    const json = JSON.stringify({
-      kind: "character",
-      data: {
-        name: "遠沢澄花",
-        memo: "地方紙記者",
-        commands: "CC<=70 目星",
-        status: [
-          { label: "SAN", value: 52 },
-          { label: "HP", value: 11 },
-        ],
-      },
+  it("キャラシの URL を取り込み候補にし、コマ出力やテキストは候補にしない（P6）", () => {
+    expect(classifyClipboardContent("https://charaeno.com/7th/h_wQNXeiHPXDEDtG3r2ac")).toEqual({
+      kind: "sheetUrl",
+      url: "https://charaeno.com/7th/h_wQNXeiHPXDEDtG3r2ac",
+      sourceLabel: "キャラエノ",
     });
-    const res = classifyClipboardContent(json);
-    expect(res?.kind).toBe("character");
-    if (res?.kind === "character") {
-      expect(res.previewName).toBe("遠沢澄花");
-      expect(res.sourceLabel).toBe("CCFOLIA");
-    }
+    expect(
+      classifyClipboardContent(JSON.stringify({ kind: "character", data: { name: "遠沢澄花" } })),
+    ).toBeNull();
+    expect(classifyClipboardContent("名前: 白瀬怜\nSTR: 11 HP: 12 SAN: 65/99")).toBeNull();
+    expect(classifyClipboardContent("https://iachara.com/view/1")).toEqual({
+      kind: "sheetUrl",
+      url: "https://iachara.com/view/1",
+      sourceLabel: "いあきゃら",
+    });
   });
 
-  it("いあきゃらテキストを探索者候補として認識する", () => {
-    const text = `名前: 白瀬怜
-職業: 救急医
-STR: 11 CON: 12 POW: 13
-HP: 12 MP: 13 SAN: 65/99`;
-    const res = classifyClipboardContent(text);
-    expect(res?.kind).toBe("character");
-    if (res?.kind === "character") {
-      expect(res.previewName).toBe("白瀬怜");
-    }
-  });
-
-  it("複数行のセッションログテキストをログ候補として認識する", () => {
-    const text = `[メイン] 21:00 KP: 夜霜: それでは開始します。
-[メイン] 21:02 遠沢澄花: 「よろしくお願いします」`;
+  it("Udonarium のチャットログ XML をログ候補として認識し、自由形式のテキストは候補にしない", () => {
+    const text = `<chat-log><chat name="KP" tab="メイン">それでは開始します。</chat><chat name="遠沢澄花" tab="メイン">よろしくお願いします</chat></chat-log>`;
+    expect(
+      classifyClipboardContent(
+        `[メイン] 21:00 KP: 夜霜: それでは開始します。\n[メイン] 21:02 遠沢澄花: 「よろしく」`,
+      ),
+    ).toBeNull();
     const res = classifyClipboardContent(text);
     expect(res?.kind).toBe("log");
     if (res?.kind === "log") {
