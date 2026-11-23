@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <title>サンプル卓 [すべて]</title>
+    <style>
+      .speaker {
+        color: var(--speaker-color);
+      }
+      .avatar-image-0 {
+        background-image: url("data:image/png;base64,AAAA");
+      }
+    </style>
+  </head>
+  <body>
+    <main class="message-list">
+      <h1 class="log-title">サンプル卓 [すべて]</h1>
+      <article class="message" data-channel="main">
+        <span class="avatar avatar-image-0" aria-hidden="true"></span>
+        <div class="message-content">
+          <div class="message-header">
+            <span class="speaker" style="--speaker-color: #4caf50">アリス</span>
+            <time class="timestamp" datetime="2026-05-17T11:07:21.000Z">2026/05/17 20:07:21</time>
+            <span class="channel-name">[メイン]</span>
+          </div>
+          <div class="message-text">1行目<br />2行目 &lt;b&gt; &amp; &quot;引用&quot;</div>
+        </div>
+      </article>
+      <article class="message system" data-channel="main">
+        <div class="message-content">
+          <div class="message-text">ボブが入室しました</div>
+          <time class="timestamp" datetime="2026-05-17T11:07:30.000Z">2026/05/17 20:07:30</time>
+        </div>
+      </article>
+      <article class="message" data-channel="secret-1">
+        <span class="avatar-spacer" aria-hidden="true"></span>
+        <div class="message-content">
+          <div class="message-header">
+            <span class="speaker" style="--speaker-color: #f44336">ボブ</span>
+            <time class="timestamp" datetime="2026-05-17T11:08:00.000Z">2026/05/17 20:08:00</time>
+            <span class="channel-name">[密談]</span>
+          </div>
+          <div class="message-text">CCB&lt;=60 【目星】</div>
+          <span class="roll-result success">(1D100&lt;=60) ＞ 25 ＞ 成功</span>
+        </div>
+      </article>
+      <article class="message" data-channel="info">
+        <span class="avatar-spacer" aria-hidden="true"></span>
+        <div class="message-content">
+          <div class="message-header">
+            <span class="speaker" style="--speaker-color: #2196f3">アリス</span>
+            <time class="timestamp" datetime="2026-05-17T11:06:00.000Z">2026/05/17 20:06:00</time>
+            <span class="channel-name">[情報]</span>
+          </div>
+          <div class="message-text">先に書かれた情報</div>
+        </div>
+      </article>
+    </main>
+  </body>
+</html>

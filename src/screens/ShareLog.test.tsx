@@ -20,7 +20,7 @@ vi.mock("../lib/router", () => ({
   usePathname: () => `/share/l/${currentSlug}`,
 }));
 
-const GATE_PASSED = "このログは、このシナリオをプレイした人だけが読めます（自己申告）。";
+const GATE_PASSED = "このログは、このシナリオを通過した人だけが読めます（自己申告）。";
 const GATE_MEMBERS = "このログはメンバー限定です。卓のメンバーだけが読めます。";
 
 function seedWith(overrides: {
@@ -32,7 +32,7 @@ function seedWith(overrides: {
   const state = structuredClone(seedState());
   state.me = "u_sora"; // 外部ユーザーとして入る
   state.entered = true;
-  const log = state.logs.s03;
+  const log = state.logs.s02;
   log.slug = overrides.slug;
   log.scope = overrides.scope;
   log.ownerId = overrides.ownerId ?? "u_mikan";
@@ -57,9 +57,7 @@ it("passed ログは外部ユーザーにはゲートが表示され、自己申
   // ゲート中は本文の絞り込み欄すら出ない
   expect(screen.queryByPlaceholderText("本文・発言者で絞り込み…")).not.toBeInTheDocument();
 
-  await userEvent
-    .setup()
-    .click(screen.getByRole("button", { name: "このシナリオをプレイした（記録を開く）" }));
+  await userEvent.setup().click(screen.getByRole("button", { name: "このシナリオを通過した（記録を開く）" }));
 
   expect(screen.queryByText(GATE_PASSED)).not.toBeInTheDocument();
   expect(screen.getByPlaceholderText("本文・発言者で絞り込み…")).toBeInTheDocument();
@@ -71,7 +69,7 @@ it("members ログは自己申告では読めない", async () => {
 
   expect(screen.getByText(GATE_MEMBERS)).toBeInTheDocument();
   expect(
-    screen.queryByRole("button", { name: "このシナリオをプレイした（記録を開く）" }),
+    screen.queryByRole("button", { name: "このシナリオを通過した（記録を開く）" }),
   ).not.toBeInTheDocument();
 });
 

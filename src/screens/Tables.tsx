@@ -47,6 +47,7 @@ import { TableDiscordPanel } from "../components/discord";
 /** `/卓譜 つなぐ` のリンク（/tables/discord?code=…）で、Discord のチャンネルと卓をつなぐ */
 export { DiscordChannelLink as TableDiscordLink } from "../components/discord";
 import { SessionRow } from "./Sessions";
+import { sessionTitle } from "../lib/session-scenario";
 
 /** 卓詳細で検索欄を出すセッション数のしきい値 */
 const SEARCH_THRESHOLD = 6;
@@ -113,7 +114,7 @@ export default function Tables() {
   }, [state.tables, state.events, state.logs, state.me, today]);
 
   return (
-    <div className="max-w-4xl">
+    <div>
       <PageHead
         title="卓"
         actions={
@@ -303,7 +304,9 @@ export function TableDetail() {
   );
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return needle ? sessions.filter((l) => l.title.toLowerCase().includes(needle)) : sessions;
+    return needle
+      ? sessions.filter((l) => sessionTitle(l, state.scenarios).toLowerCase().includes(needle))
+      : sessions;
   }, [sessions, q]);
   if (!table) return <NotFound what="卓" />;
 
@@ -490,6 +493,7 @@ export function TableDetail() {
           event={openPoll}
           state={state}
           initialMode={pollTarget?.mode}
+          inTable
           onClose={() => setPollTarget(null)}
         />
       )}
@@ -572,8 +576,8 @@ function EditTableModal({ table, onClose }: { table: Table; onClose: () => void 
           <ImageUploadField
             value={image}
             onChange={setImage}
-            label="卓の画像を選ぶ"
-            preview={<TableMark table={{ id: table.id, image: image || undefined }} size={56} />}
+            label="卓の画像"
+            render={(src) => <TableMark table={{ id: table.id, image: src || undefined }} size={56} />}
           />
         </div>
         <TableMetaFields

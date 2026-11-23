@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
-import { SYSTEMS, SYSTEM_LIST } from "@shared/data/systems";
+import { SYSTEM_LIST } from "@shared/data/systems";
 import { systemOptions } from "@shared/lib/system-options";
 import { evaluateShareGate } from "@shared/lib/share-gate";
 import { ScreenShell } from "../../components/ScreenShell";
@@ -13,17 +13,24 @@ import {
   EmptyState,
   IconButton,
   InteractiveRow,
+  LoadMore,
   MetaRow,
   PageHead,
+  ScenarioSystem,
   Seg,
   Surface,
-  SysBadge,
   TextField,
 } from "../../components/ui";
 import { useMobileStore } from "../../store/mobile-store";
 import { useTheme } from "../../theme/ThemeProvider";
 import { RADII } from "../../theme/tokens";
 import { sessionStart } from "@shared/lib/sittings";
+import { recentSystemIds } from "@shared/lib/system-options";
+import { scenarioFacts, scenarioToDirectory } from "@shared/lib/scenario-directory";
+import { useScenarioSearch } from "@shared/lib/use-scenario-directory";
+import { remoteOnly, WEB_ORIGIN } from "../../lib/scenario-list";
+
+const PAGE_SIZE = 30;
 
 type PlayedFilter = "all" | "played" | "unplayed";
 
@@ -46,8 +53,6 @@ export default function ScenariosScreen() {
     });
   }, [state.scenarios, state.logs, state.entered, state.me]);
 
-  const usedSystems = useMemo(() => new Set(rows.map((r) => r.s.systemId)), [rows]);
-
   const list = useMemo(() => {
     let items = rows;
     if (sys !== "all") items = items.filter((r) => r.s.systemId === sys);
@@ -59,6 +64,38 @@ export default function ScenariosScreen() {
     }
     return [...items].sort((a, b) => b.last - a.last || a.s.title.localeCompare(b.s.title, "ja"));
   }, [rows, q, sys, played]);
+
+  /** 遊んでいるシステム。共有シナリオ一覧で先に出す */
+  const mySystems = useMemo(() => {
+    const own = Object.values(state.logs).filter(
+      (l) => l.ownerId === state.me || Boolean(l.players[state.me]),
+    );
+    const ids = [
+      ...recentSystemIds(own),
+      ...Object.values(state.characters)
+        .filter((c) => c.ownerId === state.me)
+        .map((c) => c.systemId),
+    ];
+    return [...new Set(ids.filter((x): x is string => Boolean(x) && x !== "general"))];
+  }, [state.logs, state.characters, state.me]);
+
+  /* 共有シナリオ一覧（サーバーで探す）。通過済みだけを見るときは要らない */
+  const remote = useScenarioSearch({
+    q,
+    systemId: sys === "all" ? undefined : sys,
+    prefer: mySystems,
+    pageSize: PAGE_SIZE,
+    enabled: played !== "played",
+    origin: WEB_ORIGIN,
+  });
+  const remoteRows = useMemo(
+    () =>
+      remoteOnly(
+        rows.map((r) => r.s),
+        remote.items,
+      ),
+    [rows, remote.items],
+  );
 
   const filtered = q.trim() !== "" || sys !== "all" || played !== "all";
 
@@ -104,76 +141,84 @@ export default function ScenariosScreen() {
               { v: "unplayed", label: "未通過" },
             ]}
           />
-          {usedSystems.size > 1 && (
+          {
             <Combobox
               size="sm"
               ariaLabel="システムで絞り込み"
               value={sys}
               onChange={setSys}
               style={{ minWidth: 160, flex: 1 }}
-              options={[
-                { value: "all", label: "すべてのシステム" },
-                ...systemOptions(SYSTEM_LIST.filter((x) => usedSystems.has(x.id))),
-              ]}
+              options={[{ value: "all", label: "すべてのシステム" }, ...systemOptions(SYSTEM_LIST)]}
             />
-          )}
+          }
         </View>
       </View>
 
-      {list.length === 0 ? (
-        <Surface>
-          <EmptyState
-            kind={filtered ? "filtered" : "first"}
-            title={filtered ? undefined : "シナリオがまだありません"}
-            action={
-              filtered ? (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onPress={() => {
-                    setQ("");
-                    setSys("all");
-                    setPlayed("all");
-                  }}
-                >
-                  絞り込みを解除
-                </Button>
-              ) : (
-                <Button
-                  variant="primary"
-                  icon={<IconPlus size={16} color={tokens.primaryContent} />}
-                  onPress={() => router.push("/scenarios/new")}
-                >
-                  シナリオを追加
-                </Button>
-              )
-            }
-          />
-        </Surface>
+      {list.length === 0 && remoteRows.length === 0 ? (
+        remote.loading ? null : (
+          <Surface>
+            <EmptyState
+              kind={filtered ? "filtered" : "first"}
+              title={filtered ? undefined : "シナリオがまだありません"}
+              action={
+                filtered ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onPress={() => {
+                      setQ("");
+                      setSys("all");
+                      setPlayed("all");
+                    }}
+                  >
+                    絞り込みを解除
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    icon={<IconPlus size={16} color={tokens.primaryContent} />}
+                    onPress={() => router.push("/scenarios/new")}
+                  >
+                    シナリオを追加
+                  </Button>
+                )
+              }
+            />
+          </Surface>
+        )
       ) : (
-        <Surface>
-          <DividerList>
-            {list.map(({ s, mine }) => {
-              const sysDef = SYSTEMS[s.systemId];
-              return (
+        <>
+          <Surface>
+            <DividerList>
+              {[
+                ...list.map(({ s, mine }) => ({ d: scenarioToDirectory(s), played: mine.length > 0 })),
+                ...remoteRows.map((d) => ({ d, played: false })),
+              ].map(({ d, played: hasPlayed }) => (
                 <InteractiveRow
-                  key={s.id}
-                  onPress={() => router.push(`/scenarios/${s.id}` as never)}
-                  accessibilityLabel={s.title}
+                  key={d.id}
+                  onPress={() => router.push(`/scenarios/${d.id}` as never)}
+                  accessibilityLabel={d.title}
                 >
                   <View style={styles.row}>
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={{ fontSize: 16, fontWeight: "700", color: tokens.ink }} numberOfLines={2}>
-                        {s.title}
+                        {d.title}
                       </Text>
                       <MetaRow style={{ marginTop: 4 }}>
-                        <SysBadge sys={sysDef} />
-                        <Text style={{ fontSize: 13, color: tokens.ink2 }} numberOfLines={1}>
-                          {s.author}
-                        </Text>
+                        <ScenarioSystem systemId={d.systemId} systemLabel={d.systemLabel} />
+                        {d.author !== "" && (
+                          <Text style={{ fontSize: 13, color: tokens.ink2 }} numberOfLines={1}>
+                            {d.author}
+                          </Text>
+                        )}
+                        {scenarioFacts(d).map((f) => (
+                          <Text key={f} style={{ fontSize: 13, color: tokens.ink2 }}>
+                            {f}
+                          </Text>
+                        ))}
                       </MetaRow>
                     </View>
-                    {mine.length > 0 && (
+                    {hasPlayed && (
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                         <IconCheck size={14} color={tokens.success} />
                         <Text style={{ fontSize: 13, fontWeight: "600", color: tokens.ink2 }}>通過済み</Text>
@@ -181,10 +226,18 @@ export default function ScenariosScreen() {
                     )}
                   </View>
                 </InteractiveRow>
-              );
-            })}
-          </DividerList>
-        </Surface>
+              ))}
+            </DividerList>
+          </Surface>
+          {played !== "played" && (
+            <LoadMore
+              shown={remote.items.length}
+              total={remote.total}
+              loading={remote.loading}
+              onMore={remote.loadMore}
+            />
+          )}
+        </>
       )}
     </ScreenShell>
   );

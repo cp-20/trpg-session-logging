@@ -27,7 +27,7 @@ function makeBaseState(): State {
 
   const baseLog: Log = {
     id: "log1",
-    title: "廃校の十三時間目",
+    scenarioId: "sc1",
     systemId: "coc7",
     ownerId: "u1",
     scope: "members",
@@ -123,7 +123,6 @@ describe("reconcileWorkspaceStates", () => {
     local.logs.log2 = {
       ...local.logs.log1!,
       id: "log2",
-      title: "オフライン記録",
       slug: "オフライン記録",
     };
     remote.characters.ch1!.stats.san = 49;
@@ -131,7 +130,7 @@ describe("reconcileWorkspaceStates", () => {
 
     const res = reconcileWorkspaceStates(base, local, remote);
     expect(res.hadConflict).toBe(false);
-    expect(res.merged.logs.log2?.title).toBe("オフライン記録");
+    expect(res.merged.logs.log2?.slug).toBe("オフライン記録");
     expect(res.merged.characters.ch1?.stats.san).toBe(49);
     expect(res.merged.characters.ch1?.bio).toBe("PC側から追記");
   });
@@ -164,12 +163,12 @@ describe("reconcileWorkspaceStates", () => {
     const local = structuredClone(base);
     const remote = structuredClone(base);
 
-    local.logs.log1!.title = "ローカルで変更した卓名";
-    remote.logs.log1!.title = "Web側で変更した卓名";
+    local.logs.log1!.scope = "public";
+    remote.logs.log1!.scope = "passed";
 
     const res = reconcileWorkspaceStates(base, local, remote);
     expect(res.hadConflict).toBe(true);
-    expect(res.conflictedEntities).toContain("log:log1.title");
-    expect(res.merged.logs.log1?.title).toBe("Web側で変更した卓名");
+    expect(res.conflictedEntities).toContain("log:log1.scope");
+    expect(res.merged.logs.log1?.scope).toBe("passed");
   });
 });

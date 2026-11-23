@@ -1,11 +1,14 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SYSTEMS } from "@shared/data/systems";
 import { recentSystemIds, systemOptions } from "@shared/lib/system-options";
 import { evaluateShareGate } from "@shared/lib/share-gate";
 import { fmtDur, sessionPlayMinutes, uid, sessionStart } from "@shared/lib/time";
+import { directoryToScenario, scenarioFacts } from "@shared/lib/scenario-directory";
+import { useDirectoryScenario } from "@shared/lib/use-scenario-directory";
 import type { Scenario } from "@shared/types";
+import { WEB_ORIGIN } from "../../lib/scenario-list";
 import { ScreenShell } from "../../components/ScreenShell";
 import { SessionRow } from "../../components/SessionRow";
 import { IconCheck, IconExternal, IconEyeOff, IconPencil, IconPlus, IconSend } from "../../components/icons";
@@ -20,9 +23,9 @@ import {
   MetaRow,
   NotFound,
   PageHead,
+  ScenarioSystem,
   SectionTitle,
   Surface,
-  SysBadge,
   TextField,
 } from "../../components/ui";
 import { openExternalUrl } from "../../native/native-share";
@@ -51,17 +54,23 @@ export default function ScenarioDetailScreen() {
   const [editReqOpen, setEditReqOpen] = useState(false);
   const [showSpoilers, setShowSpoilers] = useState(false);
 
-  const sc = state.scenarios[id ?? ""];
+  /* 手元に写しがなければ（ほかの人が足したもの・TALTO のもの）共有シナリオ一覧から読む。人数・時間も共有シナリオ一覧から */
+  const local = state.scenarios[id ?? ""];
+  const { scenario: remote, loading: remoteLoading } = useDirectoryScenario(id, true, WEB_ORIGIN);
+  const sc = useMemo(
+    () => local ?? (remote ? directoryToScenario(remote, SYSTEMS) : undefined),
+    [local, remote],
+  );
   if (!sc) {
     return (
       <ScreenShell>
         <PageHead title="シナリオ" back={{ label: "シナリオ" }} />
-        <NotFound what="シナリオ" />
+        {remoteLoading ? null : <NotFound what="シナリオ" />}
       </ScreenShell>
     );
   }
+  const facts = remote ? scenarioFacts(remote) : [];
 
-  const sys = SYSTEMS[sc.systemId];
   const allLogs = Object.values(state.logs)
     .filter((l) => l.scenarioId === sc.id)
     .sort((a, b) => sessionStart(b) - sessionStart(a));
@@ -84,8 +93,13 @@ export default function ScenarioDetailScreen() {
         title={sc.title}
         sub={
           <MetaRow>
-            <SysBadge sys={sys} />
-            <Text style={{ fontSize: 13, color: tokens.ink2 }}>{sc.author}</Text>
+            <ScenarioSystem systemId={sc.systemId} systemLabel={remote?.systemLabel} />
+            {sc.author !== "" && <Text style={{ fontSize: 13, color: tokens.ink2 }}>{sc.author}</Text>}
+            {facts.map((f) => (
+              <Text key={f} style={{ fontSize: 13, color: tokens.ink2 }}>
+                {f}
+              </Text>
+            ))}
             {sc.sourceUrl && (
               <Pressable
                 onPress={() => void openExternalUrl(sc.sourceUrl!)}
@@ -98,7 +112,7 @@ export default function ScenarioDetailScreen() {
               </Pressable>
             )}
             {medDur != null && (
-              <Text style={{ fontSize: 13, color: tokens.ink2 }}>{`プレイ時間 約${fmtDur(medDur)}`}</Text>
+              <Text style={{ fontSize: 13, color: tokens.ink2 }}>{`所要時間 約${fmtDur(medDur)}`}</Text>
             )}
             {hasParticipated && (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -124,13 +138,17 @@ export default function ScenarioDetailScreen() {
                 icon={<IconSend size={16} color={tokens.ink} />}
                 onPress={() => setEditReqOpen(true)}
               >
-                編集を申請
+                修正を提案
               </Button>
             ) : null}
             <Button
               variant="primary"
               icon={<IconPlus size={16} color={tokens.primaryContent} />}
-              onPress={() => router.push({ pathname: "/upload", params: { scenario: sc.id } })}
+              onPress={() => {
+                // 記録に結ぶので、手元に写しを置く
+                if (!local) update((st) => void (st.scenarios[sc.id] ??= sc));
+                router.push({ pathname: "/upload", params: { scenario: sc.id } });
+              }}
             >
               このシナリオで記録
             </Button>
@@ -221,7 +239,7 @@ export default function ScenarioDetailScreen() {
               </Button>
             }
           >
-            まだ遊んでいないシナリオです。セッションのタイトルや参加者を見ても大丈夫なら表示してください。
+            未通過のシナリオです。遊んだ卓や参加者を見ても大丈夫なら表示してください。
           </EmptyState>
         </Surface>
       ) : visibleLogs.length === 0 ? (
@@ -266,10 +284,10 @@ function EditScenarioSheet({ sc, onClose }: { sc: Scenario; onClose: () => void 
       return;
     }
     update((s) => {
-      const target = s.scenarios[sc.id];
-      if (!target) return;
+      // 共有シナリオ一覧から開いた自分のシナリオは、直す前に手元へ写しを置く
+      const target = (s.scenarios[sc.id] ??= { ...sc });
       target.title = title.trim();
-      target.author = author.trim() || "不明";
+      target.author = author.trim();
       target.systemId = systemId;
       target.sourceUrl = sourceUrl.trim() || undefined;
       target.source = sourceFromUrl(sourceUrl);

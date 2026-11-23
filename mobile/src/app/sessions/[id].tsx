@@ -67,6 +67,7 @@ import { useMobileStore } from "../../store/mobile-store";
 import { useTheme } from "../../theme/ThemeProvider";
 import { RADII } from "../../theme/tokens";
 import { userFacingError } from "@shared/lib/user-error";
+import { sessionTitle } from "@shared/lib/session-scenario";
 
 export default function SessionDetailScreen() {
   const { tokens } = useTheme();
@@ -140,7 +141,7 @@ export default function SessionDetailScreen() {
     <View style={{ paddingTop: tab === "timeline" && log.hasLog && canRead ? 16 : 0 }}>
       <PageHead
         back={{ label: "セッション" }}
-        title={log.title}
+        title={sessionTitle(log, state.scenarios)}
         sub={
           <View style={{ gap: 4 }}>
             <MetaRow>
@@ -273,7 +274,7 @@ export default function SessionDetailScreen() {
         }
       >
         <Text style={{ fontSize: 14, lineHeight: 21, color: tokens.ink2 }}>
-          「{log.title}」のログ・参加者の紐付け・感想が消えます。元に戻せません。
+          「{sessionTitle(log, state.scenarios)}」のログ・参加者の紐付け・感想が消えます。元に戻せません。
         </Text>
       </BottomSheet>
 
@@ -751,18 +752,13 @@ function RollSummarySection({ log }: { log: Log }) {
 
 function EditLogSheet({ log, onClose }: { log: Log; onClose: () => void }) {
   const { state, update } = useMobileStore();
-  const [title, setTitle] = useState(log.title);
   const [systemId, setSystemId] = useState(log.systemId);
-  const [scenarioId, setScenarioId] = useState(log.scenarioId ?? "");
+  const [scenarioId, setScenarioId] = useState(log.scenarioId);
   const [tableId, setTableId] = useState(log.tableId ?? "");
   const [sittings, setSittings] = useState<SittingFields[]>(() => log.sittings.map(sittingToFields));
   const [error, setError] = useState<string | null>(null);
 
   function save() {
-    if (!title.trim()) {
-      setError("タイトルを入力してください");
-      return;
-    }
     const parsed = sittingsFromFields(sittings);
     if (!parsed.ok) {
       setError(parsed.error);
@@ -771,9 +767,8 @@ function EditLogSheet({ log, onClose }: { log: Log; onClose: () => void }) {
     update((s) => {
       const target = s.logs[log.id];
       if (!target) return;
-      target.title = title.trim();
       target.systemId = systemId;
-      target.scenarioId = scenarioId || undefined;
+      target.scenarioId = scenarioId;
       target.tableId = tableId || undefined;
       target.sittings = parsed.sittings;
     });
@@ -797,8 +792,13 @@ function EditLogSheet({ log, onClose }: { log: Log; onClose: () => void }) {
         </>
       }
     >
-      <Field label="タイトル" noMargin>
-        <TextField value={title} onChangeText={setTitle} />
+      <Field label="シナリオ" noMargin>
+        <Combobox
+          ariaLabel="シナリオ"
+          value={scenarioId}
+          onChange={(v) => v && setScenarioId(v)}
+          options={Object.values(state.scenarios).map((s) => ({ value: s.id, label: s.title }))}
+        />
       </Field>
       <Field label="システム">
         <Combobox
@@ -807,17 +807,6 @@ function EditLogSheet({ log, onClose }: { log: Log; onClose: () => void }) {
           onChange={setSystemId}
           options={systemOptions()}
           pinned={recentSystemIds(Object.values(state.logs))}
-        />
-      </Field>
-      <Field label="シナリオ">
-        <Combobox
-          ariaLabel="シナリオ"
-          value={scenarioId}
-          onChange={setScenarioId}
-          options={[
-            { value: "", label: "未選択" },
-            ...Object.values(state.scenarios).map((s) => ({ value: s.id, label: s.title })),
-          ]}
         />
       </Field>
       <Field label="卓">
@@ -891,7 +880,7 @@ function ShareSheet({
     >
       <View style={{ gap: 18 }}>
         <View style={{ gap: 8 }}>
-          <Text style={{ fontSize: 14, fontWeight: "700", color: tokens.ink }}>公開範囲</Text>
+          <Text style={{ fontSize: 14, fontWeight: "700", color: tokens.ink }}>共有範囲</Text>
           <ScopePicker
             value={log.scope}
             onChange={(v) =>
@@ -908,7 +897,13 @@ function ShareSheet({
           <Button
             variant="secondary"
             icon={<IconShare size={16} color={tokens.ink} />}
-            onPress={() => void shareTextOrUrl(log.title, log.title, shareUrl)}
+            onPress={() =>
+              void shareTextOrUrl(
+                sessionTitle(log, state.scenarios),
+                sessionTitle(log, state.scenarios),
+                shareUrl,
+              )
+            }
           >
             リンクを共有シートで送る
           </Button>
@@ -922,7 +917,13 @@ function ShareSheet({
               <Button
                 variant="secondary"
                 icon={<IconUserPlus size={16} color={tokens.ink} />}
-                onPress={() => void shareTextOrUrl("卓譜の招待", `「${log.title}」への招待です`, inviteUrl)}
+                onPress={() =>
+                  void shareTextOrUrl(
+                    "卓譜の招待",
+                    `「${sessionTitle(log, state.scenarios)}」への招待です`,
+                    inviteUrl,
+                  )
+                }
               >
                 招待リンクを送る
               </Button>
@@ -934,7 +935,7 @@ function ShareSheet({
               icon={<IconUserPlus size={16} color={tokens.ink} />}
               onPress={() => void issueInvite()}
             >
-              {inviteBusy ? "作成中…" : "招待リンクを作る"}
+              {inviteBusy ? "作成中…" : "参加者の招待リンクを作る"}
             </Button>
           )}
           <InlineNotice text={inviteError} tone="error" />
@@ -995,9 +996,8 @@ function ReportCardSheet({ log, onClose }: { log: Log; onClose: () => void }) {
 
   const data = useMemo(
     () => ({
-      scenarioTitle: sc?.title,
       scenarioEmoji: sc?.emoji,
-      title: log.title,
+      title: sc?.title ?? sessionTitle(log, {}),
       dateLabel: fmtDates(sessionDays(log)),
       systemName: sys?.name ?? "汎用・その他",
       playerCount: Object.keys(log.players).length || 1,

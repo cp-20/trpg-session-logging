@@ -24,7 +24,7 @@ describe("evaluateShareGate", () => {
     const log = { ...baseLog, scope: "passed" as const };
     const denied = evaluateShareGate(log, "outsider");
     expect(denied.visible).toBe(false);
-    expect(denied.reason).toContain("このシナリオをプレイした人");
+    expect(denied.reason).toContain("このシナリオを通過した人");
     expect(evaluateShareGate(log, "outsider", { asPassed: true })).toEqual({ visible: true, reason: null });
     expect(evaluateShareGate(log, null)).toMatchObject({ visible: false });
     expect(evaluateShareGate(log, null, { asPassed: true })).toEqual({ visible: true, reason: null });

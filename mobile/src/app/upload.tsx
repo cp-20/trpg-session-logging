@@ -6,6 +6,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { commitLogImport, type CommitLogResult } from "@shared/api/commands";
 import { recentSystemIds, systemOptions } from "@shared/lib/system-options";
 import { SAMPLE_LOG } from "@shared/data/seed";
+import { SYSTEMS } from "@shared/data/systems";
+import { directoryToScenario } from "@shared/lib/scenario-directory";
+import { useScenarioSearch } from "@shared/lib/use-scenario-directory";
+import { sessionTitle } from "@shared/lib/session-scenario";
+import { mergeScenarioCandidates, WEB_ORIGIN } from "../lib/scenario-list";
 import {
   importLogFromText,
   SUPPORTED_LOG_FORMATS_LABEL,
@@ -52,6 +57,7 @@ import {
   PanelHead,
   SCOPE_META,
   ScopePicker,
+  Seg,
   Select,
   type ComboboxOption,
   type SelectOption,
@@ -111,8 +117,9 @@ export default function UploadScreen() {
 
   async function handleCommit() {
     if (!draft || committing) return;
-    if (!draft.meta.title.trim()) {
-      setError("タイトルを入力してください。");
+    // セッションはシナリオの題名で呼ぶので、シナリオは必ず要る
+    if (!state.scenarios[draft.scenarioId] && !draft.newScenario?.title.trim()) {
+      setError("遊んだシナリオを選ぶか、新しいシナリオを足してください。");
       return;
     }
     setError(null);
@@ -175,7 +182,7 @@ export default function UploadScreen() {
           sub={
             attachLog ? (
               <Text style={{ fontSize: 13, color: tokens.ink2 }}>
-                「{attachLog.title}」にログを追加し、日時と発言者を読み取ります。
+                「{sessionTitle(attachLog, state.scenarios)}」にログを追加し、日時と発言者を読み取ります。
               </Text>
             ) : undefined
           }
@@ -251,7 +258,7 @@ export default function UploadScreen() {
             draft={draft}
             setDraft={(d) => {
               setDraft(d);
-              if (error && d.meta.title.trim()) setError(null);
+              if (error && (d.scenarioId || d.newScenario?.title.trim())) setError(null);
             }}
             attachId={attachId}
             manual={manual}
@@ -626,7 +633,6 @@ function ManualForm({
 }) {
   const { tokens } = useTheme();
   const { state } = useMobileStore();
-  const [title, setTitle] = useState(initial?.meta.title ?? "");
   const [rows, setRows] = useState<SittingFields[]>(() =>
     initial && initial.sittings.length > 0
       ? initial.sittings.map(sittingToFields)
@@ -641,10 +647,6 @@ function ManualForm({
   const table = tableId ? state.tables[tableId] : null;
 
   function next() {
-    if (!title.trim()) {
-      setError("タイトルを入力してください。");
-      return;
-    }
     const parsed = sittingsFromFields(rows);
     if (!parsed.ok) {
       setError(parsed.error);
@@ -661,7 +663,7 @@ function ManualForm({
           presetScenario,
           state,
         })),
-      meta: { title: title.trim(), systemId: table?.systemId ?? initial?.meta.systemId ?? "general" },
+      meta: { systemId: table?.systemId ?? initial?.meta.systemId ?? "general" },
       tableId,
       players:
         initial?.tableId === tableId
@@ -674,10 +676,7 @@ function ManualForm({
   return (
     <Surface style={{ padding: 18 }}>
       <PanelHead title="いつ、誰と遊んだか" sub="ログが見つかったら、あとでこのセッションに添付します。" />
-      <Field label="タイトル" noMargin>
-        <TextField value={title} onChangeText={setTitle} placeholder="例: 廃校の十三時間目（2陣）" />
-      </Field>
-      <Field label="遊んだ日時">
+      <Field label="遊んだ日時" noMargin>
         <SittingsInput rows={rows} onChange={setRows} />
       </Field>
       <Field label="卓">
@@ -717,8 +716,27 @@ function Step2Review({
   error: string | null;
 }) {
   const { tokens } = useTheme();
-  const { state } = useMobileStore();
+  const { state, update } = useMobileStore();
   const [newScOpen, setNewScOpen] = useState(false);
+  /* 共有シナリオ一覧はサーバーで探す。打った言葉で問い合わせ、このシステムのものを先に */
+  const [typed, setTyped] = useState("");
+  const scSystem = draft.meta.systemId;
+  const remoteScenarios = useScenarioSearch({
+    q: typed,
+    prefer: scSystem && scSystem !== "general" ? [scSystem] : [],
+    pageSize: 20,
+    origin: WEB_ORIGIN,
+  });
+  const scenarioOptions = useMemo(
+    () =>
+      mergeScenarioCandidates(Object.values(state.scenarios), remoteScenarios.items).map((d) => ({
+        value: d.id,
+        label: d.title,
+        hint: d.author,
+        keywords: [d.author, d.systemLabel ?? SYSTEMS[d.systemId]?.name ?? "", ...d.tags],
+      })),
+    [state.scenarios, remoteScenarios.items],
+  );
   /** 遊んだ日時。ログの発言時刻から導いた値を入れておき、そのまま直せる */
   const [sittingRows, setSittingRows] = useState<SittingFields[]>(() =>
     draft.sittings.length > 0 ? draft.sittings.map(sittingToFields) : [nextSittingFields([], todayStr())],
@@ -803,13 +821,93 @@ function Step2Review({
     <View style={{ gap: 18 }}>
       <Surface style={{ padding: 18 }}>
         <PanelHead title="基本情報" />
-        <Field label="タイトル" noMargin>
-          <TextField
-            value={draft.meta.title}
-            onChangeText={(v) => setDraft({ ...draft, meta: { ...draft.meta, title: v } })}
-            placeholder="例: 廃校の十三時間目"
+        <Field label="シナリオ" noMargin>
+          <Combobox
+            ariaLabel="シナリオ"
+            value={draft.scenarioId}
+            onQueryChange={setTyped}
+            onChange={(v) => {
+              // 共有シナリオ一覧から選んだら、記録に結ぶので手元に写しを置く
+              const fromDirectory =
+                v && !state.scenarios[v] ? remoteScenarios.items.find((d) => d.id === v) : undefined;
+              const sc =
+                (v ? state.scenarios[v] : undefined) ??
+                (fromDirectory && directoryToScenario(fromDirectory, SYSTEMS));
+              if (fromDirectory && sc) update((s) => void (s.scenarios[v] ??= sc));
+              setDraft({
+                ...draft,
+                scenarioId: v,
+                newScenario: null,
+                meta: { ...draft.meta, systemId: sc?.systemId ?? draft.meta.systemId },
+              });
+            }}
+            options={scenarioOptions}
           />
+          <View style={{ marginTop: 8, alignItems: "flex-start" }}>
+            <Button size="sm" variant="quiet" onPress={() => setNewScOpen((v) => !v)}>
+              {newScOpen ? "登録済みから選ぶ" : "新しいシナリオを足す"}
+            </Button>
+          </View>
         </Field>
+
+        {newScOpen && (
+          <View style={{ borderTopWidth: 1, borderTopColor: tokens.border, marginTop: 12, paddingTop: 12 }}>
+            <Field label="新しいシナリオ名" noMargin>
+              <TextField
+                value={draft.newScenario?.title ?? ""}
+                onChangeText={(v) =>
+                  setDraft({
+                    ...draft,
+                    scenarioId: "",
+                    newScenario: {
+                      title: v,
+                      author: draft.newScenario?.author ?? "",
+                      private: draft.newScenario?.private ?? true,
+                    },
+                  })
+                }
+              />
+            </Field>
+            <Field label="作者（任意）">
+              <TextField
+                value={draft.newScenario?.author ?? ""}
+                onChangeText={(v) =>
+                  setDraft({
+                    ...draft,
+                    newScenario: {
+                      title: draft.newScenario?.title ?? "",
+                      author: v,
+                      private: draft.newScenario?.private ?? true,
+                    },
+                  })
+                }
+              />
+            </Field>
+            {/* 自作のシナリオや事前相談のように、ほかの人が遊ばないものは自分だけにする（P14: 安全側を既定に） */}
+            <Field label="このシナリオを選べる人">
+              <Seg<"private" | "public">
+                size="sm"
+                value={draft.newScenario?.private === false ? "public" : "private"}
+                onChange={(v) =>
+                  setDraft({
+                    ...draft,
+                    scenarioId: "",
+                    newScenario: {
+                      title: draft.newScenario?.title ?? "",
+                      author: draft.newScenario?.author ?? "",
+                      private: v === "private",
+                    },
+                  })
+                }
+                options={[
+                  { v: "private", label: "自分だけ" },
+                  { v: "public", label: "ほかの人も選べる" },
+                ]}
+              />
+            </Field>
+          </View>
+        )}
+
         <Field label="システム">
           <Combobox
             ariaLabel="システム"
@@ -830,69 +928,6 @@ function Step2Review({
             ]}
           />
         </Field>
-        <Field label="シナリオ">
-          <Combobox
-            ariaLabel="シナリオ"
-            value={draft.scenarioId}
-            onChange={(v) => {
-              const sc = v ? state.scenarios[v] : undefined;
-              setDraft({
-                ...draft,
-                scenarioId: v,
-                newScenario: null,
-                meta: {
-                  ...draft.meta,
-                  title: draft.meta.title || sc?.title || "",
-                  systemId: sc?.systemId ?? draft.meta.systemId,
-                },
-              });
-            }}
-            options={[
-              { value: "", label: "選ばない" },
-              ...Object.values(state.scenarios).map((s) => ({ value: s.id, label: s.title })),
-            ]}
-          />
-          <View style={{ marginTop: 8, alignItems: "flex-start" }}>
-            <Button size="sm" variant="quiet" onPress={() => setNewScOpen((v) => !v)}>
-              {newScOpen ? "既存シナリオから選ぶ" : "新しいシナリオとして登録"}
-            </Button>
-          </View>
-        </Field>
-
-        {newScOpen && (
-          <View style={{ borderTopWidth: 1, borderTopColor: tokens.border, marginTop: 12, paddingTop: 12 }}>
-            <Field label="新しいシナリオ名" noMargin>
-              <TextField
-                value={draft.newScenario?.title ?? ""}
-                onChangeText={(v) =>
-                  setDraft({
-                    ...draft,
-                    scenarioId: "",
-                    newScenario: {
-                      title: v,
-                      author: draft.newScenario?.author ?? "",
-                    },
-                  })
-                }
-              />
-            </Field>
-            <Field label="作者（任意）">
-              <TextField
-                value={draft.newScenario?.author ?? ""}
-                onChangeText={(v) =>
-                  setDraft({
-                    ...draft,
-                    newScenario: {
-                      title: draft.newScenario?.title ?? "",
-                      author: v,
-                    },
-                  })
-                }
-              />
-            </Field>
-          </View>
-        )}
-
         <Field label="共有範囲">
           <ScopePicker value={draft.scope} onChange={(v) => setDraft({ ...draft, scope: v })} />
         </Field>

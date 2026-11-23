@@ -19,12 +19,13 @@ export interface Draft {
   kinds: Record<string, MsgKind>;
   speakerIcons: Record<string, string>;
   speakerLinks: Record<string, SpeakerLink>;
-  meta: { title: string; systemId: string };
+  meta: { systemId: string };
   guess: { id: string } | null;
   scope: Scope;
   tableId: string;
   scenarioId: string;
-  newScenario: { title: string; author: string } | null;
+  /** 共有シナリオ一覧に無いシナリオを足すとき。private なら共有シナリオ一覧に載せない */
+  newScenario: { title: string; author: string; private?: boolean } | null;
   /** 記録する本人以外の参加者 */
   players: { userId: string; characterIds: string[] }[];
   /**
@@ -243,7 +244,7 @@ export function buildDraft(opts: {
     kinds,
     speakerIcons,
     speakerLinks,
-    meta: { title: attachLog?.title ?? presetSc?.title ?? "", systemId },
+    meta: { systemId },
     guess,
     scope: attachLog?.scope ?? "members",
     tableId,

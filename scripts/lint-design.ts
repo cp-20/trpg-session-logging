@@ -83,7 +83,8 @@ const RESERVED_PRIMITIVES = [
   "PanelHead",
   "SittingsInput",
   "ScopePicker",
-  "Seal",
+  "DoneMark",
+  "ScoreInscription",
   "Menu",
   "OverflowMenu",
   "HoverCard",
@@ -622,6 +623,15 @@ function checkButtonHoverAndTimelineRules(violations: Violation[]): void {
         message: "src/styles.css must define scrollbar-gutter: stable on html to prevent layout shift.",
       });
     }
+    // 日本語は文節で折る（2026-11-22「改行位置は全部いい感じにして」）。body で継ぎ、利用者の本文だけ戻す
+    if (!/body \{\s*word-break: auto-phrase;/.test(css)) {
+      violations.push({
+        file: "src/styles.css",
+        line: 1,
+        message:
+          "phrase-wrap: src/styles.css must set word-break: auto-phrase on body so Japanese wraps at phrase boundaries.",
+      });
+    }
     if (!css.includes(":focus-visible")) {
       violations.push({
         file: "src/styles.css",
@@ -1080,12 +1090,117 @@ function checkLetterAvatar(violations: Violation[]): void {
   }
 }
 
+/*
+ * lint:google-button（P17）
+ * Google のログインは Google のブランドガイドラインどおりの部品（identity.tsx の GoogleSignInButton）だけで出す。
+ * 主色で塗ったボタンに「Google でログイン」と書く・独自の G を添える、が Web とモバイルで 2 回起きた（11-21・11-23）。
+ * 表記は「ログイン」（「サインイン」は使わない）。Web は描画後の audit:banned-copy でも見るが、モバイルはここだけで防ぐ
+ */
+const GOOGLE_LOGIN_LABEL_RE =
+  /Google\s*で(?:ログイン|サインイン)(?=\s*(?:<|["'`}]|$))|Google\s*で(?:ログイン|サインイン)中/;
+const GOOGLE_PROVIDER_ICON_RE = /<ProviderIcon\s+provider="google"/;
+const SIGN_IN_WORD_RE = /サインイン/;
+
+function checkGoogleButton(violations: Violation[]): void {
+  const files = ["src/components", "src/screens", "src/app", "mobile/src"]
+    .flatMap((d) => walkFiles(path.join(ROOT_DIR, d)))
+    .filter((f) => /\.tsx?$/.test(f) && !/\.(?:test|spec)\./.test(f));
+  for (const filePath of files) {
+    const rel = toRel(filePath);
+    const isIdentity = /(?:^|\/)components\/identity\.tsx$/.test(rel);
+    const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
+    lines.forEach((line, i) => {
+      if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) return;
+      /* G の印は、アカウントの行（設定の一覧など）では使ってよい。ボタンの中に添えるのを禁じる */
+      const inButton = (() => {
+        for (let k = i; k >= Math.max(0, i - 6); k--) {
+          if (k < i && /<\/(?:Button|button)>/.test(lines[k]!)) return false;
+          if (/<(?:Button|button)\b/.test(lines[k]!)) return true;
+        }
+        return false;
+      })();
+      if (
+        !isIdentity &&
+        (GOOGLE_LOGIN_LABEL_RE.test(line) || (inButton && GOOGLE_PROVIDER_ICON_RE.test(line)))
+      ) {
+        violations.push({
+          file: rel,
+          line: i + 1,
+          message:
+            "google-button: Google login must use GoogleSignInButton from components/identity.tsx (Google branding guidelines); do not label a themed Button or add a custom G.",
+        });
+      }
+      if (rel.startsWith("mobile/src/") && SIGN_IN_WORD_RE.test(line)) {
+        violations.push({
+          file: rel,
+          line: i + 1,
+          message: "google-button: use 「ログイン」 instead of 「サインイン」 (docs/glossary.md).",
+        });
+      }
+    });
+  }
+}
+
+/**
+ * lint:glossary（docs/glossary.md）
+ * 画面の文字（コメントを除く Web・モバイルの画面のソース）に、用語集で避けると決めた言葉を書かない。
+ * 内部の呼び名（目録・カルテ）、決めた言葉の言い換え（公開範囲・プレイした人・デモ）、仮の値（自由記述（未登録））など。
+ * 文面を 1 つずつ禁じるのではなく、用語集の「避ける表現」をここに写して機械で守る（2026-11-23「目録とかいう謎ワードやめて」）
+ */
+const GLOSSARY_AVOID: readonly { re: RegExp; use: string }[] = [
+  { re: /目録/, use: "画面には一覧の名前を出さない（シナリオを選べる人: 自分だけ / ほかの人も選べる）" },
+  { re: /カルテ/, use: "キャラクター / 共有ページ" },
+  { re: /実施日/, use: "遊んだ日時 / 遊んだ日" },
+  { re: /公開範囲|読める人|見られる人/, use: "共有範囲" },
+  { re: /プレイした人|プレイ済み/, use: "通過した人 / 通過済み" },
+  { re: /デモ利用者|[>"'`]\s*デモ\s*[<"'`]/, use: "サンプル" },
+  { re: /自由記述（未登録）|作者未設定/, use: "作者を空のままにし、表示しない" },
+  { re: /未リンク|接続中…/, use: "連携 / 連携中…" },
+  { re: /セッションのタイトル|セッション名/, use: "セッションは名前を持たない（シナリオの題名で呼ぶ）" },
+  { re: /編集を申請/, use: "修正を提案" },
+  { re: /招待コード|ニックネーム|オンボーディング/, use: "招待リンク / 表示名 / はじめの設定" },
+];
+
+function checkGlossary(violations: Violation[]): void {
+  const files = ["src/components", "src/screens", "src/app", "mobile/src/app", "mobile/src/components"]
+    .flatMap((d) => walkFiles(path.join(ROOT_DIR, d)))
+    .filter((f) => /\.tsx?$/.test(f) && !/\.(?:test|spec)\./.test(f));
+  for (const filePath of files) {
+    const rel = toRel(filePath);
+    let inBlock = false;
+    fs.readFileSync(filePath, "utf8")
+      .split(/\r?\n/)
+      .forEach((line, i) => {
+        // コメント（// と /* */、JSX の {/* */}）は画面に出ないので見ない
+        const code = line.replace(/\{?\/\*.*?\*\/\}?/g, "").replace(/(^|\s)\/\/.*$/, "");
+        if (inBlock) {
+          if (code.includes("*/")) inBlock = false;
+          return;
+        }
+        if (/^\s*\/\*/.test(code) && !code.includes("*/")) {
+          inBlock = true;
+          return;
+        }
+        if (/^\s*\*/.test(code)) return;
+        for (const { re, use } of GLOSSARY_AVOID) {
+          if (re.test(code))
+            violations.push({
+              file: rel,
+              line: i + 1,
+              message: `glossary: 「${re.source}」は画面に書かない。${use}（docs/glossary.md）`,
+            });
+        }
+      });
+  }
+}
+
 // 遊んだ時間帯は Log.sittings（開始・終了の日時の並び）で持つ（P1）。古い持ち方と 30 時間制の時刻を書かない
 const LEGACY_SCHEDULE_FIELD_RE = /(?<!\.)\.(?:dates|t0|t1)\b/;
 const LEGACY_SCHEDULE_API_RE =
   /\b(?:buildSessionRange|sessionClock|remapChannelTimestamps|deriveSessionFromMessages|DateList|TimeRange)\b/;
-// 24:00〜33:59 のような 30 時間制の時刻（「1:30:00」のような経過時間は除く）と、その書き方の案内
-const THIRTY_HOUR_CLOCK_RE = /(?<![\d:])(?:2[4-9]|3[0-3])[:：][0-5]\d(?![:\d])|日付をまたぐときは/;
+// 日をまたぐ終了の書き方は 25:00 にそろえた（2026-11-22「翌が入力できないの謎 25:00 とかの表記にしたい」）。
+// 「翌 1:00」「翌」の札を画面に戻さない。日付をまたぐ書き方の説明文も書かない（入力欄の値と placeholder で分かる）
+const NEXT_DAY_MARK_RE = /翌\s*\d{1,2}[:：]|翌\$\{|[>"'`]\s*翌\s*[<"'`]|日付をまたぐときは/;
 
 function scheduleSourceFiles(): string[] {
   return ["src", "mobile/src"].flatMap((d) =>
@@ -1098,7 +1213,8 @@ function scheduleSourceFiles(): string[] {
 /**
  * lint:unnatural-model（P1）
  * データの形が不自然だと UI も不自然になる。遊んだ時間帯は「実施日の一覧 + 初日の開始 + 最終日の終了（25:30）」ではなく
- * 集まりの並び（Log.sittings: 開始・終了の日時）で持ち、入力は日付と時刻（終了が翌日なら「翌」）で受ける
+ * 集まりの並び（Log.sittings: 開始・終了の日時）で持ち、入力は日付と時刻で受ける。日をまたぐ終了は 25:00 と書く
+ * （持ち方は日時のまま。書き方だけ。src/lib/sittings.ts の endClock / endFieldFor）
  */
 function checkUnnaturalModel(violations: Violation[]): void {
   for (const filePath of scheduleSourceFiles()) {
@@ -1116,12 +1232,12 @@ function checkUnnaturalModel(violations: Violation[]): void {
               "unnatural-model: a session's time is Log.sittings (start/end datetimes). Use sessionStart / sessionDays / fmtSessionWhen / SittingsInput from src/lib/sittings.ts instead of dates / t0 / t1.",
           });
         }
-        if (isUi && THIRTY_HOUR_CLOCK_RE.test(line)) {
+        if (isUi && NEXT_DAY_MARK_RE.test(line)) {
           violations.push({
             file: rel,
             line: i + 1,
             message:
-              "unnatural-model: do not ask for 30-hour clock times (25:30). Take a date and HH:MM times; an end before the start ends the next day (SittingsInput shows 「翌」).",
+              "unnatural-model: write an end time after midnight as 25:00 (endClock / endFieldFor in src/lib/sittings.ts), not 「翌 1:00」.",
           });
         }
       });
@@ -1340,6 +1456,46 @@ function checkScopePicker(violations: Violation[]): void {
   }
 }
 
+/**
+ * lint:server-catalog
+ * シナリオの共有シナリオ一覧はみんなで共有するもので、Firestore の scenarios にある（TALTO の分は scripts/sync-scenario-directory.ts が書く）。
+ * サーバーが /api/scenarios で問い合わせ、画面はその API で探す。共有シナリオ一覧の JSON（scripts/data/talto-catalog.json）を
+ * アプリから読まない（画面の塊にもサーバーの記憶にも載せない）。src/server/ は API（src/app/api/）と、
+ * サーバーだけで動く src/app のファイル（"use client" のない layout の generateMetadata・opengraph-image など）からだけ読む
+ */
+function checkServerCatalog(violations: Violation[]): void {
+  for (const filePath of walkFiles(path.join(ROOT_DIR, "src"))) {
+    const rel = toRel(filePath);
+    if (!/\.tsx?$/.test(rel) || /\.(?:test|spec)\./.test(rel) || rel.endsWith(".d.json.ts")) continue;
+    // テストの支え（src/test/）は API を本物の処理で答えるために読んでよい
+    if (rel.startsWith("src/test/")) continue;
+    const text = fs.readFileSync(filePath, "utf8");
+    const serverAppFile = rel.startsWith("src/app/") && !/^\s*["']use client["']/.test(text);
+    const lines = text.split(/\r?\n/);
+    lines.forEach((line, i) => {
+      if (/(from\s+|import\s*\(\s*)["'][^"']*talto-catalog\.json/.test(line))
+        violations.push({
+          file: rel,
+          line: i + 1,
+          message:
+            "The scenario directory lives in Firestore: do not import talto-catalog.json into the app (sync it with scripts/sync-scenario-directory.ts; search through /api/scenarios).",
+        });
+      if (
+        /(from\s+|import\s*\(\s*)["'][^"']*\/server\/[^"']*["']/.test(line) &&
+        !rel.startsWith("src/server/") &&
+        !rel.startsWith("src/app/api/") &&
+        !serverAppFile
+      )
+        violations.push({
+          file: rel,
+          line: i + 1,
+          message:
+            "src/server/ is server-only: import it only from src/app/api/ routes or server files in src/app (screens call the API).",
+        });
+    });
+  }
+}
+
 const violations: Violation[] = [];
 checkNoJsFiles(violations);
 checkNoRawSelect(violations);
@@ -1349,6 +1505,7 @@ checkButtonHoverAndTimelineRules(violations);
 checkPagesCohesion(violations);
 checkSelectedStateAndContact(violations);
 checkPublicPagesStayLight(violations);
+checkServerCatalog(violations);
 checkComboboxForGrowingOptions(violations);
 checkCommaSeparatedInput(violations);
 checkLetterAvatar(violations);
@@ -1359,6 +1516,8 @@ checkPeopleSafety(violations);
 checkRawDelta(violations);
 checkRawErrorMessage(violations);
 checkScopePicker(violations);
+checkGoogleButton(violations);
+checkGlossary(violations);
 
 if (violations.length > 0) {
   for (const v of violations) {

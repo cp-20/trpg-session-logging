@@ -7,6 +7,11 @@ import {
   formatChapters,
   mediaForSharedPage,
   mediaThumbnail,
+  mediaEditorFields,
+  mediaTitleLookupUrl,
+  needsConsentCheck,
+  normalizeMediaUrl,
+  titleFromOembed,
   embedAt,
   formatClock,
   mediaOffsetAt,
@@ -175,5 +180,48 @@ describe("一覧の見た目に使う URL", () => {
     expect(embedAt("https://www.youtube-nocookie.com/embed/abcdefghijk", 754)).toBe(
       "https://www.youtube-nocookie.com/embed/abcdefghijk?start=754&autoplay=1",
     );
+  });
+});
+
+describe("追加の流れ", () => {
+  it("貼られた URL を整え、スキームのないものには https:// を補う", () => {
+    expect(normalizeMediaUrl("  https://youtu.be/abcdefg  ")).toBe("https://youtu.be/abcdefg");
+    expect(normalizeMediaUrl("youtu.be/abcdefg")).toBe("https://youtu.be/abcdefg");
+    expect(normalizeMediaUrl("fusetter.com/tw/abc")).toBe("https://fusetter.com/tw/abc");
+    expect(normalizeMediaUrl("")).toBeNull();
+    expect(normalizeMediaUrl("録画は HDD にあります")).toBeNull();
+    expect(normalizeMediaUrl("ftp://example.com/a")).toBeNull();
+  });
+
+  it("題名は YouTube の動画だけ oEmbed で引く", () => {
+    expect(mediaTitleLookupUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe(
+      "https://www.youtube.com/oembed?format=json&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DdQw4w9WgXcQ",
+    );
+    expect(mediaTitleLookupUrl("https://www.youtube.com/playlist?list=PLx")).toBeUndefined();
+    expect(mediaTitleLookupUrl("https://fusetter.com/tw/abc")).toBeUndefined();
+    expect(titleFromOembed({ title: "  第一夜  " })).toBe("第一夜");
+    expect(titleFromOembed({ title: "" })).toBeUndefined();
+    expect(titleFromOembed(null)).toBeUndefined();
+  });
+
+  it("種類と置き場所で、最初に見せる欄と畳む欄を分ける", () => {
+    expect(mediaEditorFields("recording", "youtube")).toEqual({
+      main: [],
+      more: ["parts", "chapters", "startedAt", "pov", "credits", "expiresAt", "note"],
+    });
+    expect(mediaEditorFields("recording", "gigafile").main).toEqual(["expiresAt"]);
+    expect(mediaEditorFields("art", "pixiv")).toEqual({ main: ["credits"], more: ["expiresAt", "note"] });
+    // 再生できないものにパート・目次は出さない
+    expect(mediaEditorFields("impression", "fusetter").more).not.toContain("chapters");
+    // 値の入っている欄は種類を変えても残す
+    expect(mediaEditorFields("impression", null, ["pov"]).more).toContain("pov");
+  });
+
+  it("了承は録画・録音・配信を自分以外に見せるときだけ確かめる", () => {
+    expect(needsConsentCheck("recording", "members")).toBe(true);
+    expect(needsConsentCheck("stream", "public")).toBe(true);
+    expect(needsConsentCheck("recording", "self")).toBe(false);
+    expect(needsConsentCheck("replay", "public")).toBe(false);
+    expect(needsConsentCheck("impression", "members")).toBe(false);
   });
 });

@@ -14,7 +14,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
-import type { ComponentPropsWithRef, ReactNode, Ref } from "react";
+import type { ComponentPropsWithRef, CSSProperties, ReactNode, Ref } from "react";
 import { Link } from "../lib/router";
 import {
   MARK_BOARD,
@@ -26,12 +26,19 @@ import {
 } from "./brand";
 import { getJapaneseHolidayName } from "../lib/holidays";
 import { fmtDelta, todayStr } from "../lib/format";
-import { fmtDateText, parseDateText } from "../lib/date-text";
-import { nextSittingFields, normalizeTime, type SittingFields } from "../lib/sittings";
+import { fmtDateText, parseDateText, weekdaySuffix } from "../lib/date-text";
+import {
+  endFieldFor,
+  nextSittingFields,
+  normalizeEndTime,
+  normalizeTime,
+  type SittingFields,
+} from "../lib/sittings";
 import { DICETOUS_COMMONS, LEGAL_LINKS, rightsNoticesFor } from "../lib/rights";
 import { identiconDataUri } from "../lib/identicon";
 import { comboEntries, hasExactLabel } from "../lib/search-text";
 import type { ComboEntry, SearchOption } from "../lib/search-text";
+import type { ScoreMark } from "../lib/score-marks";
 import type { Scope, SystemDef, Table } from "../types";
 import {
   IconBooks,
@@ -108,9 +115,9 @@ export const SCOPE_META: Record<Scope, { label: string; hint: string; who: strin
       Icon: IconLock,
     },
     passed: {
-      label: "プレイした人",
+      label: "通過した人",
       hint: "このシナリオを通過した人も読めます",
-      who: "＋このシナリオを遊んだ人",
+      who: "＋このシナリオを通過した人",
       Icon: IconUsers,
     },
     public: {
@@ -123,7 +130,7 @@ export const SCOPE_META: Record<Scope, { label: string; hint: string; who: strin
 
 /**
  * 共有範囲を選ぶ。3 つを「だれが読めるか」と並べて見比べられるようにし、説明の段落を足さない（P4）。
- * 狭い順に並べる（メンバー限定 ⊂ プレイした人 ⊂ 公開）。
+ * 狭い順に並べる（メンバー限定 ⊂ 通過した人 ⊂ 公開）。
  */
 export function ScopePicker({
   value,
@@ -650,10 +657,13 @@ export function Combobox<T extends string = string>({
   id,
   limit = COMBOBOX_LIMIT,
   invalid,
+  onQueryChange,
 }: {
   value: T;
   options: readonly ComboboxOption<T>[];
   onChange: (value: T) => void;
+  /** 打った言葉（候補をサーバーで探すとき。閉じると空に戻る） */
+  onQueryChange?: (query: string) => void;
   ariaLabel?: string;
   placeholder?: string;
   pinned?: readonly T[];
@@ -690,6 +700,9 @@ export function Combobox<T extends string = string>({
     limit,
   });
   const pos = useAnchoredPopover(open, wrapRef);
+  useEffect(() => {
+    onQueryChange?.(query);
+  }, [query, onQueryChange]);
 
   useEffect(() => {
     if (!open || activeIdx < 0) return;
@@ -753,7 +766,9 @@ export function Combobox<T extends string = string>({
     <div
       ref={wrapRef}
       className={cx(
-        "input input-bordered relative flex max-w-full items-center gap-1 pr-1",
+        // 中の開閉ボタン（32px）に .input の上下の余白が足されて、隣の Select・入力欄より高くなっていた（42/46px）。
+        // 上下の余白は持たず、高さは min-h でそろえて中身は中央に置く
+        "input input-bordered relative flex max-w-full items-center gap-1 !py-0 pr-1",
         size === "sm" ? "input-sm min-h-9 pl-3" : "min-h-10 pl-3.5",
         invalid && "input-error",
         disabled && "pointer-events-none opacity-60",
@@ -1175,36 +1190,72 @@ function useModalDialog(
 }
 
 /**
- * 完了の印。譜に押す朱の角印（判子）。字は 1 字（既定は「済」、記録なら「記」）。CompletionModal の既定の stamp。
- * 字は明朝で描き、角の丸い二重枠で囲む
+ * 完了の印（既定）。円とチェックを線で描き切る。CompletionModal の stamp を渡さないときに出る
  */
-export function Seal({ char = "済", size = 84 }: { char?: string; size?: number }) {
+export function DoneMark({ size = 64 }: { size?: number }) {
   return (
-    <svg viewBox="0 0 84 84" width={size} height={size} className="text-primary" aria-hidden>
-      <rect x="5" y="5" width="74" height="74" rx="14" fill="none" stroke="currentColor" strokeWidth="5" />
-      <rect
-        x="12"
-        y="12"
-        width="60"
-        height="60"
-        rx="9"
-        fill="none"
+    <svg
+      viewBox="0 0 64 64"
+      width={size}
+      height={size}
+      className="done-mark text-primary"
+      aria-hidden
+      fill="none"
+    >
+      <circle
+        cx="32"
+        cy="32"
+        r="28"
+        pathLength={1}
         stroke="currentColor"
-        strokeWidth="1.5"
-        strokeOpacity=".65"
+        strokeWidth="3"
+        className="done-ring"
       />
-      <text
-        x="42"
-        y="43"
-        textAnchor="middle"
-        dominantBaseline="central"
-        fill="currentColor"
-        fontSize="44"
-        fontWeight="700"
-        fontFamily='"Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", serif'
-      >
-        {char}
-      </text>
+      <path
+        d="M20 33 L28.5 41 L45 24"
+        pathLength={1}
+        stroke="currentColor"
+        strokeWidth="4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="done-check"
+      />
+    </svg>
+  );
+}
+
+/**
+ * 記録の完了の演出: その回が 1 枚の譜になる。3 本の段が左から引かれ、ダイスの点が時間の順に置かれ、
+ * 最後に終止線が入る（朱はクリティカル、白抜きはファンブル）。点は scoreMarks（src/lib/score-marks.ts）で作る
+ */
+export function ScoreInscription({ marks, width = 240 }: { marks: readonly ScoreMark[]; width?: number }) {
+  const lanes = [20, 38, 56] as const;
+  const [x0, x1] = [12, 212];
+  return (
+    <svg
+      viewBox="0 0 240 76"
+      width={width}
+      height={(width * 76) / 240}
+      aria-hidden
+      className="score-inscription"
+    >
+      {lanes.map((y) => (
+        <path key={y} d={`M${x0} ${y} H226`} pathLength={1} className="score-line" />
+      ))}
+      {marks.map((m, i) => (
+        <circle
+          key={i}
+          cx={x0 + 6 + m.x * (x1 - x0 - 6)}
+          cy={lanes[m.lane]}
+          r={m.tone === "plain" ? 3.4 : 4.8}
+          className={cx("score-mark", m.tone === "crit" && "is-crit", m.tone === "fumble" && "is-fumble")}
+          style={{ "--x": m.x } as CSSProperties}
+        />
+      ))}
+      <g className="score-end">
+        <path d="M222 12 V64" strokeWidth="1.5" />
+        <path d="M229 12 V64" strokeWidth="4.5" />
+      </g>
     </svg>
   );
 }
@@ -1220,7 +1271,7 @@ export interface CompletionAction {
 
 /**
  * 大事な操作の完了（P11）。区切って、短い動きで「済んだ」を伝え、次の行動を主 1 つと副に絞る。
- * 判子を譜に押すような印（.motion-stamp）が、少し浮いてから押し込まれる。reduced-motion では動かない。
+ * モーダルが開き切ってから印（既定は DoneMark、記録は ScoreInscription）が描かれる。reduced-motion では動かない。
  * 開くと主操作にフォーカスするので、Enter でそのまま次へ進める。
  *
  * @example
@@ -1243,7 +1294,7 @@ export function CompletionModal({
   primary: CompletionAction;
   secondary?: readonly CompletionAction[];
   onClose: () => void;
-  /** 既定の角印（「済」）の代わりに押すもの。<Seal char="記" /> など */
+  /** 既定の印（DoneMark）の代わりに出すもの。<ScoreInscription marks={…} /> など */
   stamp?: ReactNode;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -1291,7 +1342,7 @@ export function CompletionModal({
           <IconX width={20} height={20} strokeWidth={2.2} />
         </button>
         <div className="flex flex-col items-center px-6 pt-9 text-center">
-          <span className="motion-stamp">{stamp ?? <Seal />}</span>
+          <span className="completion-mark">{stamp ?? <DoneMark />}</span>
           <h2 id={titleId} className="mt-5 text-lg font-bold sm:text-xl">
             {title}
           </h2>
@@ -1961,7 +2012,7 @@ export function DateBlock({
 
 /**
  * 遊んだ日時（集まり）の入力。1 行が 1 回で、日付・開始・終了を入れる。
- * 終了が開始より前なら翌日に終わる集まりとして「翌」を添える（25:30 のような書き方はさせない）。
+ * 日をまたぐ終了は 24 を足して書く（25:00）。01:00 と打っても開始より前なら欄を離れたときに 25:00 にそろえる。
  */
 export function SittingsInput({
   rows,
@@ -1982,9 +2033,6 @@ export function SittingsInput({
     <div className="space-y-2">
       <ol className="space-y-2">
         {rows.map((r, i) => {
-          const start = normalizeTime(r.start);
-          const end = normalizeTime(r.end);
-          const nextDay = Boolean(start && end && end <= start);
           const label = many ? `${i + 1}回目の` : "";
           const bad = invalidIndex === i;
           return (
@@ -2008,18 +2056,14 @@ export function SittingsInput({
                 <span className="text-ink2" aria-hidden>
                   〜
                 </span>
-                <span
-                  className={cx("w-4 text-center text-sm text-ink2", !nextDay && "invisible")}
-                  aria-hidden={!nextDay}
-                >
-                  翌
-                </span>
                 <TimeInput
-                  ariaLabel={`${label}終了時刻${nextDay ? "（翌日）" : ""}`}
+                  ariaLabel={`${label}終了時刻`}
+                  late
                   size={size}
                   invalid={bad}
                   value={r.end}
                   onChange={(v) => set(i, { end: v })}
+                  onCommit={(v) => set(i, { end: endFieldFor(r.start, v) })}
                 />
               </span>
               {many && (
@@ -2047,21 +2091,29 @@ export function SittingsInput({
   );
 }
 
-/** 時刻（HH:MM、0〜23 時）の入力。打ちかけの値はそのまま持ち、欄を離れたときに 09:05 の形にそろえる */
+/**
+ * 時刻（HH:MM、0〜23 時。終了は late で 47 時まで）の入力。打ちかけの値はそのまま持ち、
+ * 欄を離れたときに 09:05 の形にそろえる（onCommit があればそろえた値をそこへ渡す）
+ */
 function TimeInput({
   value,
   onChange,
+  onCommit,
+  late,
   ariaLabel,
   invalid,
   size = "md",
 }: {
   value: string;
   onChange: (v: string) => void;
+  onCommit?: (v: string) => void;
+  late?: boolean;
   ariaLabel: string;
   invalid?: boolean;
   size?: "sm" | "md";
 }) {
-  const unreadable = value.trim() !== "" && !normalizeTime(value);
+  const normalize = late ? normalizeEndTime : normalizeTime;
+  const unreadable = value.trim() !== "" && !normalize(value);
   return (
     <input
       aria-label={ariaLabel}
@@ -2077,8 +2129,10 @@ function TimeInput({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       onBlur={() => {
-        const t = normalizeTime(value);
-        if (t && t !== value) onChange(t);
+        const t = normalize(value);
+        if (!t) return;
+        if (onCommit) onCommit(t);
+        else if (t !== value) onChange(t);
       }}
     />
   );
@@ -2360,6 +2414,9 @@ export function DateInput({
 
   const openPicker = (focus: boolean) => setOpen({ focus, value: parseDateText(text) ?? lastIso.current });
   const unreadable = touched && text.trim() !== "" && !parseDateText(text);
+  // 打った日付のすぐ後ろに曜日（祝日なら「・祝」）を添える。暦を開かなくても曜日が分かるように
+  const typedIso = parseDateText(text);
+  const weekday = typedIso ? weekdaySuffix(typedIso, getJapaneseHolidayName) : "";
 
   return (
     <div
@@ -2416,6 +2473,21 @@ export function DateInput({
           if (fine && e.button === 0 && !disabled && !readOnly) openPicker(false);
         }}
       />
+      {weekday && (
+        // 入力欄と同じ左の余白・文字で、打った文字の幅だけ空けて曜日を置く（読み上げは日付の後に続ける）
+        <span
+          aria-hidden
+          className={cx(
+            "input pointer-events-none absolute inset-0 flex items-center overflow-hidden whitespace-pre tabular-nums",
+            size === "sm" && "input-sm",
+          )}
+          // 入力欄と同じ余白・文字にするため .input を借りる。面と枠は styles.css の .input が後勝ちするので直に消す
+          style={{ background: "transparent", borderColor: "transparent", outline: "none" }}
+        >
+          <span className="invisible">{text.trim()}</span>
+          <span className={cx("ml-1", weekdayTone(typedIso!))}>{weekday}</span>
+        </span>
+      )}
       <button
         ref={buttonRef}
         type="button"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fmtDateText, parseDateText } from "./date-text";
+import { fmtDateText, parseDateText, weekdaySuffix } from "./date-text";
 
 describe("parseDateText / fmtDateText", () => {
   it("区切りの違い・全角・年月日・8 桁を読む", () => {
@@ -33,5 +33,16 @@ describe("parseDateText / fmtDateText", () => {
   it("表示は YYYY/MM/DD", () => {
     expect(fmtDateText("2026-10-17")).toBe("2026/10/17");
     expect(fmtDateText("")).toBe("");
+  });
+});
+
+describe("weekdaySuffix", () => {
+  it("曜日と祝日を添え、読めない値には何も添えない", () => {
+    const holiday = (iso: string) => (iso === "2026-11-23" ? "勤労感謝の日" : null);
+    expect(weekdaySuffix("2026-11-17", holiday)).toBe("(火)");
+    expect(weekdaySuffix("2026-11-23", holiday)).toBe("(月・祝)");
+    expect(weekdaySuffix("2026-11-22")).toBe("(日)");
+    expect(weekdaySuffix("")).toBe("");
+    expect(weekdaySuffix("2026/11/17")).toBe("");
   });
 });

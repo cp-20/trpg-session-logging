@@ -476,7 +476,7 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
       {asideCol ? (
         <SplitLayout asideWidth="md" stickyAside main={mainCol} aside={asideCol} />
       ) : (
-        <div className="max-w-4xl">{mainCol}</div>
+        <div>{mainCol}</div>
       )}
 
       {editOpen &&

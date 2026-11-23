@@ -24,7 +24,7 @@ const config: Config & { daisyui?: Record<string, unknown> } = {
           "accent-content": "#fffaf5",
           neutral: "#221c17",
           "neutral-content": "#f3ece2",
-          "base-100": "#fffdf9",
+          "base-100": "#fcf7f0",
           "base-200": "#f2ebe0",
           "base-300": "#e2d7c5",
           "base-content": "#221c17",

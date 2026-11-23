@@ -94,7 +94,6 @@ export function PollCard({
 
   const tb = ev.tableId ? state.tables[ev.tableId] : undefined;
   const sc = ev.scenarioId ? state.scenarios[ev.scenarioId] : undefined;
-  const organiser = state.users[ev.createdBy];
   const candidates = pollCandidates(ev);
   const memberIds = pollMemberIds(ev, state);
   const okCounts = candidates.map((c) => memberIds.filter((id) => c.responses[id] === "ok").length);
@@ -117,7 +116,6 @@ export function PollCard({
               <Text style={[styles.metaText, { color: tokens.primary, fontWeight: "600" }]}>{sc.title}</Text>
             </Pressable>
           )}
-          {organiser && <Text style={[styles.metaText, { color: tokens.ink2 }]}>主催 {organiser.name}</Text>}
         </MetaRow>
         {ev.note && (
           <Text style={{ fontSize: 14, lineHeight: 20, color: tokens.ink2, marginTop: 6 }}>{ev.note}</Text>
@@ -145,7 +143,7 @@ export function PollCard({
                 <View>
                   <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "baseline", gap: 8 }}>
                     <Text style={[styles.candDate, styles.tabular, { color: tokens.ink }]}>
-                      {fmtDate(cand.date)} {cand.startTime}–{cand.endTime}
+                      {fmtDate(cand.date)} {cand.startTime}〜
                     </Text>
                     {durMin > 0 && <Text style={{ fontSize: 12, color: tokens.ink2 }}>{fmtDur(durMin)}</Text>}
                   </View>

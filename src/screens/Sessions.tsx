@@ -17,6 +17,8 @@ import { systemOptions } from "../lib/system-options";
 import { fmtDur, sessionPlayMinutes, todayStr, sessionStart, sessionDays } from "../lib/time";
 import { sessionsOfMe, useStore } from "../store";
 import type { Log } from "../types";
+import { sessionTitle } from "../lib/session-scenario";
+import { roleLabel } from "../lib/roles";
 
 /** 参加キャラクター（いなければPL）を顔アイコンの重なりと名前で示す */
 function Cast({ log, showKp }: { log: Log; showKp: boolean }) {
@@ -60,11 +62,17 @@ export const SessionRow = memo(function SessionRow({
   context?: "table" | "scenario";
 }) {
   const { state } = useStore();
-  const sc = log.scenarioId ? state.scenarios[log.scenarioId] : null;
   const tb = log.tableId ? state.tables[log.tableId] : null;
   const sys = SYSTEMS[log.systemId];
   const playMin = sessionPlayMinutes(log);
-  const showScenario = sc && context !== "scenario" && !log.title.includes(sc.title);
+  // セッションの呼び名はシナリオの題名。シナリオのページでは各行で繰り返さず、どの卓で遊んだかを見出しにする
+  const gm = state.users[log.ownerId];
+  const heading =
+    context === "scenario"
+      ? (tb?.name ??
+        (gm ? `${roleLabel(log.systemId, "GM")} ${gm.name}` : sessionTitle(log, state.scenarios)))
+      : sessionTitle(log, state.scenarios);
+  const showTable = tb && context !== "table" && heading !== tb.name;
 
   return (
     <Link to={href} className="group row-interactive flex items-start gap-4 px-4 py-4 sm:px-5">
@@ -75,12 +83,11 @@ export const SessionRow = memo(function SessionRow({
       />
       <div className="min-w-0 flex-1">
         <h3 className="truncate text-base font-bold leading-snug transition-colors group-hover:text-primary">
-          {log.title}
+          {heading}
         </h3>
         <div className="meta mt-1 text-xs sm:text-sm">
           <SysBadge sys={sys} />
-          {showScenario && <span className="max-w-48 truncate">{sc.title}</span>}
-          {tb && context !== "table" && <span className="max-w-40 truncate">{tb.name}</span>}
+          {showTable && <span className="max-w-40 truncate">{tb.name}</span>}
           {playMin > 0 && <span className="tabular-nums">{fmtDur(playMin)}</span>}
         </div>
         <Cast log={log} showKp={showKp} />
@@ -118,7 +125,7 @@ export default function Sessions() {
       const sc = l.scenarioId ? (state.scenarios[l.scenarioId]?.title ?? "") : "";
       const tb = l.tableId ? (state.tables[l.tableId]?.name ?? "") : "";
       const kpName = state.users[l.ownerId]?.name ?? "";
-      const parts = [l.title, sc, tb, kpName];
+      const parts = [sc, tb, kpName];
       for (const [uid, p] of Object.entries(l.players)) {
         if (state.users[uid]?.name) parts.push(state.users[uid]!.name);
         for (const cid of p.characterIds) {
@@ -182,7 +189,7 @@ export default function Sessions() {
 
   if (myLogs.length === 0) {
     return (
-      <div className="max-w-4xl">
+      <div>
         <PageHead title="セッション" />
         <div className="surface">
           <EmptyState
@@ -205,7 +212,7 @@ export default function Sessions() {
   }
 
   return (
-    <div className="max-w-4xl">
+    <div>
       <PageHead title="セッション" />
 
       <div className="mb-5 flex flex-col gap-2">

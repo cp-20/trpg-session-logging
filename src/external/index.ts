@@ -3,8 +3,8 @@ import { BRAND_COLORS, markContent } from "../components/brand";
 /* ---------- X 卓報告カード ---------- */
 
 export interface ReportCardData {
-  scenarioTitle?: string;
   scenarioEmoji?: string;
+  /** セッションの呼び名（= シナリオの題名） */
   title: string;
   dateLabel: string;
   systemName: string;
@@ -26,9 +26,8 @@ export function buildReportCardSVG(d: ReportCardData): string {
           .slice(0, count - 1)
           .join("") + "…"
       : s;
-  const mainTitle = Array.from(clip(d.scenarioTitle ?? d.title, 36));
+  const mainTitle = Array.from(clip(d.title, 36));
   const lines = [mainTitle.slice(0, 18).join(""), mainTitle.slice(18).join("")].filter(Boolean);
-  const subTitle = d.scenarioTitle && d.title && d.title !== d.scenarioTitle ? clip(d.title, 36) : "";
   let host = "卓譜";
   try {
     host = new URL(d.shareUrl).hostname;
@@ -45,7 +44,6 @@ export function buildReportCardSVG(d: ReportCardData): string {
   <line x1="40" y1="72" x2="560" y2="72" stroke="#e2d7c5" stroke-width="1"/>
   <text x="40" y="102" font-family="'Noto Sans JP', 'Hiragino Sans', sans-serif" font-weight="700" font-size="12" fill="${BRAND_COLORS.tile}">${esc(clip(d.systemName, 40))}</text>
   ${lines.map((line, i) => `<text x="40" y="${138 + i * 36}" font-family="'Noto Sans JP', 'Hiragino Sans', sans-serif" font-weight="700" font-size="25" fill="#221c17">${esc(line)}</text>`).join("")}
-  ${subTitle ? `<text x="40" y="${lines.length > 1 ? 204 : 172}" font-family="'Noto Sans JP', 'Hiragino Sans', sans-serif" font-weight="500" font-size="13" fill="#68594c">${esc(subTitle)}</text>` : ""}
   <text x="40" y="242" font-family="'Noto Sans JP', 'Hiragino Sans', sans-serif" font-weight="500" font-size="13" fill="#221c17">${esc(clip(d.dateLabel, 34))}  ·  ${d.playerCount}人でプレイ</text>
   <line x1="40" y1="264" x2="560" y2="264" stroke="#e2d7c5" stroke-width="1"/>
   <text x="560" y="292" text-anchor="end" font-family="'Noto Sans JP', 'Hiragino Sans', sans-serif" font-weight="500" font-size="12" fill="#68594c">${esc(host)}</text>
@@ -85,8 +83,7 @@ export async function downloadReportPNG(svg: string, filename: string): Promise<
 }
 
 export function reportTweetText(d: ReportCardData): string {
-  const label = d.scenarioTitle ?? d.title;
-  return `「${label}」を${d.playerCount}人でプレイしました #卓報告`;
+  return `「${d.title}」を${d.playerCount}人でプレイしました #卓報告`;
 }
 
 export function xIntentUrl(d: ReportCardData): string {

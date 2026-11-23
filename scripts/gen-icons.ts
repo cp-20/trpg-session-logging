@@ -88,14 +88,14 @@ interface IconSet {
 
 /**
  * tabler に合うものがない概念は、tabler と同じ約束（24 四方・線のみ・stroke-width 2・丸い端）で描いてここに置く。
- * - table: 卓（卓を囲む人）。tabler の users-group は「人の集まり」で、卓（テーブルを囲む場）に見えない
+ * - table: 卓。天板と脚だけの机（人を描き込むと小さい大きさで潰れ、卓に見えなかった。2026-11-22）
  */
 const CUSTOM: IconSet = {
   width: 24,
   height: 24,
   icons: {
     table: {
-      body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="7.5" cy="4.75" r="2.25"/><circle cx="16.5" cy="4.75" r="2.25"/><path d="M3.75 11c.55-1.75 1.95-2.75 3.75-2.75s3.2 1 3.75 2.75m1.5 0c.55-1.75 1.95-2.75 3.75-2.75s3.2 1 3.75 2.75"/><ellipse cx="12" cy="17.5" rx="9" ry="3.5"/></g>',
+      body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><ellipse cx="12" cy="10" rx="9" ry="4"/><path d="M5 12.5V19M19 12.5V19M12 14v6"/></g>',
     },
   },
 };

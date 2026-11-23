@@ -40,7 +40,7 @@ export default function NewScenarioScreen() {
       s.scenarios[id] = {
         id,
         title: title.trim(),
-        author: author.trim() || "不明",
+        author: author.trim(),
         systemId,
         source: sourceFromUrl(sourceUrl),
         sourceUrl: sourceUrl.trim() || undefined,

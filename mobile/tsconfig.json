@@ -4,6 +4,8 @@
     "strict": true,
     "allowJs": false,
     "allowArbitraryExtensions": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "jsx": "react-jsx",
     "lib": [
       "DOM",

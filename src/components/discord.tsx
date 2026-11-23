@@ -27,7 +27,6 @@ import {
   FormRow,
   InlineNotice,
   PageHead,
-  Seal,
   SettingRow,
   TableMark,
 } from "./ui";
@@ -91,7 +90,7 @@ export function DiscordAccountRow() {
       >
         {authUser && account !== undefined && (
           <button className="btn btn-sm" disabled={busy} onClick={account ? disconnect : connect}>
-            {busy ? "接続中…" : account ? "連携を解除" : "連携する"}
+            {busy ? "連携中…" : account ? "連携を解除" : "連携する"}
           </button>
         )}
       </SettingRow>
@@ -243,7 +242,7 @@ export function DiscordChannelLink() {
   const head = <PageHead back={{ to: "/tables", label: "卓" }} title="Discord のチャンネルとつなぐ" />;
   if (!authUser)
     return (
-      <div className="max-w-3xl">
+      <div>
         {head}
         <div className="surface">
           <EmptyState kind="permission" title="ログインしてから開いてください" />
@@ -252,14 +251,14 @@ export function DiscordChannelLink() {
     );
   if (preview === undefined)
     return (
-      <div className="max-w-3xl">
+      <div>
         {head}
         <InlineNotice tone="pending" text="リンクを確かめています…" />
       </div>
     );
   if (!preview)
     return (
-      <div className="max-w-3xl">
+      <div>
         {head}
         <div className="surface">
           <EmptyState kind="permission" title="リンクの期限が切れています">
@@ -270,7 +269,7 @@ export function DiscordChannelLink() {
     );
 
   return (
-    <div className="max-w-3xl">
+    <div>
       <PageHead
         back={{ to: "/tables", label: "卓" }}
         title="Discord のチャンネルとつなぐ"
@@ -322,7 +321,6 @@ export function DiscordChannelLink() {
       {linked && (
         <CompletionModal
           title="チャンネルとつなぎました"
-          stamp={<Seal />}
           onClose={() => nav({ to: `/tables/${linked.id}` })}
           primary={{ label: "卓を開く", to: `/tables/${linked.id}` }}
         >

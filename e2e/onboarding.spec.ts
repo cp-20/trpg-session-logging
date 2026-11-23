@@ -63,7 +63,7 @@ for (const mode of MODES) {
     await expect(done).toContainText("@mikan_e2e");
     await page.waitForTimeout(700); // 印を押す動きが落ち着いてから測る
     await audit("done");
-    await done.getByRole("link", { name: "続きを開く" }).click();
+    await done.getByRole("link", { name: "卓を開く" }).click();
     await page.waitForURL(/\/tables$/);
     // 常設の「卓譜へようこそ」は出さない
     await expect(page.getByText("卓譜へようこそ")).toHaveCount(0);

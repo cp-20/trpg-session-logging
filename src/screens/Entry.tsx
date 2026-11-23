@@ -26,7 +26,6 @@ import {
   UserName,
   userAvatarSrc,
 } from "../components/identity";
-import { identiconDataUri } from "../lib/identicon";
 import { alternateHandle, HANDLE_MAX, handleProblem, normalizeHandle, suggestHandle } from "../lib/handle";
 import { applyJoinedTable, findLocalInvite, handleTakenLocally, type TableInviteView } from "../lib/people";
 import {
@@ -44,9 +43,10 @@ import { IconBooks, IconCheck, IconUserPlus } from "../components/icons";
 import { getSharedInvite, acceptSharedInvite, type SharedInvite } from "../lib/cloud-state";
 import { authErrorMessage, signInWithGoogle } from "../lib/auth";
 import { isFirebaseConfigured } from "../lib/firebase";
-import { safeNextPath } from "../lib/next-path";
+import { destinationLabel, safeNextPath } from "../lib/next-path";
 import { GoogleSignInButton } from "../components/identity";
 import { PublicFrame } from "./Landing";
+import { sessionTitle } from "../lib/session-scenario";
 
 /**
  * 招待リンク着地ページ。
@@ -63,13 +63,11 @@ export default function ClaimInvite() {
 function InviteHead({
   title,
   systemId,
-  scenarioTitle,
   dates,
   inviter,
 }: {
   title: string;
   systemId: string;
-  scenarioTitle?: string;
   dates?: string[];
   inviter?: ReactNode;
 }) {
@@ -84,12 +82,6 @@ function InviteHead({
           <div className="meta">
             {sys && <SysBadge sys={sys} />}
             {dates && dates.length > 0 && <span>{fmtDates(dates)}</span>}
-            {scenarioTitle && (
-              <span className="inline-flex items-center gap-1">
-                <IconBooks width={14} height={14} aria-hidden />
-                {scenarioTitle}
-              </span>
-            )}
           </div>
         </>
       }
@@ -133,7 +125,7 @@ function RemoteClaimInvite({ token }: { token: string }) {
   }
   if (!invite) {
     return (
-      <div className="mx-auto max-w-2xl">
+      <div>
         <PageHead title="招待を開けませんでした" />
         <div className="surface p-5 sm:p-6">
           <p className="text-sm leading-7">
@@ -147,8 +139,8 @@ function RemoteClaimInvite({ token }: { token: string }) {
     );
   }
   return (
-    <div className="mx-auto max-w-2xl">
-      <InviteHead title={invite.title} systemId={invite.systemId} scenarioTitle={invite.scenarioTitle} />
+    <div>
+      <InviteHead title={invite.title} systemId={invite.systemId} />
       <section className="surface p-5 sm:p-6">
         <p className="text-sm leading-relaxed">
           参加すると、このセッションがあなたの記録に入り、ログを読めるようになります。参加はあとから外せます。
@@ -270,9 +262,8 @@ function LocalClaimInvite() {
 
   const head = (
     <InviteHead
-      title={log.title}
+      title={sessionTitle(log, state.scenarios)}
       systemId={log.systemId}
-      scenarioTitle={scenario?.title}
       dates={sessionDays(log)}
       inviter={
         kp && !joined && !already
@@ -288,7 +279,7 @@ function LocalClaimInvite() {
     const myChar = mine ? state.characters[mine] : undefined;
     const meUser = state.users[me];
     return (
-      <div className="mx-auto max-w-2xl">
+      <div>
         {head}
         <section className="surface" aria-label="参加者">
           <div className="list">
@@ -335,7 +326,7 @@ function LocalClaimInvite() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl">
+    <div>
       {head}
 
       <section className="surface p-5 sm:p-6">
@@ -465,6 +456,10 @@ export function SignIn() {
   const next = safeNextPath(useSearchParam("next"));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // もう使い始めている（ログイン済み・サンプル中）なら、ログインの画面を挟まず行き先へ送る
+  useEffect(() => {
+    if (state.entered) nav({ to: next, replace: true });
+  }, [state.entered, next, nav]);
   return (
     <PublicFrame width="max-w-md" hideLogin>
       <section aria-labelledby="signin-title">
@@ -518,7 +513,7 @@ export function SignIn() {
             <div className="mt-8 border-t border-base-300 pt-6">
               <h2 className="text-sm font-bold">アカウントを作らずに試す</h2>
               <p className="mt-1 text-xs leading-relaxed text-ink2">
-                サンプルの卓と探索者が入った状態で開きます。変更はこのブラウザにだけ保存されます。
+                サンプルの卓とキャラクターが入った状態で開きます。変更はこのブラウザにだけ保存されます。
               </p>
               <button
                 type="button"
@@ -555,7 +550,7 @@ function WelcomeFrame({ step, children }: { step: WelcomeStep; children: ReactNo
   return (
     <div className="flex min-h-dvh flex-col bg-base-200">
       <header className="border-b border-base-300 bg-base-100">
-        <div className="mx-auto flex h-14 max-w-xl items-center gap-3 px-4 sm:px-6">
+        <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 sm:px-6">
           <span className="flex items-center gap-2 text-primary">
             <LogoMark size={22} />
             <span className="font-bold tracking-tight text-base-content">卓譜</span>
@@ -601,7 +596,7 @@ function WelcomeCard({
   primary,
 }: {
   title: string;
-  lead: string;
+  lead?: string;
   children: ReactNode;
   onBack?: () => void;
   onSkip?: () => void;
@@ -613,7 +608,7 @@ function WelcomeCard({
         <h1 id="welcome-title" className="text-xl font-bold">
           {title}
         </h1>
-        <p className="mt-1.5 text-sm text-ink2">{lead}</p>
+        {lead && <p className="mt-1.5 text-sm text-ink2">{lead}</p>}
         <div className="mt-6">{children}</div>
       </div>
       <div className="mt-7 flex items-center gap-2 border-t border-base-300 px-5 py-4 sm:px-7">
@@ -743,8 +738,12 @@ export function Welcome() {
       {finished && (
         <CompletionModal
           title="卓譜の準備ができました"
-          stamp={<Avatar u={state.users[state.me]!} size={72} />}
-          primary={{ label: next === "/home" ? "ホームを開く" : "続きを開く", to: next }}
+          stamp={
+            <span className="motion-reveal">
+              <Avatar u={state.users[state.me]!} size={72} />
+            </span>
+          }
+          primary={{ label: destinationLabel(next), to: next }}
           secondary={[
             { label: "セッションのログを取り込む", to: "/upload" },
             { label: "キャラシを取り込む", to: "/characters" },
@@ -835,7 +834,7 @@ function WelcomeHandle({ onDone }: { onDone: () => void }) {
   return (
     <WelcomeCard
       title="ユーザー ID を決めましょう"
-      lead="プロフィールの URL とアイコンになり、あとから変えられません。"
+      lead="プロフィールの URL になり、あとから変えられません。"
       primary={
         <button
           type="button"
@@ -853,16 +852,8 @@ function WelcomeHandle({ onDone }: { onDone: () => void }) {
           e.preventDefault();
           void submit();
         }}
-        className="flex items-start gap-4"
       >
-        <img
-          src={identiconDataUri(handleProblem(handle) ? me.id : handle, "user")}
-          alt=""
-          width={56}
-          height={56}
-          className="size-14 shrink-0 rounded-full"
-        />
-        <div className="min-w-0 grow">
+        <div>
           <label htmlFor="welcome-handle" className="sr-only">
             ユーザー ID
           </label>
@@ -971,7 +962,6 @@ function WelcomeIcon({ onBack, onDone }: { onBack: () => void; onDone: () => voi
   return (
     <WelcomeCard
       title="アイコンを選びましょう"
-      lead="ID から作った印が既定で、好きな画像にも替えられます。"
       onBack={onBack}
       onSkip={() => save("")}
       primary={
@@ -983,15 +973,9 @@ function WelcomeIcon({ onBack, onDone }: { onBack: () => void; onDone: () => voi
       <ImageUploadField
         value={image}
         onChange={setImage}
-        label="アイコンの画像を選ぶ"
-        preview={<Avatar u={{ ...me, image: image || undefined }} size={72} />}
-        extra={
-          google && image !== google ? (
-            <button type="button" className="btn btn-sm" onClick={() => setImage(google)}>
-              Google の画像を使う
-            </button>
-          ) : undefined
-        }
+        label="アイコン"
+        render={(src) => <Avatar u={{ ...me, image: src || undefined }} size={56} />}
+        choices={google ? [{ value: google, label: "Google" }] : []}
       />
     </WelcomeCard>
   );
@@ -1056,7 +1040,7 @@ export function JoinTable() {
   }
   if (!view) {
     return (
-      <div className="mx-auto max-w-2xl">
+      <div>
         <PageHead title="招待を開けませんでした" />
         <div className="surface p-5 sm:p-6">
           <p className="text-sm">{error ?? "期限が切れたか、無効になった招待です。"}</p>
@@ -1096,7 +1080,7 @@ export function JoinTable() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl">
+    <div>
       <PageHead
         eyebrow="卓への招待"
         lead={<TableMark table={{ id: view.tableId, image: view.image }} size={56} />}

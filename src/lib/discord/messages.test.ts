@@ -42,7 +42,7 @@ describe("日程調整のメッセージ", () => {
   it("候補ごとの ○△× の数と「回答する」を出し、メンションは効かせない", () => {
     const m = pollMessage(samplePoll(), { tableName: "港町卓" }, "https://takufu.test");
     expect(m.embeds?.[0]?.description).toContain("○ 1　△ 0　× 0");
-    expect(m.embeds?.[0]?.description).toContain("翌01:00");
+    expect(m.embeds?.[0]?.description).toContain("21:00〜25:00");
     expect(m.components?.[0]?.components.map((b) => b.label)).toEqual(["回答する", "卓譜で開く"]);
     noMentions(m);
   });
@@ -76,9 +76,9 @@ describe("日程調整のメッセージ", () => {
     expect(last.flags).toBe(64);
   });
 
-  it("候補の日時は日本時間で、日をまたぐと「翌」", () => {
+  it("候補の日時は日本時間で、日をまたぐと 24 を足した時刻", () => {
     expect(fmtCandidate({ id: "c", date: "2026-11-28", startTime: "21:00", endTime: "01:30" })).toBe(
-      "11月28日(土) 21:00〜翌01:30",
+      "11月28日(土) 21:00〜25:30",
     );
   });
 });
@@ -98,7 +98,7 @@ describe("記録の投稿", () => {
     noMentions(m);
   });
 
-  it("メンバー限定・プレイした人限定では、題名を出さずリンクだけにする", () => {
+  it("メンバー限定・通過した人限定では、題名を出さずリンクだけにする", () => {
     for (const info of [
       { ...base, scope: "members" as const },
       { ...base, scope: "passed" as const },

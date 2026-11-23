@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { IdenticonKind } from "./identicon";
-import { IDENTICON_INKS, PATTERN_IDS, identiconDataUri, identiconSpec, identiconSvg } from "./identicon";
+import {
+  HAIR_STYLES,
+  HAIR_TONES,
+  IDENTICON_INKS,
+  PATTERN_IDS,
+  SKIN_TONES,
+  identiconDataUri,
+  identiconSpec,
+  identiconSvg,
+} from "./identicon";
 
 const KINDS: IdenticonKind[] = ["user", "table", "character"];
 
@@ -31,10 +40,38 @@ describe("identicon", () => {
     expect(identiconSvg("user_a", "user")).not.toBe(identiconSvg("user_b", "user"));
   });
 
+  it("人とキャラは人の姿で、髪形・髪色・肌・服・地が散らばる", () => {
+    for (const kind of ["user", "character"] as const) {
+      const figs = Array.from({ length: 400 }, (_, i) => identiconSpec(`p_${i}`, kind).figure!);
+      expect(new Set(figs.map((f) => f.hair)).size).toBe(HAIR_STYLES.length);
+      expect(new Set(figs.map((f) => f.hairTone)).size).toBe(HAIR_TONES.length);
+      expect(new Set(figs.map((f) => f.skin)).size).toBe(SKIN_TONES.length);
+      expect(figs.some((f) => f.glasses)).toBe(true);
+      expect(figs.some((f) => !f.glasses)).toBe(true);
+      const looks = new Set(
+        Array.from({ length: 400 }, (_, i) => {
+          const s = identiconSpec(`p_${i}`, kind);
+          const f = s.figure!;
+          return `${s.ink}/${f.hair}/${f.hairTone}/${f.skin}/${f.neckline}/${f.ground}/${f.glasses}`;
+        }),
+      );
+      expect(looks.size).toBeGreaterThan(380);
+      // 地は服と別の顔料なので、肩が地に溶けない
+      for (let i = 0; i < 200; i++) {
+        const s = identiconSpec(`g_${i}`, kind);
+        expect(s.figure!.ground).not.toBe(s.ink);
+      }
+    }
+    expect(identiconSpec("x", "table").figure).toBeNull();
+  });
+
   it("人・卓・キャラは同じ種でも別の形", () => {
     const [u, t, c] = KINDS.map((k) => identiconSvg("same", k));
     expect(new Set([u, t, c]).size).toBe(3);
     expect(t).toContain("<rect");
+    // キャラは和柄の地、人は無地
+    expect(c).toContain("<pattern");
+    expect(u).not.toContain("<pattern");
   });
 
   it("卓の印にはダイスの目が 1〜6 個ある", () => {

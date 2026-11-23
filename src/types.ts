@@ -101,6 +101,11 @@ export interface Scenario {
   /** カタログ行の由来: system = 取り込み等によるシステム側登録 / user = ユーザーが自由に追加 */
   addedBy: "system" | "user";
   addedByUid?: string;
+  /**
+   * 共有シナリオ一覧に出さない（足した本人と、このシナリオのセッションの共有ページを読める人だけが見る）。
+   * 自作のシナリオや、キャラクター作成・事前相談のようなシナリオを持たない集まりに使う
+   */
+  private?: boolean;
   /** カタログ上で既知のラン数（この卓での記録の外側） */
   extraRuns?: number;
   externalSync?: ExternalSyncConfig;
@@ -181,11 +186,14 @@ export interface SessionImpression {
   spoiler: boolean;
 }
 
+/**
+ * セッション: 1 つのシナリオを通しで遊んだ 1 回。名前は持たず、シナリオの題名で呼ぶ。
+ * 同じシナリオをもう一度遊んだら別のセッション。何夜かに分けて遊んだら sittings が複数になる
+ */
 export interface Log {
   id: string;
-  title: string;
   tableId?: string;
-  scenarioId?: string;
+  scenarioId: string;
   systemId: string;
   ownerId: string;
   scope: Scope;
@@ -327,6 +335,8 @@ export interface ScenarioEditRequest {
   id: string;
   scenarioId: string;
   uid: string;
+  /** 送った人の名前（ほかの人の提案は、名前を手元に持っていないので文書に添える） */
+  requesterName?: string;
   at: string;
   changes?: ScenarioEditChanges;
   note?: string;

@@ -24,6 +24,7 @@ import { mobileAuthErrorMessage } from "../../lib/firebase-mobile";
 import { hapticSuccess } from "../../native/haptics";
 import { useMobileStore } from "../../store/mobile-store";
 import { useTheme } from "../../theme/ThemeProvider";
+import { sessionTitle } from "@shared/lib/session-scenario";
 
 export default function ClaimInviteScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -94,20 +95,7 @@ function RemoteClaimInvite({ token }: { token: string }) {
       <Text style={{ fontSize: 12, fontWeight: "700", color: tokens.ink2, marginBottom: 4 }}>
         セッションへの招待
       </Text>
-      <PageHead
-        title={invite.title}
-        sub={
-          <MetaRow>
-            {sys && <SysBadge sys={sys} />}
-            {invite.scenarioTitle && (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <IconBooks size={14} color={tokens.ink2} />
-                <Text style={{ fontSize: 13, color: tokens.ink2 }}>{invite.scenarioTitle}</Text>
-              </View>
-            )}
-          </MetaRow>
-        }
-      />
+      <PageHead title={invite.title} sub={<MetaRow>{sys && <SysBadge sys={sys} />}</MetaRow>} />
       <Surface style={{ padding: 18, gap: 14 }}>
         <Text style={{ fontSize: 14, lineHeight: 21, color: tokens.ink }}>
           参加すると、このセッションがあなたの記録に入り、ログを読めるようになります。参加はあとから外せます。
@@ -230,7 +218,7 @@ function LocalClaimInvite({ logId }: { logId: string }) {
         セッションへの招待
       </Text>
       <PageHead
-        title={log.title}
+        title={sessionTitle(log, state.scenarios)}
         sub={
           <View style={{ gap: 4 }}>
             {kp && !joined && !already && (

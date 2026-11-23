@@ -40,7 +40,7 @@ export default function SessionsScreen() {
       list = list.filter((l) => {
         const sc = l.scenarioId ? state.scenarios[l.scenarioId]?.title : "";
         const tb = l.tableId ? state.tables[l.tableId]?.name : "";
-        return [l.title, sc, tb].some((t) => t?.toLowerCase().includes(needle));
+        return [sc, tb].some((t) => t?.toLowerCase().includes(needle));
       });
     }
     return list.sort((a, b) => sessionStart(b) - sessionStart(a));

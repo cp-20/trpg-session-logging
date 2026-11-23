@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { addScenario } from "./support/scenario";
 import path from "node:path";
 
 /**
@@ -19,7 +20,7 @@ test("実ログファイルを解析して保存し、共有ビューでも全�
   await expect(page.getByText("ccfolia-sample.json")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("教室の黒板、まだ新しい。")).toBeVisible();
   await expect(page.getByText("【シークレット】黒板に文字を書いたのは")).toBeVisible();
-  await page.getByLabel("タイトル", { exact: true }).fill("CCFOLIA 実ファイル取り込み");
+  await addScenario(page, "CCFOLIA 実ファイル取り込み");
   await page.getByRole("button", { name: "記録する", exact: true }).click({ force: true });
   await expect(page.getByRole("heading", { name: "セッションを記録しました", exact: true })).toBeVisible();
 

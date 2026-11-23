@@ -334,7 +334,7 @@ export function sessionMessage(slug: string, info: SharedLogInfo, baseUrl: strin
   const url = `${baseUrl}/share/l/${encodeURIComponent(slug)}`;
   const anonymous = info.scope === "public";
   if (!anonymous || !info.title) {
-    const who = info.scope === "members" ? "卓のメンバー" : "このシナリオをプレイした人";
+    const who = info.scope === "members" ? "卓のメンバー" : "このシナリオを通過した人";
     return {
       content: `セッションを記録しました。共有ページは${who}だけが読めます。`,
       components: [{ type: 1, components: [linkButton("共有ページを開く", url)] }],
@@ -343,7 +343,6 @@ export function sessionMessage(slug: string, info: SharedLogInfo, baseUrl: strin
   }
   const sys = info.systemId ? SYSTEMS[info.systemId]?.name : undefined;
   const lines = [
-    info.scenarioTitle && info.scenarioTitle !== info.title ? plain(info.scenarioTitle) : null,
     sys ?? null,
     info.sittings?.length ? fmtSessionWhen({ sittings: info.sittings }) : null,
   ].filter(Boolean);

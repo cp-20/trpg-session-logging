@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { addScenario, waitForLogByScenario } from "./support/scenario";
 
 /**
  * 招待フローの E2E:
@@ -14,26 +15,17 @@ test("招待リンクから別ユーザーが自己紐付けでき、参加者�
   // KP(みかん)がログなしセッションを作成(統合された /upload フローから)
   await page.goto("/upload");
   await page.getByRole("button", { name: "ログなしで記録する" }).click({ force: true });
-  await page.getByLabel("タイトル", { exact: true }).fill("招待E2Eの卓");
+  await addScenario(page, "招待E2Eの卓");
   await page.getByRole("button", { name: "記録する", exact: true }).click({ force: true });
   await expect(page.getByRole("heading", { name: "セッションを記録しました", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "セッションを開く", exact: true }).click({ force: true });
   await expect(page).toHaveURL(/\/sessions\/s_/);
 
-  const logId = await page.waitForFunction(
-    () => {
-      const st = JSON.parse(localStorage.getItem("takufu-state-v4") ?? "{}");
-      const id = Object.keys(st.logs ?? {}).find((k) => st.logs[k]?.title === "招待E2Eの卓");
-      return id ?? null;
-    },
-    undefined,
-    { polling: 250 },
-  );
-  const id = (await logId.jsonValue()) as string;
+  const { id } = await waitForLogByScenario(page, "招待E2Eの卓");
 
   // そらとして入り直す
   await page.goto("/settings");
-  await page.getByRole("button", { name: "デモ利用者を切替" }).click({ force: true });
+  await page.getByRole("button", { name: "サンプルの利用者を切り替える" }).click({ force: true });
   await page.getByRole("button", { name: /そら/ }).click({ force: true });
 
   // 招待URL着地 → 発言者なしで参加

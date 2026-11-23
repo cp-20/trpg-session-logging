@@ -7,6 +7,7 @@ import { idbGet, idbSet, LOCAL_STORAGE_MAX_CHARS } from "./lib/local-db";
 import { parseSavedState, validateSavedState } from "./lib/state-schema";
 import { download, todayStr } from "./lib/time";
 import { userFacingError } from "./lib/user-error";
+import { hasDemoData, stripDemoData } from "./lib/demo-cleanup";
 
 async function readLocalSnapshot(storageKey: string): Promise<{
   state: State | null;
@@ -150,6 +151,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 /* best effort */
               }
               setRecovery(rawBackup);
+            }
+          }
+
+          // 前の版で体験版の見本が記録に紛れ込んでいたら除き、クラウドへ書き戻す（src/lib/demo-cleanup.ts）
+          if (hasDemoData(state, user.uid)) {
+            const { seedState } = await import("./data/seed");
+            if (!alive || run !== generation) return;
+            const cleaned = stripDemoData(state, seedState(), user.uid);
+            if (cleaned.removed > 0) {
+              state = cleaned.state;
+              try {
+                localStorage.setItem(`${key}-pending`, "true");
+              } catch {
+                /* 書き戻しは次の変更のときにも行われる */
+              }
             }
           }
 

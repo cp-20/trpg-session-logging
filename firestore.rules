@@ -263,6 +263,58 @@ service cloud.firestore {
           && request.resource.data.discord.keys().hasOnly(['guildId', 'channelId', 'messageId', 'scheduledEventId']));
       allow delete: if owner(resource.data);
     }
+    // シナリオの共有シナリオ一覧（利用者みんなで共有する。src/lib/scenario-directory.ts）。だれでも読め、サーバーの検索（/api/scenarios）が問い合わせる。
+    // TALTO の作品（sc_talto_*）はボットだけが書く（scripts/sync-scenario-directory.ts）。利用者が足したものは足した本人だけが書き換える。
+    // 利用者の分は消さない（ほかの人の記録が結んでいるため）
+    function validScenario(d) {
+      return d.keys().hasOnly(['title', 'author', 'systemId', 'source', 'sourceUrl', 'tags', 'description', 'addedByUid', 'rank', 'sysRank', 't', 'updatedAt'])
+        && d.addedByUid == request.auth.uid
+        && d.updatedAt == request.time
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 200
+        && d.author is string && d.author.size() <= 200
+        && d.systemId is string && d.systemId.size() > 0 && d.systemId.size() <= 64
+        && d.source in ['booth', 'talto', 'url', 'manual']
+        && (!('sourceUrl' in d) || (d.sourceUrl is string && d.sourceUrl.size() <= 500))
+        && d.tags is list && d.tags.size() <= 20
+        && (!('description' in d) || (d.description is string && d.description.size() <= 2000))
+        // 並びは TALTO のものの後ろ（USER_RANK）。探す手がかり（切れ端）は 400 まで
+        && d.rank == 1000000000 && d.sysRank == d.systemId + ':1000000000'
+        && d.t is map && d.t.size() <= 400;
+    }
+    match /scenarios/{scenarioId} {
+      allow get, list: if true;
+      allow create, update, delete: if isBot() && scenarioId.matches('sc_talto_.*');
+      allow create: if signedIn() && !scenarioId.matches('sc_talto_.*') && scenarioId.size() <= 64
+        && validScenario(request.resource.data);
+      allow update: if signedIn() && resource.data.addedByUid == request.auth.uid
+        && validScenario(request.resource.data);
+    }
+
+    // シナリオの修正の提案（src/lib/scenario-edit-requests.ts）。足した人ではない人が送り、足した人が反映か却下を決める。
+    // 読めるのは送った人と足した人だけ。問い合わせは uid か ownerUid で絞る
+    match /scenarioEditRequests/{requestId} {
+      allow get, list: if signedIn()
+        && (resource.data.uid == request.auth.uid || resource.data.ownerUid == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['scenarioId', 'uid', 'requesterName', 'ownerUid', 'changes', 'note', 'status', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.requesterName is string && request.resource.data.requesterName.size() <= 100
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.scenarioId is string
+        && request.resource.data.ownerUid is string
+        && request.resource.data.ownerUid != request.auth.uid
+        && request.resource.data.ownerUid
+          == get(/databases/$(database)/documents/scenarios/$(request.resource.data.scenarioId)).data.addedByUid
+        && request.resource.data.changes is map
+        && request.resource.data.changes.keys().hasOnly(['title', 'author', 'systemId', 'sourceUrl', 'tags', 'description'])
+        && (!('note' in request.resource.data) || (request.resource.data.note is string && request.resource.data.note.size() <= 1000));
+      allow update: if signedIn() && resource.data.ownerUid == request.auth.uid && resource.data.status == 'pending'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && request.resource.data.status in ['accepted', 'rejected'];
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid && resource.data.status == 'pending';
+    }
+
     match /sharedCharacters/{characterId} {
       allow get: if true;
       // Discord 連携のボット: 本人の公開中のキャラクターを並べる（`/卓譜 キャラクター`。問い合わせに enabled == true が要る）

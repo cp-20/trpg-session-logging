@@ -1,8 +1,46 @@
-import { createDemoState, getTestNav, renderWithStore } from "../test/integration-harness";
+import {
+  createDemoState,
+  getTestNav,
+  renderWithStore,
+  serveScenarioDirectory,
+} from "../test/integration-harness";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Scenarios, { ScenarioDetail, ScenarioNew } from "./Scenarios";
+
+// TALTO の共有シナリオ一覧の見本（並びはよく遊ばれている順）
+const coc = { systemSlug: "call_of_cthulhu_6th", systemName: "クトゥルフ神話TRPG" };
+const TALTO = [
+  {
+    id: "t_lighthouse",
+    title: "灯台守の夜",
+    author: "しおかぜ堂",
+    ...coc,
+    playersMin: 2,
+    playersMax: 3,
+    hours: 4,
+  },
+  {
+    id: "t_station",
+    title: "霧の駅",
+    author: "みなと",
+    systemSlug: "emoklore",
+    systemName: "エモクロアTRPG",
+    playersMin: 1,
+    playersMax: 1,
+    hours: 2,
+  },
+  {
+    id: "t_owned",
+    title: "持っている灯台",
+    author: "しおかぜ堂",
+    ...coc,
+    playersMin: 2,
+    playersMax: 2,
+    hours: 3,
+  },
+];
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -75,7 +113,7 @@ describe("Scenarios + BOOTH URL 自動入力 + 構造化修正申請 結合テ�
       initialState: asOtherState,
     });
 
-    await user.click(screen.getByRole("button", { name: /編集を申請/ }));
+    await user.click(screen.getByRole("button", { name: /修正を提案/ }));
     const authorInput = screen.getByLabelText("作者・サークル");
     await user.clear(authorInput);
     await user.type(authorInput, "星灯堂（改訂版）");
@@ -118,5 +156,72 @@ describe("Scenarios + BOOTH URL 自動入力 + 構造化修正申請 結合テ�
     await user.click(screen.getByRole("button", { name: "手で入力する" }));
     expect(screen.getByLabelText("タイトル")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "URLから読み込む" }).className).not.toContain("btn-primary");
+  });
+
+  it("シナリオは共有シナリオ一覧からサーバーで探し、自分が遊んだもの・足したものを先に並べ、選ぶと記録に使える", async () => {
+    const user = userEvent.setup();
+    await serveScenarioDirectory({ talto: TALTO });
+    const mine = createDemoState((s) => {
+      s.scenarios = {
+        sc_mine: {
+          id: "sc_mine",
+          title: "持っている灯台",
+          author: "しおかぜ堂",
+          systemId: "coc6",
+          source: "talto",
+          sourceUrl: "https://talto.cc/projects/t_owned",
+          emoji: "",
+          bg: "#fff",
+          tags: [],
+          addedBy: "user",
+          addedByUid: s.me,
+        },
+      };
+      s.logs = {};
+    });
+    const list = renderWithStore(<Scenarios />, { initialPath: "/scenarios", initialState: mine });
+    // 何も打たなくても共有シナリオ一覧から並ぶ（「シナリオを追加」だけにしない）
+    expect(await screen.findByRole("link", { name: /灯台守の夜/ })).toBeInTheDocument();
+    expect(screen.queryByText("シナリオがまだありません")).toBeNull();
+    // 検索はサーバーで。自分が足したものが先で、共有シナリオ一覧の同じ作品は重ねて出さない
+    await user.type(screen.getByLabelText("シナリオを検索"), "灯台");
+    await waitFor(() => expect(screen.queryByRole("link", { name: /霧の駅/ })).toBeNull());
+    await screen.findByRole("link", { name: /灯台守の夜/ });
+    const links = screen.getAllByRole("link").map((a) => a.textContent ?? "");
+    expect(links.filter((t) => t.includes("持っている灯台"))).toHaveLength(1);
+    expect(links.findIndex((t) => t.includes("持っている灯台"))).toBeLessThan(
+      links.findIndex((t) => t.includes("灯台守の夜")),
+    );
+    expect(links.some((t) => t.includes("灯台守の夜") && t.includes("2〜3人") && t.includes("〜4時間"))).toBe(
+      true,
+    );
+    await user.click(screen.getByRole("link", { name: /灯台守の夜/ }));
+    expect(getTestNav().pathname).toBe("/scenarios/sc_talto_t_lighthouse");
+    list.unmount();
+
+    // 手元に写しのない作品も、共有シナリオ一覧から開いて記録できる。記録に結ぶので手元に写しを置く
+    const none = createDemoState((s) => {
+      s.scenarios = {};
+      s.logs = {};
+    });
+    const detail = renderWithStore(<ScenarioDetail />, {
+      initialPath: "/scenarios/sc_talto_t_lighthouse",
+      params: { id: "sc_talto_t_lighthouse" },
+      initialState: none,
+    });
+    expect(await screen.findByRole("heading", { name: "灯台守の夜" })).toBeInTheDocument();
+    expect(screen.getByText("2〜3人")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /TALTO/ })).toHaveAttribute(
+      "href",
+      "https://talto.cc/projects/t_lighthouse",
+    );
+    await user.click(screen.getByRole("button", { name: /このシナリオで記録/ }));
+    expect(getTestNav().href).toBe("/upload?scenario=sc_talto_t_lighthouse");
+    expect(detail.readPersistedState()!.scenarios.sc_talto_t_lighthouse).toMatchObject({
+      title: "灯台守の夜",
+      author: "しおかぜ堂",
+      systemId: "coc6",
+      source: "talto",
+    });
   });
 });

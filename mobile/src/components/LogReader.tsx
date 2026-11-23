@@ -35,7 +35,7 @@ export interface SpeakerMeta {
   roleLabel: string;
 }
 
-/** 誰とも結び付かない発言者の顔。発言者名を種にした既定の画像（GM 側は円印、ほかはコマ）。Web の timeline と同じ */
+/** 誰とも結び付かない発言者の顔。発言者名を種にした既定の画像（GM 側は人の姿、ほかはキャラの姿）。Web の timeline と同じ */
 function speakerFallbackSvg(sp: string, kind: Msg["kind"]): string {
   const isKeeper = kind === "KP" || kind === "GM" || kind === "SYSTEM";
   return identiconDataUri(sp, isKeeper ? "user" : "character");

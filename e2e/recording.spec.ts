@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { addScenario } from "./support/scenario";
 
 test("ログなしの記録: 遊んだ日時は日付と時刻で入れ、重なりは保存せず、翌日に終わる回も残せる", async ({
   page,
@@ -9,12 +10,13 @@ test("ログなしの記録: 遊んだ日時は日付と時刻で入れ、重な
   await page.waitForURL(/\/home$/);
   await page.goto("/upload");
   await page.getByRole("button", { name: "ログなしで記録する" }).click({ force: true });
-  await page.getByLabel("タイトル", { exact: true }).fill("二日間のセッション");
+  await addScenario(page, "二日間のセッション");
   await page.getByLabel("日付", { exact: true }).fill("2026/10/10");
   await page.getByLabel("開始時刻", { exact: true }).fill("21:00");
   await page.getByLabel(/^終了時刻/).fill("1:30");
-  // 終了が開始より前なら翌日に終わる回（25:30 のような書き方はさせない）
-  await expect(page.getByLabel("終了時刻（翌日）", { exact: true })).toBeVisible();
+  // 終了が開始より前なら翌日に終わる回。欄を離れると 24 を足した書き方（25:30）にそろう
+  await page.getByLabel(/^終了時刻/).blur();
+  await expect(page.getByLabel("終了時刻", { exact: true })).toHaveValue("25:30");
   await page.getByRole("button", { name: "日時を追加", exact: true }).click({ force: true });
   await expect(page.getByLabel("2回目の日付", { exact: true })).toHaveValue("2026/10/11");
   // 1 回目と重なる時間帯は保存しない
@@ -37,7 +39,7 @@ test("ログなしの記録: 遊んだ日時は日付と時刻で入れ、重な
       page.evaluate(() => {
         const state = JSON.parse(localStorage.getItem("takufu-state-v4") ?? "{}");
         const log = Object.values(state.logs ?? {}).find(
-          (value: any) => value.title === "二日間のセッション",
+          (value: any) => state.scenarios?.[value.scenarioId]?.title === "二日間のセッション",
         ) as any;
         // JST の日付・時刻で見る
         const fmt = (ts: number) => new Date((ts + 9 * 3600) * 1000).toISOString().slice(0, 16);

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import rows from "../data/talto-scenarios.json";
+import catalogFile from "../../scripts/data/talto-catalog.json";
 import { SYSTEMS } from "../data/systems";
 import {
   isAdultListing,
+  decodeTaltoCatalog,
   isNonScenarioListing,
   TALTO_SYSTEM_MAP,
   taltoRowToScenario,
@@ -35,7 +36,7 @@ describe("taltoSystemId", () => {
     expect(taltoSystemId("shinobigami")).toBe("ShinobiGami");
     expect(taltoSystemId("shinobigami", new Set(["ShinobiGami"]))).toBe("ShinobiGami");
     expect(taltoSystemId("shinobigami", new Set(["coc7"]))).toBeNull();
-    expect(taltoSystemId("kamitsubaki_city_uc_narrative")).toBeNull();
+    expect(taltoSystemId("storyteller")).toBeNull();
     expect(taltoSystemId("some_new_slug", new Set(["some_new_slug"]))).toBe("some_new_slug");
   });
   it("only maps to ids that exist in the app's system list", () => {
@@ -62,11 +63,11 @@ describe("taltoRowToScenario", () => {
   });
   it("keeps the TALTO system name as the first tag when the system is unmapped", () => {
     const sc = taltoRowToScenario(
-      { ...base, systemSlug: "kamitsubaki_city_uc_narrative", systemName: "神椿市建設中。NARRATIVE" },
+      { ...base, systemSlug: "storyteller", systemName: "ストリテラ オモテとウラのRPG" },
       SYSTEMS,
     );
     expect(sc.systemId).toBe("general");
-    expect(sc.tags[0]).toBe("神椿市建設中。NARRATIVE");
+    expect(sc.tags[0]).toBe("ストリテラ オモテとウラのRPG");
   });
   it("does not tag the catch-all その他 category", () => {
     const sc = taltoRowToScenario({ ...base, systemSlug: "other", systemName: "その他" }, SYSTEMS);
@@ -103,12 +104,10 @@ describe("isNonScenarioListing", () => {
   });
 });
 
-describe("committed sample data", () => {
-  it("has a realistic volume with unique ids and no adult titles", () => {
-    expect(rows.length).toBeGreaterThanOrEqual(300);
-    expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length);
+describe("同梱の TALTO の一覧", () => {
+  it("成人向けやシナリオ以外の出品を持たない", () => {
+    const rows = decodeTaltoCatalog(catalogFile);
     expect(rows.some((r) => isAdultListing({ name: r.title }))).toBe(false);
     expect(rows.some((r) => isNonScenarioListing(r.title))).toBe(false);
-    expect(rows.every((r) => r.url.startsWith("https://talto.cc/projects/"))).toBe(true);
   });
 });

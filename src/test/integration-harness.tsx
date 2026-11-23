@@ -5,7 +5,15 @@ import { vi } from "vitest";
 import { seedState } from "../data/seed";
 import { parseSavedState } from "../lib/state-schema";
 import { StoreProvider } from "../store";
-import type { State } from "../types";
+import type { Scenario, State } from "../types";
+import { SYSTEMS } from "../data/systems";
+import {
+  memoryScenarioStore,
+  sharedScenarioDoc,
+  taltoToDirectory,
+  toDirectoryDoc,
+} from "../lib/scenario-directory";
+import type { TaltoCatalogEntry } from "../lib/talto-scenarios";
 
 type NavState = {
   href: string;
@@ -176,4 +184,33 @@ export function renderWithStore(
       return raw ? parseSavedState(raw) : null;
     },
   };
+}
+
+/**
+ * シナリオの共有シナリオ一覧の API（/api/scenarios）を、本物の処理（src/app/api/scenarios/route.ts）と記憶の中の共有シナリオ一覧で答える。
+ * 共有シナリオ一覧は TALTO の見本（よく遊ばれている順）と、利用者が足したもの。ほかの URL は rest に渡す（渡さなければ 404）
+ */
+export async function serveScenarioDirectory({
+  talto = [],
+  shared = [],
+  rest,
+}: {
+  talto?: TaltoCatalogEntry[];
+  shared?: Scenario[];
+  rest?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+} = {}) {
+  const { GET } = await import("../app/api/scenarios/route");
+  const { setScenarioStoreForTest } = await import("../server/scenario-directory");
+  const docs = [
+    ...talto.map((e, i) => toDirectoryDoc(taltoToDirectory(e, SYSTEMS), i, SYSTEMS)),
+    ...shared.map((sc) => sharedScenarioDoc(sc, sc.addedByUid ?? "someone")),
+  ];
+  setScenarioStoreForTest(memoryScenarioStore(docs));
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url.startsWith("/api/scenarios")) return GET(new Request(`http://test${url}`));
+    return rest ? rest(input, init) : new Response("Not found", { status: 404 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
 }

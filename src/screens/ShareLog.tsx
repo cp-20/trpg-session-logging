@@ -4,7 +4,7 @@ import { Link, useParams } from "../lib/router";
 import { IconBooks, IconExternal, IconLock, IconTrendingUp } from "../components/icons";
 import { LogReaderBar, RecordingLinkContext, SessionTimeline, TimelineFilter } from "../components/timeline";
 import { EmptyState, LegalLinks, LogoMark, StatBar, StatChange, SysBadge, cx } from "../components/ui";
-import { Avatar, CharAvatar } from "../components/identity";
+import { Avatar, CharAvatar, GoogleSignInButton } from "../components/identity";
 import { SessionMediaSection, recordingLinksAt } from "../components/media";
 import { SYSTEMS } from "../data/systems";
 import { carriedDeltas, carriedValues } from "../lib/character-growth";
@@ -25,6 +25,7 @@ import { evaluateShareGate, visibleShareMembers } from "../lib/share-gate";
 import { fmtDate, fmtDur, fmtSessionWhen, sessionPlayMinutes } from "../lib/time";
 import { useStore } from "../store";
 import type { Character, Log, State } from "../types";
+import { sessionTitle } from "../lib/session-scenario";
 
 /* ---------- 共有ページの外枠（ログインなしでも読める静かな読書面） ---------- */
 function ShareFrame({
@@ -43,7 +44,7 @@ function ShareFrame({
   return (
     <div className="min-h-screen bg-base-200">
       <header className="border-b border-base-300 bg-base-100">
-        <div className={cx("mx-auto flex h-14 items-center gap-3 px-4 sm:px-6", width)}>
+        <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 sm:px-6">
           <Link to={"/sessions"} className="flex items-center gap-2" aria-label="卓譜">
             <LogoMark size={22} className="text-primary" />
             <span className="font-bold tracking-tight">卓譜</span>
@@ -52,7 +53,7 @@ function ShareFrame({
         </div>
       </header>
       <main className={cx("mx-auto px-4 pb-20 pt-8 sm:px-6", width)}>{children}</main>
-      <footer className={cx("mx-auto px-4 pb-12 sm:px-6", width)}>
+      <footer className="mx-auto max-w-6xl px-4 pb-12 sm:px-6">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-base-300 pt-6 text-xs text-ink2">
           {systemIds && systemIds.some((id) => SYSTEM_RIGHTS[id]) && (
             <span className="basis-full">
@@ -168,16 +169,15 @@ function RemoteShare({ slug }: { slug: string }) {
         <EmptyState
           kind="permission"
           icon={<IconLock width={28} height={28} />}
-          title={scope === "passed" ? "プレイした人に共有された記録です" : "メンバー限定の記録です"}
+          title={scope === "passed" ? "通過した人に共有された記録です" : "メンバー限定の記録です"}
           action={
             status === "error" ? (
               <button className="btn" onClick={() => setRetry((n) => n + 1)}>
                 もう一度読み込む
               </button>
             ) : !authUser ? (
-              <button
-                className="btn btn-primary"
-                disabled={busy}
+              <GoogleSignInButton
+                busy={busy}
                 onClick={async () => {
                   setBusy(true);
                   setError(null);
@@ -189,9 +189,7 @@ function RemoteShare({ slug }: { slug: string }) {
                     setBusy(false);
                   }
                 }}
-              >
-                Google でログイン
-              </button>
+              />
             ) : (
               scope === "passed" && (
                 <button
@@ -210,7 +208,7 @@ function RemoteShare({ slug }: { slug: string }) {
                     }
                   }}
                 >
-                  {busy ? "確認中…" : "プレイ済みなので開く"}
+                  {busy ? "確認中…" : "通過済みなので開く"}
                 </button>
               )
             )
@@ -222,7 +220,7 @@ function RemoteShare({ slug }: { slug: string }) {
               : !authUser
                 ? "Google でログインすると、読めるかどうかを確認します。"
                 : scope === "passed"
-                  ? "このシナリオをプレイ済みなら、記録を開けます。"
+                  ? "このシナリオを通過済みなら、記録を開けます。"
                   : "参加者として登録されたアカウントでログインしてください。"}
           </p>
           {error && status !== "error" && (
@@ -295,7 +293,7 @@ function ShareLogView({
           data-user-content
           className="mt-2 text-2xl font-bold leading-snug tracking-tight sm:text-[1.75rem]"
         >
-          {log.title}
+          {sessionTitle(log, state.scenarios)}
         </h1>
         <div className="meta mt-2 text-ink">
           <span className="tabular-nums">{fmtSessionWhen(log)}</span>
@@ -333,7 +331,7 @@ function ShareLogView({
               action={
                 log.scope === "passed" && !serverAuthorized ? (
                   <button type="button" className="btn btn-primary" onClick={() => setAsPassed(true)}>
-                    このシナリオをプレイした（記録を開く）
+                    このシナリオを通過した（記録を開く）
                   </button>
                 ) : undefined
               }
@@ -425,7 +423,7 @@ function ShareLogView({
   );
 }
 
-/* ================= キャラクター共有カルテ ================= */
+/* ================= キャラクターの共有ページ ================= */
 export function ShareChar() {
   const { id } = useParams<{ slug?: string; id?: string }>();
   const { state } = useStore();
@@ -472,7 +470,7 @@ function RemoteCharacter({ id }: { id: string }) {
       <ShareFrame narrow>
         <p className="flex items-center gap-2 text-sm text-ink2" role="status">
           <span className="loading loading-spinner loading-sm" aria-hidden />
-          カルテを読み込んでいます…
+          キャラクターを読み込んでいます…
         </p>
       </ShareFrame>
     );
@@ -482,7 +480,7 @@ function RemoteCharacter({ id }: { id: string }) {
         <div className="surface">
           <EmptyState
             kind="permission"
-            title={<span role="alert">カルテを読み込めませんでした</span>}
+            title={<span role="alert">キャラクターを読み込めませんでした</span>}
             action={
               <button className="btn" onClick={() => setRetry((n) => n + 1)}>
                 もう一度読み込む
@@ -499,7 +497,7 @@ function RemoteCharacter({ id }: { id: string }) {
     return (
       <ShareFrame narrow>
         <div className="surface">
-          <EmptyState kind="permission" title="カルテが見つかりません">
+          <EmptyState kind="permission" title="キャラクターが見つかりません">
             リンクが間違っているか、共有が止められた可能性があります。
           </EmptyState>
         </div>
@@ -532,7 +530,7 @@ function ShareCharView({
           <EmptyState
             kind="permission"
             icon={<IconLock width={28} height={28} />}
-            title="このカルテは非公開です"
+            title="このキャラクターは共有されていません"
           >
             持ち主が共有を有効にすると、このリンクで読めるようになります。
           </EmptyState>
@@ -602,8 +600,8 @@ function ShareCharView({
       )}
 
       {share.includeSessions && sessions.length > 0 && (
-        <section className="mt-8" aria-label="セッション履歴">
-          <h2 className="mb-3 text-base font-bold sm:text-lg">セッション履歴</h2>
+        <section className="mt-8" aria-label="これまでのセッション">
+          <h2 className="mb-3 text-base font-bold sm:text-lg">これまでのセッション</h2>
           <ol className="surface tl">
             {sessions.map((s) => {
               const slugOrNull = s.logId

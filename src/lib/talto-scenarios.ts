@@ -1,6 +1,6 @@
 /**
  * TALTO（https://talto.cc）の公開シナリオ一覧から取ったサンプル行を、卓譜の Scenario に直す。
- * 取得は scripts/fetch-talto-scenarios.ts。体験版（/demo）の見本データにだけ使う。
+ * 取得は scripts/fetch-talto-scenarios.ts。見本の行は体験版（/demo）に、共有シナリオ一覧（後半）はシナリオの検索に使う。
  */
 import type { Scenario } from "../types";
 
@@ -57,7 +57,25 @@ export const TALTO_SYSTEM_MAP: Readonly<Record<string, string>> = {
   tokyo_nova: "TokyoNova",
   ventangle_ar: "Ventangle",
   yuuyake_koyake: "GoldenSkyStories",
+  ainecadette: "Ainecadette",
+  amadeus: "Amadeus",
+  arianrhod: "Arianrhod",
+  beast_bind_trinity: "BeastBindTrinity",
+  castle_in_gray: "CastleInGray",
+  dracurouge: "Dracurouge",
+  garden_order: "GardenOrder",
+  kamitsubaki_city_uc_narrative: "KamitsubakiCityUnderConstructionNarrative",
+  mamono_scramble: "MamonoScramble",
+  meikyu_kingdom: "MeikyuKingdom",
+  nrr: "NRR",
+  starry_dolls: "StarryDolls",
+  unsung_duet: "UnsungDuet",
 };
+
+/** シナリオではない作品を並べるカテゴリ（遊んだ記録の公開など） */
+const NON_SCENARIO_CATEGORIES = new Set(["solo_journaling_game_playlog"]);
+
+export const isNonScenarioCategory = (slug: string): boolean => NON_SCENARIO_CATEGORIES.has(slug);
 
 const ADULT_RE = /R-?18|R18G|18禁|成人向け|アダルト|NSFW/i;
 
@@ -127,4 +145,60 @@ export function taltoRowToScenario(
     claimedBy: null,
     addedBy: "system",
   };
+}
+
+/* ---------- 公開シナリオの一覧（scripts/data/talto-catalog.json） ---------- */
+
+/** 共有シナリオ一覧の 1 件。表紙画像は持たず、URL は ID から作る */
+export type TaltoCatalogEntry = Omit<TaltoScenarioRow, "thumbnail" | "url">;
+
+/** 共有シナリオ一覧の 1 行: [ID, タイトル, 作者, システムの番号, 最少人数, 最多人数, 時間] */
+type CatalogTuple = [string, string, string, number, number | null, number | null, number | null];
+
+/** TALTO の一覧ファイルの形。行は配列にして大きさを抑える。システムは slug と名前を 1 回だけ持つ */
+export interface TaltoCatalogFile {
+  v: 1;
+  /** 取得日（YYYY-MM-DD） */
+  fetchedAt: string;
+  systems: [slug: string, name: string][];
+  rows: CatalogTuple[];
+}
+
+export const taltoProjectUrl = (id: string) => `https://talto.cc/projects/${id}`;
+
+/** 共有シナリオ一覧をファイルの文字列に。並びはそのまま（よく遊ばれている順）。1 行 1 作品にして差分を読みやすくする */
+export function encodeTaltoCatalog(entries: readonly TaltoCatalogEntry[], fetchedAt: string): string {
+  const systems: [string, string][] = [];
+  const index = new Map<string, number>();
+  const rows = entries.map((e): CatalogTuple => {
+    let i = index.get(e.systemSlug);
+    if (i === undefined) {
+      i = systems.length;
+      index.set(e.systemSlug, i);
+      systems.push([e.systemSlug, e.systemName]);
+    }
+    return [e.id, e.title, e.author, i, e.playersMin, e.playersMax, e.hours];
+  });
+  const head = JSON.stringify({ v: 1, fetchedAt, systems });
+  return `${head.slice(0, -1)},"rows":[\n${rows.map((r) => JSON.stringify(r)).join(",\n")}\n]}\n`;
+}
+
+/** TALTO の一覧ファイルを 1 件ずつの形に戻す。壊れた行は飛ばす */
+export function decodeTaltoCatalog(file: TaltoCatalogFile): TaltoCatalogEntry[] {
+  const out: TaltoCatalogEntry[] = [];
+  for (const r of file.rows) {
+    const sys = file.systems[r[3]];
+    if (!sys || typeof r[0] !== "string" || typeof r[1] !== "string") continue;
+    out.push({
+      id: r[0],
+      title: r[1],
+      author: r[2] ?? "",
+      systemSlug: sys[0],
+      systemName: sys[1],
+      playersMin: r[4] ?? null,
+      playersMax: r[5] ?? null,
+      hours: r[6] ?? null,
+    });
+  }
+  return out;
 }

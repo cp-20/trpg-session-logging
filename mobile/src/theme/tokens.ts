@@ -27,7 +27,7 @@ export interface ThemeTokens {
 export const LIGHT_TOKENS: ThemeTokens = {
   mode: "light",
   ground: "#f2ebe0",
-  surface: "#fffdf9",
+  surface: "#fcf7f0",
   surfaceHover: "#ebe3d6",
   border: "#e2d7c5",
   ink: "#221c17",

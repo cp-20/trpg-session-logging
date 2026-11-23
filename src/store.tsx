@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { User as FirebaseUser } from "firebase/auth";
-import type { Character, Log, State, User } from "./types";
+import type { Character, Log, Scenario, State, User } from "./types";
+import { isSharedByUser, sharedScenarioDoc } from "./lib/scenario-directory";
 import type { TablePollSync } from "./lib/table-polls";
 import { parseSavedState, RestoredStateSchema } from "./lib/state-schema";
 export { RestoredStateSchema };
@@ -93,6 +94,10 @@ function logPublishSignature(log: Log, state: State): string {
     state.prefs.hideSelfOnShare,
     scenario,
   ]);
+}
+
+function scenarioPublishSignature(scenario: Scenario, uid: string): string {
+  return JSON.stringify(sharedScenarioDoc(scenario, uid));
 }
 
 function characterPublishSignature(character: Character, state: State, uid: string): string {
@@ -203,6 +208,16 @@ export function StoreProvider({
           c.id,
           needsInitialCloudSync ? "" : characterPublishSignature(c, initial.state, authUser!.uid),
         ]),
+    ),
+  );
+  /** 共有シナリオ一覧へ出した、自分が足したシナリオ（中身の署名） */
+  const publishedScenarios = useRef(
+    new Map(
+      authUser
+        ? Object.values(initial.state.scenarios)
+            .filter((sc) => isSharedByUser(sc, authUser.uid))
+            .map((sc) => [sc.id, needsInitialCloudSync ? "" : scenarioPublishSignature(sc, authUser.uid)])
+        : [],
     ),
   );
   const publishedMemberships = useRef(
@@ -342,6 +357,7 @@ export function StoreProvider({
             publishSharedCharacter,
             deleteSharedCharacter,
             updateSharedMembership,
+            publishSharedScenario,
           } = await import("./lib/cloud-state");
 
           revision.current = await saveCloudState(authUser.uid, state, revision.current);
@@ -400,6 +416,14 @@ export function StoreProvider({
             if (publishedCharacters.current.get(character.id) === signature) continue;
             await publishSharedCharacter(character, state);
             publishedCharacters.current.set(character.id, signature);
+          }
+
+          for (const sc of Object.values(state.scenarios)) {
+            if (!isSharedByUser(sc, authUser.uid)) continue;
+            const signature = scenarioPublishSignature(sc, authUser.uid);
+            if (publishedScenarios.current.get(sc.id) === signature) continue;
+            await publishSharedScenario(sc, authUser.uid);
+            publishedScenarios.current.set(sc.id, signature);
           }
 
           await pollSync.current?.push(state);

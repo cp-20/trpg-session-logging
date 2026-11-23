@@ -10,7 +10,7 @@ it("添付と同時に登録したシナリオを正しく紐付け、参加者�
   const input: CommitLogInput = {
     attachId: target.id,
     fileName: "log.json",
-    meta: { title: target.title, systemId: target.systemId },
+    meta: { systemId: target.systemId },
     channels: target.channels,
     kinds: {},
     tableId: target.tableId ?? "",
@@ -40,7 +40,7 @@ it("新規ログあり・新規ログなしの両方を commitLogImport で作�
     {
       attachId: null,
       fileName: "room.json",
-      meta: { title: "  新規夜卓  ", systemId: "coc7" },
+      meta: { systemId: "coc7" },
       channels: [
         {
           id: "c1",
@@ -53,7 +53,7 @@ it("新規ログあり・新規ログなしの両方を commitLogImport で作�
       speakerIcons: { 凛: "https://cdn.example.com/a.png", 空: "" },
       scope: "public",
       tableId: "",
-      scenarioId: "",
+      scenarioId: "sc_abyss",
       newScenario: null,
       players: [{ userId: state.me, characterIds: ["__import__", "ch_real"] }],
     },
@@ -63,7 +63,9 @@ it("新規ログあり・新規ログなしの両方を commitLogImport で作�
   expect(resWithLog.ok).toBe(true);
   expect(Object.keys(state.logs)).toHaveLength(beforeCount + 1);
   const created = state.logs[resWithLog.id]!;
-  expect(created.title).toBe("新規夜卓");
+  // セッションは名前を持たず、シナリオの題名で呼ぶ
+  expect(created).not.toHaveProperty("title");
+  expect(created.scenarioId).toBe("sc_abyss");
   expect(created.hasLog).toBe(true);
   expect(created.channels[0]?.msgs[0]?.kind).toBe("KP");
   expect(created.speakerIcons).toEqual({ 凛: "https://cdn.example.com/a.png" });
@@ -73,12 +75,12 @@ it("新規ログあり・新規ログなしの両方を commitLogImport で作�
     {
       attachId: null,
       fileName: null,
-      meta: { title: "   ", systemId: "general" },
+      meta: { systemId: "general" },
       channels: [],
       kinds: {},
       tableId: "",
       scenarioId: "",
-      newScenario: { title: "単発シナリオ", author: "" },
+      newScenario: { title: "単発シナリオ", author: "", private: true },
       players: [{ userId: state.me, characterIds: [] }],
       sittings: [{ start: 1764072000, end: 1764082800 }],
     },
@@ -87,11 +89,31 @@ it("新規ログあり・新規ログなしの両方を commitLogImport で作�
   );
   expect(resNoLog.ok).toBe(true);
   const manualLog = state.logs[resNoLog.id]!;
-  expect(manualLog.title).toBe("未タイトルの卓");
+  // 足したシナリオで呼び、共有シナリオ一覧に載せないと選んだものは private
+  expect(state.scenarios[manualLog.scenarioId]).toMatchObject({ title: "単発シナリオ", private: true });
   expect(manualLog.hasLog).toBe(false);
   expect(manualLog.sittings).toEqual([{ start: 1764072000, end: 1764082800 }]);
   // ログからも導けたので、発言時刻の集まりになる
   expect(created.sittings).toEqual([{ start: 1763643600, end: 1763643600 }]);
+
+  // シナリオのないセッションは作れない
+  const refused = await commitLogImport(
+    {
+      attachId: null,
+      fileName: null,
+      meta: { systemId: "coc7" },
+      channels: [],
+      kinds: {},
+      tableId: "",
+      scenarioId: "",
+      newScenario: { title: "   ", author: "" },
+      players: [{ userId: state.me, characterIds: [] }],
+      sittings: [{ start: 1764072000, end: 1764082800 }],
+    },
+    state,
+    (apply) => apply(state),
+  );
+  expect(refused).toMatchObject({ ok: false, reason: "シナリオを選んでください。" });
 });
 
 it("commitLogImport の添付・アイコン削除・ID採番・スケジュール/デフォルト日時の細部を検証する", async () => {
@@ -106,7 +128,7 @@ it("commitLogImport の添付・アイコン削除・ID採番・スケジュー�
     {
       attachId: target.id,
       fileName: null,
-      meta: { title: target.title, systemId: "unknown_sys" },
+      meta: { systemId: "unknown_sys" },
       channels: [
         {
           id: "c1",
@@ -128,7 +150,7 @@ it("commitLogImport の添付・アイコン削除・ID採番・スケジュー�
   const attachSc = state.scenarios[state.logs[target.id]!.scenarioId!]!;
   expect(attachSc).toMatchObject({
     title: "未登録著者シナリオ",
-    author: "自由記述（未登録）",
+    author: "",
     emoji: "🎲",
     bg: "#e6e6f0",
     tags: [],
@@ -145,7 +167,7 @@ it("commitLogImport の添付・アイコン削除・ID採番・スケジュー�
     {
       attachId: "missing_id",
       fileName: null,
-      meta: { title: "x", systemId: "coc7" },
+      meta: { systemId: "coc7" },
       channels: [],
       kinds: {},
       tableId: "",
@@ -164,7 +186,7 @@ it("commitLogImport の添付・アイコン削除・ID採番・スケジュー�
     {
       attachId: otherLog.id,
       fileName: null,
-      meta: { title: "x", systemId: "coc7" },
+      meta: { systemId: "coc7" },
       channels: [],
       kinds: {},
       tableId: "",
@@ -183,7 +205,7 @@ it("commitLogImport の添付・アイコン削除・ID採番・スケジュー�
     {
       attachId: target.id,
       fileName: null,
-      meta: { title: target.title, systemId: "unknown_sys" },
+      meta: { systemId: "unknown_sys" },
       channels: [],
       kinds: {},
       speakerIcons: { 空: "" },
@@ -211,7 +233,7 @@ it("commitLogImport の添付・アイコン削除・ID採番・スケジュー�
     {
       attachId: target.id,
       fileName: "keep.txt",
-      meta: { title: target.title, systemId: "coc7" },
+      meta: { systemId: "coc7" },
       channels: [
         {
           id: "m",
@@ -236,7 +258,8 @@ it("commitLogImport の添付・アイコン削除・ID採番・スケジュー�
   expect(updated.speakerIcons).toEqual({ 保持: "https://cdn.example.com/keep.png" });
   expect(updated.scope).toBe("public");
   expect(updated.tableId).toBeUndefined();
-  expect(updated.scenarioId).toBeUndefined();
+  // シナリオは外せない（選び直さなければ元のまま）
+  expect(updated.scenarioId).toBe("sc_existing");
   expect(updated.importedFrom).toBe("keep.txt");
   expect(updated.channels[0]?.msgs.map((m) => m.id)).toEqual([`${target.id}-m-0`, `${target.id}-m-1`]);
   expect(updated.channels[0]?.msgs.map((m) => m.kind)).toEqual(["PL", "NPC"]);
@@ -246,7 +269,7 @@ it("commitLogImport の添付・アイコン削除・ID採番・スケジュー�
     {
       attachId: null,
       fileName: null,
-      meta: { title: "日時なし", systemId: "coc7" },
+      meta: { systemId: "coc7" },
       channels: [],
       kinds: {},
       tableId: "",
@@ -263,7 +286,7 @@ it("commitLogImport の添付・アイコン削除・ID採番・スケジュー�
     {
       attachId: null,
       fileName: "manual.txt",
-      meta: { title: "手入力卓", systemId: "unknown_sys" },
+      meta: { systemId: "unknown_sys" },
       channels: [],
       kinds: {},
       tableId: "tbl_1",
@@ -291,7 +314,7 @@ it("commitLogImport の添付・アイコン削除・ID採番・スケジュー�
   const scB = state.scenarios[todayLog.scenarioId!]!;
   expect(scB).toMatchObject({
     title: "新シナリオB",
-    author: "自由記述（未登録）",
+    author: "",
     emoji: "🎲",
     bg: "#e6e6f0",
     tags: [],
@@ -306,7 +329,7 @@ it("commitLogImport の添付・アイコン削除・ID採番・スケジュー�
     {
       attachId: null,
       fileName: null,
-      meta: { title: "連番確認", systemId: "coc7" },
+      meta: { systemId: "coc7" },
       channels: [{ id: "ch1", name: "メイン", secret: false, msgs: [] }],
       kinds: {},
       tableId: "",

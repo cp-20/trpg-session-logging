@@ -28,3 +28,16 @@ export function parseDateText(raw: string): string | null {
 export function fmtDateText(iso: string): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso.replaceAll("-", "/") : iso;
 }
+
+const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"] as const;
+
+/**
+ * 日付の欄の横に添える曜日。"2026-11-23" → "(月・祝)"、"2026-11-17" → "(火)"。読めなければ ""。
+ * 祝日の判定は呼ぶ側から渡す（holidays.ts に依存させない）
+ */
+export function weekdaySuffix(iso: string, holidayName?: (iso: string) => string | null): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return "";
+  const wd = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
+  return `(${WEEKDAYS[wd]}${holidayName?.(iso) ? "・祝" : ""})`;
+}

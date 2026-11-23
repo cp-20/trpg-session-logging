@@ -171,12 +171,15 @@ describe.skipIf(!enabled)("createFirestoreStore（ボットの利用者・エミ
 
   it("共有ページは、匿名で読めるときだけ中身を読む。メンバー限定の中身と保存データは読めない", async () => {
     await as("a");
-    const put = async (slug: string, scope: string) => {
+    // セッションは名前を持たずシナリオの題名で呼ぶ。以前に公開したものは名前（title）だけを持つことがある
+    const current = {
+      log: { scenarioId: "sc1", tableId: "t1", systemId: "coc7", sittings: [{ start: 1, end: 2 }] },
+      scenario: { id: "sc1", title: "霧の港" },
+    };
+    const legacy = { log: { title: "旧い卓", tableId: "t1", systemId: "coc7", sittings: [] } };
+    const put = async (slug: string, scope: string, payload: object = current) => {
       await setDoc(doc(db(), `sharedLogs/${slug}/revisions/r/chunks/0000`), {
-        data: JSON.stringify({
-          log: { title: "霧の港", tableId: "t1", systemId: "coc7", sittings: [{ start: 1, end: 2 }] },
-          scenario: { title: "霧" },
-        }),
+        data: JSON.stringify(payload),
         ownerId: a.uid,
       });
       await setDoc(doc(db(), "sharedLogs", slug), {
@@ -189,13 +192,14 @@ describe.skipIf(!enabled)("createFirestoreStore（ボットの利用者・エミ
     };
     await put(`pub${run}`, "public");
     await put(`mem${run}`, "members");
+    await put(`old${run}`, "public", legacy);
     expect(await store.getSharedLog(`pub${run}`)).toMatchObject({
       ownerId: a.uid,
       title: "霧の港",
       tableId: "t1",
-      scenarioTitle: "霧",
       revoked: false,
     });
+    expect(await store.getSharedLog(`old${run}`)).toMatchObject({ title: "旧い卓" });
     const members = await store.getSharedLog(`mem${run}`);
     expect(members).toMatchObject({ ownerId: a.uid, scope: "members", revoked: false });
     expect(members?.title).toBeUndefined();

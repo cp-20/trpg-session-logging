@@ -4,7 +4,7 @@
  * 利用場面の調査は docs/research/session-media-usecases.md。
  *
  * - 置き場所は外部（YouTube・Google ドライブ・ふせったーなど）なので、基本は URL で持つ。
- * - 見せる相手はものごとに決める（自分だけ / 指定した人 / メンバー / プレイした人 / 公開）。秘匿 HO の視点録画のように、
+ * - 見せる相手はものごとに決める（自分だけ / 指定した人 / メンバー / 通過した人 / 公開）。秘匿 HO の視点録画のように、
  *   あとから範囲を広げる使い方を想定する。
  * - 長い録画は何本にも分かれるので、パートと目次（タイムスタンプ）を持てる。録画の開始時刻があれば、ログの発言時刻から
  *   録画のその場面へ飛べる。
@@ -26,7 +26,7 @@ export type MediaKind =
   | "story"
   | "other";
 
-/** self: 自分だけ / people: 指定した人 / members: セッションのメンバー / passed: プレイした人 / public: 公開 */
+/** self: 自分だけ / people: 指定した人 / members: セッションのメンバー / passed: 通過した人 / public: 公開 */
 export type MediaScope = "self" | "people" | "members" | "passed" | "public";
 
 export interface MediaPart {
@@ -114,7 +114,7 @@ export const MEDIA_SCOPE_LABEL: Record<MediaScope, string> = {
   self: "自分だけ",
   people: "指定した人",
   members: "メンバー限定",
-  passed: "プレイした人",
+  passed: "通過した人",
   public: "公開",
 };
 
@@ -270,7 +270,7 @@ export interface MediaViewer {
   viewerId: string | null;
   /** セッションのメンバー（GM と PL） */
   isMember: boolean;
-  /** そのシナリオをプレイ済みと確かめられた人（メンバーを含む） */
+  /** そのシナリオを通過済みと確かめられた人（メンバーを含む） */
   hasPassed: boolean;
 }
 
@@ -448,4 +448,61 @@ export function embedAt(embedUrl: string, sec: number): string {
     );
   }
   return u.toString();
+}
+
+/* ---------- 追加・編集の流れ ---------- */
+
+/**
+ * 貼られた文字を URL に整える。前後の空白を除き、`youtu.be/…` のようにスキームのないものには https:// を補う。
+ * URL として読めなければ null
+ */
+export function normalizeMediaUrl(raw: string): string | null {
+  const t = raw.trim();
+  if (!t) return null;
+  const withScheme = /^https?:\/\//i.test(t) ? t : /^[\w-]+(\.[\w-]+)+(\/|$)/.test(t) ? `https://${t}` : t;
+  return detectMediaLink(withScheme) ? withScheme : null;
+}
+
+/** URL から題名を引ける問い合わせ先（oEmbed）。ブラウザから直接引けるのは YouTube だけ */
+export function mediaTitleLookupUrl(rawUrl: string): string | undefined {
+  const d = detectMediaLink(rawUrl);
+  if (d?.service !== "youtube" || !mediaThumbnail(rawUrl)) return undefined;
+  return `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(rawUrl.trim())}`;
+}
+
+/** oEmbed の応答から題名を取り出す */
+export function titleFromOembed(json: unknown): string | undefined {
+  if (!json || typeof json !== "object") return undefined;
+  const t = (json as { title?: unknown }).title;
+  return typeof t === "string" && t.trim() ? t.trim().slice(0, 200) : undefined;
+}
+
+/** 追加・編集で、種類によっては要る欄 */
+export type MediaField = "expiresAt" | "credits" | "parts" | "chapters" | "startedAt" | "pov" | "note";
+
+/**
+ * 種類と置き場所から、最初から見せる欄（main）と「詳しく」に畳む欄（more）を決める。
+ * - 消える置き場所（ギガファイル便）なら期限、創作ならクレジットを最初から見せる
+ * - パート・目次・録画の開始時刻・視点は再生できるものだけ
+ * - すでに値の入っている欄（filled）は、種類が変わっても消さずに more に残す
+ */
+export function mediaEditorFields(
+  kind: MediaKind,
+  service: MediaService | null,
+  filled: readonly MediaField[] = [],
+): { main: MediaField[]; more: MediaField[] } {
+  const def = MEDIA_KIND_MAP[kind];
+  const main: MediaField[] = [];
+  const more: MediaField[] = [];
+  if (def.timed) more.push("parts", "chapters", "startedAt", "pov");
+  (def.group === "creation" ? main : more).push("credits");
+  (service === "gigafile" ? main : more).push("expiresAt");
+  more.push("note");
+  for (const f of filled) if (!main.includes(f) && !more.includes(f)) more.push(f);
+  return { main, more };
+}
+
+/** 同卓者の了承を確かめるか（録画・録音・配信を、自分以外にも見せるとき） */
+export function needsConsentCheck(kind: MediaKind, scope: MediaScope): boolean {
+  return Boolean(MEDIA_KIND_MAP[kind].needsConsent) && scope !== "self";
 }

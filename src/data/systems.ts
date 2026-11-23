@@ -1,5 +1,5 @@
-import { BCDICE_SYSTEMS } from "../lib/bcdice-systems";
-import type { BcdiceSystem } from "../lib/bcdice-systems";
+import { BCDICE_SYSTEMS } from "../lib/bcdice-systems.ts";
+import type { BcdiceSystem } from "../lib/bcdice-systems.ts";
 import type { Channel, RoleKey, SystemDef } from "../types";
 
 /**

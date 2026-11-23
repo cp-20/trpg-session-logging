@@ -24,10 +24,11 @@ import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SvgXml } from "react-native-svg";
+import { SYSTEMS } from "@shared/data/systems";
 import { getJapaneseHolidayName } from "@shared/lib/holidays";
 import { todayStr } from "@shared/lib/format";
 import { fmtDateText, parseDateText } from "@shared/lib/date-text";
-import { nextSittingFields, normalizeTime, type SittingFields } from "@shared/lib/sittings";
+import { endFieldFor, nextSittingFields, type SittingFields } from "@shared/lib/sittings";
 import { comboEntries, hasExactLabel, type ComboEntry, type SearchOption } from "@shared/lib/search-text";
 import type { Scope, SystemDef } from "@shared/types";
 import { hapticImpact, hapticSelection, isReduceMotionEnabled } from "../native/haptics";
@@ -110,7 +111,7 @@ export function AppTopBar({
 
       {!authUser && (
         <View style={[styles.demoPill, { backgroundColor: tokens.ground }]}>
-          <Text style={[styles.demoPillText, { color: tokens.ink2 }]}>デモ</Text>
+          <Text style={[styles.demoPillText, { color: tokens.ink2 }]}>サンプル</Text>
         </View>
       )}
 
@@ -198,6 +199,40 @@ export function Tag({
   );
 }
 
+/** システム。卓譜のシステムに結べたものは正式名の印、結べないものは配布元のカテゴリ名 */
+export function ScenarioSystem({ systemId, systemLabel }: { systemId: string; systemLabel?: string }) {
+  const { tokens } = useTheme();
+  return systemLabel ? (
+    <Text style={[styles.metaText, { color: tokens.ink2 }]} numberOfLines={1}>
+      {systemLabel}
+    </Text>
+  ) : (
+    <SysBadge sys={SYSTEMS[systemId]} />
+  );
+}
+
+/** 一覧の続き。全部出ていなければ「さらに表示」を出す（読んでいる間は待ち表示） */
+export function LoadMore({
+  shown,
+  total,
+  loading,
+  onMore,
+}: {
+  shown: number;
+  total: number;
+  loading?: boolean;
+  onMore: () => void;
+}) {
+  if (shown >= total) return null;
+  return (
+    <View style={{ marginTop: 12, alignItems: "center" }}>
+      <Button size="sm" variant="secondary" disabled={loading} onPress={onMore}>
+        {loading ? "読み込み中…" : `さらに表示（残り ${total - shown} 件）`}
+      </Button>
+    </View>
+  );
+}
+
 /* ---------- システム名ラベル（点 + 正式名。省略なし） ---------- */
 export function SysBadge({ sys }: { sys: SystemDef | undefined }) {
   const { tokens } = useTheme();
@@ -217,7 +252,7 @@ export const SCOPE_META: Record<
   { label: string; hint: string; Icon: (p: MobileIconProps) => ReactNode }
 > = {
   members: { label: "メンバー限定", hint: "参加者と卓のメンバーだけが読めます", Icon: IconLock },
-  passed: { label: "プレイした人", hint: "このシナリオを通過した人も読めます", Icon: IconUsers },
+  passed: { label: "通過した人", hint: "このシナリオを通過した人も読めます", Icon: IconUsers },
   public: { label: "公開", hint: "リンクを知っている人なら誰でも読めます", Icon: IconWorld },
 };
 
@@ -901,6 +936,7 @@ export function Combobox<T extends string = string>({
   disabled,
   limit = COMBOBOX_LIMIT,
   invalid,
+  onQueryChange,
 }: {
   value: T;
   options: readonly ComboboxOption<T>[];
@@ -918,9 +954,15 @@ export function Combobox<T extends string = string>({
   disabled?: boolean;
   limit?: number;
   invalid?: boolean;
+  /** 検索欄の入力が変わったとき（サーバーで候補を探すときなど）。閉じると "" で呼ぶ */
+  onQueryChange?: (query: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
+  const [query, setQueryState] = useState("");
+  const setQuery = (q: string) => {
+    setQueryState(q);
+    onQueryChange?.(q);
+  };
   const selected = options.find((o) => o.value === value);
   const { entries, hidden } = useMemo(
     () =>
@@ -1451,7 +1493,7 @@ export function DateBlock({
 
 /**
  * 遊んだ日時（集まり）の入力。1 行が 1 回で、日付（YYYY/MM/DD）・開始・終了を入れる。
- * 終了が開始より前なら翌日に終わる集まりとして「翌」を添える（25:30 のような書き方はさせない）
+ * 終了が開始より前なら翌日に終わる集まりとして、24 を足した書き方（25:30）にそろえる
  */
 export function SittingsInput({
   rows,
@@ -1467,9 +1509,6 @@ export function SittingsInput({
   return (
     <View style={{ gap: 8 }}>
       {rows.map((r, i) => {
-        const start = normalizeTime(r.start);
-        const end = normalizeTime(r.end);
-        const nextDay = Boolean(start && end && end <= start);
         const label = many ? `${i + 1}回目の` : "";
         return (
           <View key={i} style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
@@ -1489,13 +1528,14 @@ export function SittingsInput({
               accessibilityLabel={`${label}開始時刻`}
               style={{ width: 72, textAlign: "center" }}
             />
-            <Text style={{ color: tokens.ink2, fontSize: 15 }}>〜{nextDay ? " 翌" : ""}</Text>
+            <Text style={{ color: tokens.ink2, fontSize: 15 }}>〜</Text>
             <TextField
               value={r.end}
               onChangeText={(v) => set(i, { end: v })}
-              placeholder="00:00"
+              onBlur={() => set(i, { end: endFieldFor(r.start, r.end) })}
+              placeholder="24:00"
               keyboardType="numbers-and-punctuation"
-              accessibilityLabel={`${label}終了時刻${nextDay ? "（翌日）" : ""}`}
+              accessibilityLabel={`${label}終了時刻`}
               style={{ width: 72, textAlign: "center" }}
             />
             {many && (

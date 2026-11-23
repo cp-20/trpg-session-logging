@@ -195,24 +195,100 @@ export function summarizeParsed(parsed: ParsedLog): string[] {
    - 生ログ: <p><span>[main]</span><span>発言者</span><span>本文</span></p>
    - 旧整形ログ: div.tab > p.tabtitle + p.player > b(発言者) + 本文
    - 新整形ログ: section.tab > h2.tabtitle + ol > li.player (.speaker-text + .player-message)
-   HTML にはタイムスタンプが含まれないため ts=0(順序は文書順で維持)。
+   新形式(article.message)は datetime を ts に使う。旧形式にはタイムスタンプが無いため ts=0(順序は文書順で維持)。
    ============================================================ */
+
+/** 新形式 HTML の .roll-result「コマンド ＞ (式) ＞ 合計[出目] ＞ … ＞ 判定」を Roll にする */
+export function parseRollResultText(raw: string, judge?: string): Msg["roll"] | undefined {
+  const text = raw.trim();
+  if (!text) return undefined;
+  const parts = text.split(/\s*＞\s*/).filter(Boolean);
+  const dice = /\[([^\]]*)\]/.exec(text)?.[1]?.replace(/\s+/g, "") ?? "";
+  const judgeLabel: Record<string, string> = {
+    success: "成功",
+    failure: "失敗",
+    critical: "クリティカル",
+    fumble: "ファンブル",
+  };
+  return {
+    cmd: parts[0] ?? text,
+    skill: "",
+    dice,
+    result: (judge && judgeLabel[judge]) || (parts.length > 1 ? parts[parts.length - 1]! : text),
+  };
+}
+
+/** DOM 要素の本文。<br> は改行として残す(textContent だと落ちる) */
+function textWithBreaks(el: Element | null | undefined): string {
+  if (!el) return "";
+  const clone = el.cloneNode(true) as Element;
+  clone.querySelectorAll("br").forEach((br) => br.replaceWith("\n"));
+  return clone.textContent;
+}
+
+/**
+ * 新形式のチャンネル名の解決。data-channel(内部 ID)ごとに、どこかの発言にある表示名(.channel-name)を共有する。
+ * 表示名の無い発言(システム表示など)が別チャンネルに分かれるのを防ぐ。
+ */
+export function resolveChannelLabels(items: { dc: string; label: string }[]): string[] {
+  const labelOf = new Map<string, string>();
+  for (const it of items) if (it.dc && it.label && !labelOf.has(it.dc)) labelOf.set(it.dc, it.label);
+  return items.map((it) => it.label || labelOf.get(it.dc) || it.dc || "メイン");
+}
+
+function epochOfDatetime(raw: string | null | undefined): number {
+  if (!raw) return 0;
+  const ms = Date.parse(raw.trim());
+  return Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
+}
 
 export function parseCcfoliaLogHtml(html: string): ParsedLog | null {
   if (typeof DOMParser === "undefined") {
-    const entries: LogEntry[] = parseCcfoliaHtmlEntriesFallback(html).map((e) => ({
-      sp: e.sp,
-      text: e.text,
-      ts: 0,
-      kind: e.sp === "system" ? "SYSTEM" : mapKind(e.sp, undefined),
-      type: e.text.startsWith("◆") ? "note" : "text",
-      channel: e.tab,
-    }));
+    const fb = parseCcfoliaHtmlEntriesFallback(html);
+    const labels = resolveChannelLabels(fb.map((e) => ({ dc: e.dataChannel ?? "", label: e.label ?? "" })));
+    const entries: LogEntry[] = fb.map((e, i) => {
+      const roll = e.rollText ? parseRollResultText(e.rollText, e.rollClass) : undefined;
+      return {
+        sp: e.sp,
+        text: e.text,
+        ts: epochOfDatetime(e.datetime),
+        kind: e.system || e.sp === "system" ? "SYSTEM" : mapKind(e.sp, undefined),
+        type: e.text.startsWith("◆") ? "note" : "text",
+        channel: e.dataChannel !== undefined ? labels[i]! : e.tab,
+        ...(roll ? { roll } : {}),
+      };
+    });
     return assembleChannels(entries);
   }
   const doc = new DOMParser().parseFromString(html, "text/html");
   const entries: LogEntry[] = [];
   let chIndex = 0;
+
+  /* (0) 新形式: article.message(時刻・チャンネル・ダイス結果つき) */
+  const dcs: { dc: string; label: string }[] = [];
+  for (const art of doc.querySelectorAll("article.message")) {
+    const text = textWithBreaks(art.querySelector(".message-text")).trim();
+    const rollEl = art.querySelector(".roll-result");
+    const rollText = rollEl?.textContent.trim() ?? "";
+    if (!text && !rollText) continue;
+    const system = art.classList.contains("system");
+    const sp = art.querySelector(".speaker")?.textContent.trim() ?? "";
+    const label = (art.querySelector(".channel-name")?.textContent ?? "").trim().replace(/^\[|\]$/g, "");
+    const judge = ["success", "failure", "critical", "fumble"].find((c) => rollEl?.classList.contains(c));
+    const roll = rollText ? parseRollResultText(rollText, judge) : undefined;
+    dcs.push({ dc: (art.getAttribute("data-channel") ?? "").trim(), label });
+    entries.push({
+      sp: sp || (system ? "system" : "不明な発言者"),
+      text,
+      ts: epochOfDatetime(art.querySelector("time.timestamp")?.getAttribute("datetime")),
+      kind: system || sp === "system" ? "SYSTEM" : mapKind(sp, undefined),
+      type: text.startsWith("◆") ? "note" : "text",
+      channel: "",
+      ...(roll ? { roll } : {}),
+    });
+  }
+  resolveChannelLabels(dcs).forEach((c, i) => (entries[i]!.channel = c));
+  if (entries.length > 0) return assembleChannels(entries);
 
   /* (1) 生ログ: 3つ以上の span を持つ <p> を順に読む */
   const rawPs = [...doc.querySelectorAll("p")].filter((p) => {
@@ -225,7 +301,7 @@ export function parseCcfoliaLogHtml(html: string): ParsedLog | null {
     const sp = spans[1].textContent.trim();
     const text = spans
       .slice(2)
-      .map((s) => s.textContent)
+      .map((s) => textWithBreaks(s))
       .join("\n")
       .trim();
     if (!sp || !text) continue;

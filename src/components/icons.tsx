@@ -232,13 +232,8 @@ export function IconTable(props: IconProps) {
       {...props}
     >
       <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
-        <circle vectorEffect="non-scaling-stroke" cx="7.5" cy="4.75" r="2.25" />
-        <circle vectorEffect="non-scaling-stroke" cx="16.5" cy="4.75" r="2.25" />
-        <path
-          vectorEffect="non-scaling-stroke"
-          d="M3.75 11c.55-1.75 1.95-2.75 3.75-2.75s3.2 1 3.75 2.75m1.5 0c.55-1.75 1.95-2.75 3.75-2.75s3.2 1 3.75 2.75"
-        />
-        <ellipse vectorEffect="non-scaling-stroke" cx="12" cy="17.5" rx="9" ry="3.5" />
+        <ellipse vectorEffect="non-scaling-stroke" cx="12" cy="10" rx="9" ry="4" />
+        <path vectorEffect="non-scaling-stroke" d="M5 12.5V19M19 12.5V19M12 14v6" />
       </g>
     </svg>
   );

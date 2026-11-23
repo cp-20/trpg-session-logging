@@ -67,7 +67,7 @@ describe("state-schema", () => {
     expect(okRestored?.prefs.hideSelfOnShare).toBe(false);
     expect(okRestored?.tables).toEqual({});
     expect(okRestored?.events).toEqual({});
-    expect(okRestored?.logs.s03.slug).toBe("s03");
+    expect(okRestored?.logs.s04.slug).toBe("s04");
     expect(okRestored?.logs.s01.sittings.length).toBeGreaterThan(0);
     expect(okRestored?.logs.s01.sittings[0]!.start).toBeGreaterThan(1_000_000_000);
     expect(okRestored?.logs.s02.sittings).toEqual([{ start: t0, end: t0 + 3600 }]);
@@ -105,7 +105,7 @@ describe("state-schema", () => {
 
     // 不正 log ownerId は拒否、かつ localStorage 原本は不変
     const badOwner = structuredClone(seedState());
-    badOwner.logs.s03.ownerId = "missing";
+    badOwner.logs.s04.ownerId = "missing";
     const raw = JSON.stringify(badOwner);
     localStorage.setItem("takufu-state-v4", raw);
     expect(parseSavedState(raw)).toBeNull();
@@ -128,7 +128,7 @@ describe("state-schema", () => {
 
     // 不正 log.players
     const badLogPlayer = structuredClone(seedState());
-    badLogPlayer.logs.s03.players.ghost = { linked: true, hidden: false, characterIds: [] };
+    badLogPlayer.logs.s04.players.ghost = { linked: true, hidden: false, characterIds: [] };
     expect(validateSavedState(badLogPlayer)).toBeNull();
 
     // type === "roll" なのに roll オブジェクトが無い

@@ -84,12 +84,12 @@ export const PRESET_NPC_ICONS: readonly { id: string; label: string; src: string
   },
 ];
 
-/** 人の顔。画像がなければ、変わらない ID から作った印（src/lib/identicon.ts）。頭文字は使わない */
+/** 人の顔。画像がなければ、変わらない ID から作った人の姿（src/lib/identicon.ts）。頭文字は使わない */
 export function userAvatarSrc(u: User): string {
   return u.image || identiconDataUri(u.handle ?? u.id, "user");
 }
 
-/** キャラクターの顔。画像がなければ、ID から作ったコマの絵 */
+/** キャラクターの顔。画像がなければ、ID から作った人の姿（和柄の地） */
 export function characterAvatarSrc(c: Character): string {
   return c.image || identiconDataUri(c.id, "character");
 }
@@ -324,70 +324,114 @@ export function UserName({ u, className }: { u: User; className?: string }) {
 }
 
 /**
- * 画像を上げる欄（人・卓の画像）。正方形に切り抜いて縮め、上げていないときは生成した画像（preview）を出す。
- * value が空なら生成画像。「生成した画像に戻す」で空に戻す
+ * 画像を選ぶ欄（人・卓の画像）。並べた見本から選ぶ: 生成した画像（既定）・ほかの候補（Google の画像など）・
+ * 上げた画像・「画像を上げる」。上げた画像は正方形に切り抜いて縮める。value が空なら生成画像
  */
 export function ImageUploadField({
   value,
   onChange,
-  preview,
+  render,
   label,
   maxChars = 3800,
-  extra,
+  choices = [],
 }: {
   value: string;
   onChange: (next: string) => void;
-  /** いまの見た目（value を反映したもの） */
-  preview: ReactNode;
-  /** ファイル選択のラベル（読み上げ用）。例: 「プロフィール画像を選ぶ」 */
+  /** その画像での見た目（"" なら生成画像） */
+  render: (image: string) => ReactNode;
+  /** 欄の名前（読み上げ用）。例: 「アイコン」 */
   label: string;
   maxChars?: number;
-  /** ほかの選択肢（Google の画像を使う、など） */
-  extra?: ReactNode;
+  /** 生成画像のほかに選べる画像（Google の画像など） */
+  choices?: readonly { value: string; label: string }[];
 }) {
   const [error, setError] = useState<string | null>(null);
+  // 上げた画像は、別の見本を選んでもこの欄を開いている間は残す（選び直せるように）
+  const preset = new Set(["", ...choices.map((c) => c.value)]);
+  const [uploaded, setUploaded] = useState(() => (preset.has(value) ? "" : value));
+  const tiles = [
+    { value: "", label: "生成" },
+    ...choices,
+    ...(uploaded ? [{ value: uploaded, label: "上げた画像" }] : []),
+  ];
+  const pick = (next: string) => {
+    setError(null);
+    onChange(next);
+  };
+  const tileClass = (on: boolean) =>
+    cx(
+      "flex w-24 flex-col items-center gap-2 whitespace-nowrap rounded-box border px-2 pb-2.5 pt-3 text-xs transition-colors",
+      on
+        ? "border-primary bg-primary/10 font-bold text-primary"
+        : "border-base-300 text-ink2 hover:border-base-content/30 hover:text-base-content",
+    );
   return (
     <div>
-      <div className="flex flex-wrap items-center gap-4">
-        {preview}
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="btn btn-sm cursor-pointer">
-            <IconUpload width={15} height={15} aria-hidden />
-            画像を選ぶ
-            <input
-              type="file"
-              accept="image/*"
-              className="sr-only"
-              aria-label={label}
-              onChange={async (e) => {
-                const input = e.currentTarget;
-                const file = input.files?.[0];
-                if (!file) return;
-                setError(null);
-                try {
-                  onChange(await readAvatarImageFile(file, { maxSize: 128, maxChars }));
-                } catch (err) {
-                  setError(userFacingError(err, "画像を読み込めませんでした。"));
-                } finally {
-                  input.value = "";
-                }
-              }}
-            />
-          </label>
-          {extra}
-          {value && (
+      <div
+        role="radiogroup"
+        aria-label={label}
+        className="flex flex-wrap gap-2"
+        onKeyDown={(e) => {
+          if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+          e.preventDefault();
+          const i = Math.max(
+            0,
+            tiles.findIndex((t) => t.value === value),
+          );
+          const step = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1;
+          const next = tiles[(i + step + tiles.length) % tiles.length]!;
+          pick(next.value);
+          requestAnimationFrame(() =>
+            (
+              e.currentTarget.querySelector('[role="radio"][aria-checked="true"]') as HTMLElement | null
+            )?.focus(),
+          );
+        }}
+      >
+        {tiles.map((t) => {
+          const on = t.value === value;
+          return (
             <button
+              key={t.label}
               type="button"
-              className="btn btn-quiet btn-sm"
-              onClick={() => {
-                onChange("");
-                setError(null);
-              }}
+              role="radio"
+              aria-checked={on}
+              tabIndex={on ? 0 : -1}
+              className={tileClass(on)}
+              onClick={() => pick(t.value)}
             >
-              生成した画像に戻す
+              {render(t.value)}
+              {t.label}
             </button>
-          )}
-        </div>
+          );
+        })}
+        <label className={cx(tileClass(false), "cursor-pointer border-dashed")}>
+          <span className="flex size-14 items-center justify-center">
+            <IconUpload width={22} height={22} aria-hidden />
+          </span>
+          画像を選ぶ
+          <input
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            aria-label={`${label}の画像を上げる`}
+            onChange={async (e) => {
+              const input = e.currentTarget;
+              const file = input.files?.[0];
+              if (!file) return;
+              setError(null);
+              try {
+                const data = await readAvatarImageFile(file, { maxSize: 128, maxChars });
+                setUploaded(data);
+                onChange(data);
+              } catch (err) {
+                setError(userFacingError(err, "画像を読み込めませんでした。"));
+              } finally {
+                input.value = "";
+              }
+            }}
+          />
+        </label>
       </div>
       {error && (
         <p className="mt-2 text-sm text-error" role="alert">

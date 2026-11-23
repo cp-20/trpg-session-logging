@@ -5,6 +5,9 @@ import { INTERNATIONAL_GROUP, recentSystemIds, systemOptions } from "./system-op
 
 describe("systemOptions", () => {
   const opts = systemOptions();
+  it("汎用・その他は先頭", () => {
+    expect(opts[0]!.value).toBe("general");
+  });
 
   it("すべてのシステムを、国際化版を後ろの見出しにまとめて出す", () => {
     expect(opts).toHaveLength(SYSTEM_LIST.length);

@@ -13,9 +13,11 @@ import {
   loadCloudState,
   publishSharedCharacter,
   publishSharedLog,
+  publishSharedScenario,
   saveCloudState,
   updateSharedMembership,
 } from "@shared/lib/cloud-state";
+import { isSharedByUser, sharedScenarioDoc } from "@shared/lib/scenario-directory";
 import { parseSavedState } from "@shared/lib/state-schema";
 import { TablePollSync } from "@shared/lib/table-polls";
 import { todayStr } from "@shared/lib/time";
@@ -156,6 +158,8 @@ export function MobileStoreProvider({ children }: { children: ReactNode }) {
   const aliveRef = useRef(true);
   const publishedLogsRef = useRef(new Map<string, string>());
   const publishedCharsRef = useRef(new Map<string, string>());
+  /** 共有シナリオ一覧へ出した、自分が足したシナリオ（中身の署名） */
+  const publishedScenariosRef = useRef(new Map<string, string>());
   const lastCalendarFeedKeyRef = useRef<string | null>(null);
   const pollSyncRef = useRef<TablePollSync | null>(null);
 
@@ -215,6 +219,14 @@ export function MobileStoreProvider({ children }: { children: ReactNode }) {
       if (publishedCharsRef.current.get(ch.id) === sig) continue;
       await publishSharedCharacter(ch, snapshot);
       publishedCharsRef.current.set(ch.id, sig);
+    }
+
+    for (const sc of Object.values(snapshot.scenarios)) {
+      if (!isSharedByUser(sc, uid)) continue;
+      const sig = JSON.stringify(sharedScenarioDoc(sc, uid));
+      if (publishedScenariosRef.current.get(sc.id) === sig) continue;
+      await publishSharedScenario(sc, uid);
+      publishedScenariosRef.current.set(sc.id, sig);
     }
 
     await pollSyncRef.current?.push(snapshot);
@@ -460,7 +472,7 @@ export function MobileStoreProvider({ children }: { children: ReactNode }) {
       () => {
         if (aliveRef.current) {
           setAuthReady(true);
-          setSyncError("サインイン情報を確認できませんでした。");
+          setSyncError("ログイン情報を確認できませんでした。");
         }
       },
     );

@@ -77,7 +77,7 @@ export default function Home() {
         <PageHead title="ホーム" />
         <div className="surface">
           <EmptyState
-            icon={<IconUpload width={28} height={28} />}
+            icon={<LogToRecordDiagram />}
             title="遊んだセッションを残しましょう"
             action={
               <>
@@ -316,5 +316,67 @@ export default function Home() {
         />
       )}
     </>
+  );
+}
+
+/**
+ * 初めての人のホームの図: ココフォリアなどのログ（発言とダイス）が、卓譜の 1 回の記録
+ * （日付・顔ぶれ・時間に沿った譜）になる。色はテーマのトークンだけ（ダークでもそのまま）
+ */
+function LogToRecordDiagram() {
+  const strokes = { strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
+  return (
+    <svg width="300" height="132" viewBox="0 0 300 132" aria-hidden className="max-w-full" fill="none">
+      {/* ログ: 発言の吹き出しとダイス */}
+      <g {...strokes}>
+        <rect x="6" y="10" width="112" height="112" rx="10" className="fill-base-100 stroke-base-300" />
+        <circle cx="24" cy="32" r="7" className="fill-base-200 stroke-base-300" />
+        <rect x="36" y="25" width="66" height="14" rx="7" className="fill-base-200 stroke-none" />
+        <circle cx="24" cy="62" r="7" className="fill-base-200 stroke-base-300" />
+        <rect x="36" y="55" width="48" height="14" rx="7" className="fill-base-200 stroke-none" />
+        <circle cx="24" cy="94" r="7" className="fill-base-200 stroke-base-300" />
+        {/* d10: ひし形の面と出目の点 */}
+        <path d="M50 82 L62 92 L50 106 L38 92 Z" className="fill-primary/15 stroke-primary" />
+        <circle cx="50" cy="93" r="2.6" className="fill-primary stroke-none" />
+        <rect x="70" y="87" width="34" height="12" rx="6" className="fill-base-200 stroke-none" />
+      </g>
+      {/* 矢印 */}
+      <path
+        d="M130 66 H160 M152 58 L161 66 L152 74"
+        {...strokes}
+        strokeWidth={2.4}
+        className="stroke-current"
+      />
+      {/* 卓譜の記録: 日付・顔ぶれ・時間に沿った譜（点はダイス、朱はクリティカル） */}
+      <g {...strokes}>
+        <rect x="172" y="10" width="122" height="112" rx="10" className="fill-base-100 stroke-base-300" />
+        <rect x="184" y="22" width="26" height="26" rx="5" className="fill-base-200 stroke-none" />
+        <rect x="216" y="24" width="64" height="9" rx="4.5" className="fill-base-300 stroke-none" />
+        <rect x="216" y="38" width="40" height="7" rx="3.5" className="fill-base-200 stroke-none" />
+        {[0, 1, 2].map((i) => (
+          <circle
+            key={i}
+            cx={192 + i * 13}
+            cy="66"
+            r="7"
+            className="fill-base-200 stroke-base-100"
+            strokeWidth={2.5}
+          />
+        ))}
+        {[88, 98, 108].map((y) => (
+          <path key={y} d={`M184 ${y} H282`} className="stroke-base-300" strokeWidth={1.5} />
+        ))}
+        {[
+          [194, 98],
+          [210, 88],
+          [226, 108],
+          [244, 98],
+          [270, 108],
+        ].map(([x, y]) => (
+          <circle key={`${x}-${y}`} cx={x} cy={y} r="3.4" className="fill-current stroke-none" />
+        ))}
+        <circle cx="257" cy="88" r="4.6" className="fill-primary stroke-none" />
+      </g>
+    </svg>
   );
 }

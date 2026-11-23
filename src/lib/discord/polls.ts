@@ -54,7 +54,7 @@ export function candidateSitting(c: PollCandidate, durationMin?: number): Sittin
   return { start: range.start / 1000, end: range.end / 1000 };
 }
 
-/** 「11月22日(日) 21:00〜翌1:00」 */
+/** 「11月22日(日) 21:00〜25:00」 */
 export function fmtCandidate(c: PollCandidate, durationMin?: number): string {
   const s = candidateSitting(c, durationMin);
   return s ? fmtSitting(s) : `${c.date} ${c.startTime}`;

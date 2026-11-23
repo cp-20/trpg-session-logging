@@ -17,7 +17,9 @@ export interface SearchOption<T extends string = string> {
 // 区切りに使われがちな記号。表記ゆれ（「ソード・ワールド」と「ソードワールド」）を吸収するため落とす
 const SEPARATORS_RE = /[\s・･\-‐‑–—―_.,、。/／:：;；'"`’”()（）[\]［］「」『』【】〈〉《》!！?？~〜]/g;
 
+/** 正規化の結果。シナリオの共有シナリオ一覧（数万件）を打つたびに直さないよう、共有シナリオ一覧が収まる大きさまで持つ */
 const normalizeCache = new Map<string, string>();
+const NORMALIZE_CACHE_MAX = 100_000;
 
 /** 照らし合わせ用の形に直す。NFKC → 小文字 → カタカナをひらがなに → 区切り記号を除く */
 export function normalizeForSearch(text: string): string {
@@ -26,7 +28,7 @@ export function normalizeForSearch(text: string): string {
   let out = text.normalize("NFKC").toLowerCase();
   out = out.replace(/[ァ-ヶ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
   out = out.replace(SEPARATORS_RE, "");
-  if (normalizeCache.size >= 5000) normalizeCache.clear();
+  if (normalizeCache.size >= NORMALIZE_CACHE_MAX) normalizeCache.clear();
   normalizeCache.set(text, out);
   return out;
 }

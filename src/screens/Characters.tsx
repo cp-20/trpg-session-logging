@@ -110,10 +110,19 @@ export const CharacterCard = memo(function CharacterCard({ c }: { c: Character }
 
 const CHAR_PAGE_SIZE = 24;
 
-/** 読み込めるキャラシサイト。説明文ではなく名前の並びで見せる */
-function SheetSites({ className }: { className?: string }) {
+/**
+ * 読み込めるキャラシサイト。説明文ではなく名前の並びで見せる。
+ * 長さの違う名前を折り返しで流すとがたつくので、同じ幅の升に揃えて並べる
+ */
+function SheetSites({ align = "center" }: { align?: "center" | "start" }) {
   return (
-    <ul aria-label="対応しているキャラシサイト" className={cx("meta justify-center", className)}>
+    <ul
+      aria-label="対応しているキャラシサイト"
+      className={cx(
+        "grid w-fit grid-cols-[repeat(2,auto)] gap-x-8 gap-y-1 text-left",
+        align === "center" && "mx-auto",
+      )}
+    >
       {SHEET_SITES.map((site) => (
         <li key={site.label} className="whitespace-nowrap">
           {site.label}
@@ -437,7 +446,7 @@ function ImportWizard({ onClose, onManual }: { onClose: () => void; onManual: ()
                 <b className="font-medium text-base-content">{site.label}</b>
               </p>
             ) : (
-              <SheetSites className="!justify-start" />
+              <SheetSites align="start" />
             )}
           </div>
 

@@ -26,12 +26,27 @@ import {
   useVisibleCount,
 } from "../components/ui";
 import { SYSTEMS, SYSTEM_LIST } from "../data/systems";
+import {
+  directoryToScenario,
+  scenarioFacts,
+  scenarioToDirectory,
+  withoutKnown,
+  type DirectoryScenario,
+} from "../lib/scenario-directory";
+import { useDirectoryScenario, useScenarioSearch } from "../lib/use-scenario-directory";
+import { matchRank } from "../lib/search-text";
 import { evaluateShareGate } from "../lib/share-gate";
 import { fmtDur, sessionPlayMinutes, uid, sessionStart } from "../lib/time";
-import { systemOptions } from "../lib/system-options";
+import { recentSystemIds, systemOptions } from "../lib/system-options";
 import { cleanTags, tagOptions } from "../lib/tags";
 import { useStore } from "../store";
-import type { ExternalSyncConfig, ExternalSyncProvider, Scenario, ScenarioEditChanges } from "../types";
+import type {
+  ExternalSyncConfig,
+  ExternalSyncProvider,
+  Scenario,
+  ScenarioEditChanges,
+  ScenarioEditRequest,
+} from "../types";
 import type { ImportedScenario } from "../lib/external-sync";
 import { SessionRow } from "./Sessions";
 
@@ -67,9 +82,10 @@ export default function Scenarios() {
   const deferredQ = useDeferredValue(q);
   const [sys, setSys] = useState("all");
   const [played, setPlayed] = useState<PlayedFilter>("all");
-  const [visibleCount, setVisibleCount] = useVisibleCount(SCENARIO_PAGE_SIZE, [deferredQ, sys, played]);
+  const query = deferredQ.trim();
 
-  const rows = useMemo(() => {
+  /** 自分が関わったシナリオ（遊んだ・記録が見える・自分で足した）。共有シナリオ一覧の結果より先に並べる */
+  const mine = useMemo(() => {
     const viewer = state.entered ? state.me : null;
     const bySc = new Map<string, { last: number; played: boolean }>();
     for (const l of Object.values(state.logs)) {
@@ -79,33 +95,68 @@ export default function Scenarios() {
       if (l.ownerId === state.me || Boolean(l.players[state.me])) cur.played = true;
       bySc.set(l.scenarioId, cur);
     }
-    return Object.values(state.scenarios).map((s) => {
-      const info = bySc.get(s.id);
-      return { s, hasPlayed: info?.played ?? false, last: info?.last ?? 0 };
-    });
+    return Object.values(state.scenarios)
+      .filter((s) => bySc.has(s.id) || s.addedByUid === state.me)
+      .map((s) => {
+        const info = bySc.get(s.id);
+        return { s, hasPlayed: info?.played ?? false, last: info?.last ?? 0 };
+      })
+      .sort((a, b) => b.last - a.last || a.s.title.localeCompare(b.s.title, "ja"));
   }, [state.scenarios, state.logs, state.entered, state.me]);
+  const hasPlayedAny = mine.some((r) => r.hasPlayed);
 
-  const usedSystems = useMemo(() => new Set(rows.map((r) => r.s.systemId)), [rows]);
+  /** 遊んでいるシステム（セッション・自分のキャラクター・卓から）。共有シナリオ一覧で先に出す */
+  const mySystems = useMemo(() => {
+    const own = Object.values(state.logs).filter(
+      (l) => l.ownerId === state.me || Boolean(l.players[state.me]),
+    );
+    const ids = [
+      ...recentSystemIds(own),
+      ...Object.values(state.characters)
+        .filter((c) => c.ownerId === state.me)
+        .map((c) => c.systemId),
+      ...Object.values(state.tables)
+        .filter((t) => t.memberIds.includes(state.me))
+        .map((t) => t.systemId),
+    ];
+    return [...new Set(ids.filter((x): x is string => Boolean(x) && x !== "general"))];
+  }, [state.logs, state.characters, state.tables, state.me]);
 
-  const list = useMemo(() => {
-    let items = rows;
+  const localHits = useMemo(() => {
+    let items = mine;
     if (sys !== "all") items = items.filter((r) => r.s.systemId === sys);
     if (played === "played") items = items.filter((r) => r.hasPlayed);
     if (played === "unplayed") items = items.filter((r) => !r.hasPlayed);
-    const query = deferredQ.trim().toLowerCase();
-    if (query) {
-      items = items.filter((r) => (r.s.title + r.s.author + r.s.tags.join()).toLowerCase().includes(query));
-    }
-    return [...items].sort((a, b) => b.last - a.last || a.s.title.localeCompare(b.s.title, "ja"));
-  }, [rows, deferredQ, sys, played]);
+    if (query)
+      items = items.filter(
+        (r) => matchRank({ label: r.s.title, keywords: [r.s.author, ...r.s.tags] }, query) >= 0,
+      );
+    return items;
+  }, [mine, sys, played, query]);
 
-  const shownList = useMemo(() => list.slice(0, visibleCount), [list, visibleCount]);
+  /* 共有シナリオ一覧（サーバーで探す）。通過済みだけを見るときは要らない */
+  const remote = useScenarioSearch({
+    q: query,
+    systemId: sys === "all" ? undefined : sys,
+    prefer: mySystems,
+    pageSize: SCENARIO_PAGE_SIZE,
+    enabled: played !== "played",
+  });
+  const remoteRows = useMemo(() => {
+    // 手元の写しと同じ作品（同じ ID、同じ TALTO の作品）は重ねて出さない
+    return withoutKnown(
+      mine.map((r) => r.s),
+      remote.items,
+    );
+  }, [remote.items, mine]);
+
   const filtered = q.trim() !== "" || sys !== "all" || played !== "all";
   /** 検索して見つからなかったときの追加先。URL を貼ったならそのまま読み込み、言葉ならタイトルに入れる */
   const addHref = scenarioAddHref(q);
+  const empty = localHits.length === 0 && remoteRows.length === 0;
 
   return (
-    <div className="max-w-4xl">
+    <div>
       <PageHead title="シナリオ" />
 
       <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
@@ -121,98 +172,81 @@ export default function Scenarios() {
           />
         </label>
         <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
-          <Seg<PlayedFilter>
-            ariaLabel="通過状況で絞り込み"
-            value={played}
-            onChange={setPlayed}
-            options={[
-              { v: "all", label: "すべて" },
-              { v: "played", label: "通過済み" },
-              { v: "unplayed", label: "未通過" },
-            ]}
-          />
-          {usedSystems.size > 1 && (
-            <Combobox
-              ariaLabel="システムで絞り込み"
-              value={sys}
-              onChange={setSys}
-              className="min-w-40 flex-1 sm:w-56 sm:flex-none"
+          {/* 遊んだシナリオがなければ、通過で絞るものがない */}
+          {hasPlayedAny && (
+            <Seg<PlayedFilter>
+              ariaLabel="通過状況で絞り込み"
+              value={played}
+              onChange={setPlayed}
               options={[
-                { value: "all", label: "すべてのシステム" },
-                ...systemOptions(SYSTEM_LIST.filter((x) => usedSystems.has(x.id))),
+                { v: "all", label: "すべて" },
+                { v: "played", label: "通過済み" },
+                { v: "unplayed", label: "未通過" },
               ]}
             />
           )}
+          <Combobox
+            ariaLabel="システムで絞り込み"
+            value={sys}
+            onChange={setSys}
+            className="min-w-40 flex-1 sm:w-56 sm:flex-none"
+            options={[{ value: "all", label: "すべてのシステム" }, ...systemOptions(SYSTEM_LIST)]}
+          />
         </div>
       </div>
 
-      {list.length === 0 ? (
-        <div className="surface">
-          <EmptyState
-            kind={filtered ? "filtered" : "first"}
-            title={filtered ? undefined : "シナリオがまだありません"}
-            action={
-              filtered ? (
-                <div className="flex flex-wrap justify-center gap-2">
-                  {q.trim() && (
-                    <button className="btn btn-primary btn-sm" onClick={() => nav({ to: addHref })}>
-                      <IconPlus width={15} height={15} /> シナリオを追加
+      {empty ? (
+        remote.loading ? null : (
+          <div className="surface">
+            <EmptyState
+              kind={filtered ? "filtered" : "first"}
+              title={filtered ? undefined : "シナリオがまだありません"}
+              action={
+                filtered ? (
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {q.trim() && (
+                      <button className="btn btn-primary btn-sm" onClick={() => nav({ to: addHref })}>
+                        <IconPlus width={15} height={15} /> シナリオを追加
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-quiet btn-sm"
+                      onClick={() => {
+                        setQ("");
+                        setSys("all");
+                        setPlayed("all");
+                      }}
+                    >
+                      絞り込みを解除
                     </button>
-                  )}
-                  <button
-                    className="btn btn-quiet btn-sm"
-                    onClick={() => {
-                      setQ("");
-                      setSys("all");
-                      setPlayed("all");
-                    }}
-                  >
-                    絞り込みを解除
+                  </div>
+                ) : (
+                  <button className="btn btn-primary" onClick={() => nav({ to: "/scenarios/new" })}>
+                    <IconPlus width={16} height={16} /> シナリオを追加
                   </button>
-                </div>
-              ) : (
-                <button className="btn btn-primary" onClick={() => nav({ to: "/scenarios/new" })}>
-                  <IconPlus width={16} height={16} /> シナリオを追加
-                </button>
-              )
-            }
-          />
-        </div>
+                )
+              }
+            />
+          </div>
+        )
       ) : (
         <>
           <div className="surface list">
-            {shownList.map(({ s, hasPlayed }) => {
-              const sysDef = SYSTEMS[s.systemId];
-              return (
-                <Link
-                  key={s.id}
-                  to={`/scenarios/${s.id}`}
-                  className="group row-interactive flex items-center gap-4 px-4 py-3.5 sm:px-5"
-                >
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate font-bold leading-snug transition-colors group-hover:text-primary">
-                      {s.title}
-                    </h3>
-                    <div className="meta mt-0.5 text-xs sm:text-sm">
-                      <SysBadge sys={sysDef} />
-                      <span className="truncate">{s.author}</span>
-                    </div>
-                  </div>
-                  {hasPlayed && (
-                    <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-ink2">
-                      <IconCheck width={14} height={14} aria-hidden /> 通過済み
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
+            {localHits.map(({ s, hasPlayed }) => (
+              <ScenarioListRow key={s.id} s={scenarioToDirectory(s)} played={hasPlayed} />
+            ))}
+            {remoteRows.map((d) => (
+              <ScenarioListRow key={d.id} s={d} played={false} />
+            ))}
           </div>
-          <LoadMore
-            shown={shownList.length}
-            total={list.length}
-            step={SCENARIO_PAGE_SIZE}
-            onMore={() => setVisibleCount((n) => n + SCENARIO_PAGE_SIZE)}
-          />
+          {played !== "played" && (
+            <LoadMore
+              shown={remote.items.length}
+              total={remote.total}
+              step={SCENARIO_PAGE_SIZE}
+              onMore={remote.loadMore}
+            />
+          )}
           {q.trim() && (
             <p className="mt-4 flex flex-wrap items-center gap-x-2 text-sm text-ink2">
               探しているシナリオがないときは
@@ -224,6 +258,45 @@ export default function Scenarios() {
         </>
       )}
     </div>
+  );
+}
+
+/** システム。卓譜のシステムに結べたものは正式名の印、結べないものは配布元のカテゴリ名 */
+function ScenarioSystem({ s }: { s: Pick<DirectoryScenario, "systemId" | "systemLabel"> }) {
+  return s.systemLabel ? (
+    <span className="whitespace-nowrap">{s.systemLabel}</span>
+  ) : (
+    <SysBadge sys={SYSTEMS[s.systemId]} />
+  );
+}
+
+/** 一覧の 1 行。人数と時間は遊べるかを決める材料なので、分かれば出す */
+function ScenarioListRow({ s, played }: { s: DirectoryScenario; played: boolean }) {
+  return (
+    <Link
+      to={`/scenarios/${s.id}`}
+      className="group row-interactive flex items-center gap-4 px-4 py-3.5 sm:px-5"
+    >
+      <div className="min-w-0 flex-1">
+        <h3 className="truncate font-bold leading-snug transition-colors group-hover:text-primary">
+          {s.title}
+        </h3>
+        <div className="meta mt-0.5 text-xs sm:text-sm">
+          <ScenarioSystem s={s} />
+          {s.author && <span className="truncate">{s.author}</span>}
+          {scenarioFacts(s).map((f) => (
+            <span key={f} className="whitespace-nowrap">
+              {f}
+            </span>
+          ))}
+        </div>
+      </div>
+      {played && (
+        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-ink2">
+          <IconCheck width={14} height={14} aria-hidden /> 通過済み
+        </span>
+      )}
+    </Link>
   );
 }
 
@@ -279,7 +352,14 @@ export function ScenarioDetail() {
   const [showSpoilers, setShowSpoilers] = useState(false);
   const [visibleLogCount, setVisibleLogCount] = useVisibleCount(SCENARIO_LOG_PAGE_SIZE, [id]);
 
-  const sc = state.scenarios[id ?? ""];
+  /* 手元に写しがなければ（ほかの人が足したもの・TALTO のもの）共有シナリオ一覧から読む。人数・時間も共有シナリオ一覧から */
+  const local = state.scenarios[id ?? ""];
+  const { scenario: remote, loading: remoteLoading } = useDirectoryScenario(id);
+  const sc = useMemo(
+    () => local ?? (remote ? directoryToScenario(remote, SYSTEMS) : undefined),
+    [local, remote],
+  );
+  const facts = remote ? scenarioFacts(remote) : [];
   const allLogs = useMemo(
     () =>
       sc
@@ -300,26 +380,32 @@ export function ScenarioDetail() {
       .sort((a, b) => a - b);
     return durations.length ? durations[Math.floor(durations.length / 2)] : null;
   }, [visibleLogs]);
+  const requests = useEditRequests(sc);
 
-  if (!sc) return <NotFound what="シナリオ" />;
-  const sys = SYSTEMS[sc.systemId];
+  if (!sc) return remoteLoading ? null : <NotFound what="シナリオ" />;
   const hasParticipated = allLogs.some((l) => l.ownerId === state.me || Boolean(l.players[state.me]));
-  const isAuthor = sc.claimedBy === state.me;
-  const canEdit = isAuthor || sc.addedByUid === state.me;
+  const canEdit = requests.isOwner;
   const needsSpoilerGuard = !canEdit && !hasParticipated && allLogs.length > 0;
-  const pendingRequests = state.editRequests.filter((r) => r.scenarioId === sc.id && r.status === "pending");
+  const pendingRequests = requests.incoming;
   const shownLogs = visibleLogs.slice(0, visibleLogCount);
-  const record = () => nav({ to: `/upload?scenario=${sc.id}` });
+  const record = () => {
+    // 記録に結ぶので、手元に写しを置く
+    if (!local) update((s) => void (s.scenarios[sc.id] ??= sc));
+    nav({ to: `/upload?scenario=${sc.id}` });
+  };
 
   return (
-    <div className="max-w-4xl">
+    <div>
       <PageHead
         back={{ to: "/scenarios", label: "シナリオ" }}
         title={sc.title}
         sub={
           <div className="meta">
-            <SysBadge sys={sys} />
-            <span>{sc.author}</span>
+            <ScenarioSystem s={remote ?? sc} />
+            {sc.author && <span>{sc.author}</span>}
+            {facts.map((f) => (
+              <span key={f}>{f}</span>
+            ))}
             {sc.sourceUrl && (
               <a
                 href={sc.sourceUrl}
@@ -330,7 +416,7 @@ export function ScenarioDetail() {
                 {sourceLabel(sc)} <IconExternal width={14} height={14} aria-hidden />
               </a>
             )}
-            {medDur != null && <span>プレイ時間 約{fmtDur(medDur)}</span>}
+            {medDur != null && <span>所要時間 約{fmtDur(medDur)}</span>}
             {hasParticipated && (
               <span className="inline-flex items-center gap-1 font-medium text-ink2">
                 <IconCheck width={14} height={14} aria-hidden /> 通過済み
@@ -344,9 +430,9 @@ export function ScenarioDetail() {
               <button className="btn" onClick={() => setEditing(true)}>
                 <IconPencil width={16} height={16} /> 編集
               </button>
-            ) : !authUser ? (
+            ) : requests.canRequest ? (
               <button className="btn" onClick={() => setEditRequest(true)}>
-                <IconSend width={16} height={16} /> 編集を申請
+                <IconSend width={16} height={16} /> 修正を提案
               </button>
             ) : null}
             <button className="btn btn-primary" onClick={record}>
@@ -356,7 +442,7 @@ export function ScenarioDetail() {
         }
       />
 
-      {pendingRequests.length > 0 && isAuthor && (
+      {pendingRequests.length > 0 && (
         <section
           aria-label="届いている修正提案"
           className="mb-6 space-y-3 rounded-box border border-warning/40 bg-warning/10 p-4 text-sm"
@@ -364,7 +450,7 @@ export function ScenarioDetail() {
           <p className="font-semibold">修正の提案が {pendingRequests.length} 件届いています</p>
           <ul className="space-y-3">
             {pendingRequests.map((req) => {
-              const requester = state.users[req.uid]?.name ?? "ユーザー";
+              const requester = req.requesterName ?? state.users[req.uid]?.name ?? "ユーザー";
               const diffs = formatScenarioDiffs(sc, req.changes);
               return (
                 <li key={req.id} className="rounded-lg border border-base-300 bg-base-100 p-3 space-y-2">
@@ -374,10 +460,7 @@ export function ScenarioDetail() {
                       type="button"
                       className="btn btn-sm btn-quiet"
                       onClick={() => {
-                        update((s) => {
-                          const target = s.editRequests.find((r) => r.id === req.id);
-                          if (target) target.status = "rejected";
-                        });
+                        void requests.resolve(req, "rejected");
                       }}
                     >
                       却下
@@ -405,9 +488,8 @@ export function ScenarioDetail() {
                               targetSc.description = ch.description || undefined;
                             }
                           }
-                          const targetReq = s.editRequests.find((r) => r.id === req.id);
-                          if (targetReq) targetReq.status = "accepted";
                         });
+                        void requests.resolve(req, "accepted");
                       }}
                     >
                       {diffs.length > 0 ? "提案を反映" : "確認済みにする"}
@@ -482,7 +564,7 @@ export function ScenarioDetail() {
               </button>
             }
           >
-            まだ遊んでいないシナリオです。セッションのタイトルや参加者を見ても大丈夫なら表示してください。
+            未通過のシナリオです。遊んだ卓や参加者を見ても大丈夫なら表示してください。
           </EmptyState>
         </div>
       ) : visibleLogs.length === 0 ? (
@@ -506,7 +588,14 @@ export function ScenarioDetail() {
       )}
 
       {editing && <EditScenarioModal sc={sc} onClose={() => setEditing(false)} />}
-      {editRequest && <EditRequestModal sc={sc} onClose={() => setEditRequest(false)} />}
+      {editRequest && (
+        <EditRequestModal
+          sc={sc}
+          pending={requests.myPending}
+          onSend={requests.send}
+          onClose={() => setEditRequest(false)}
+        />
+      )}
     </div>
   );
 }
@@ -630,20 +719,100 @@ interface EditRequestFormValues {
   note: string;
 }
 
+/**
+ * シナリオの修正の提案。ログインしていれば Firestore（足した人にだけ届く。src/lib/cloud-state.ts）、
+ * 体験版（ログインしていない）では手元の記録に置く
+ */
+function useEditRequests(sc: Scenario | undefined) {
+  const { state, update, authUser } = useStore();
+  const cloud = Boolean(authUser);
+  const isOwner = Boolean(sc && (sc.addedByUid === state.me || sc.claimedBy === state.me));
+  const [remote, setRemote] = useState<ScenarioEditRequest[]>([]);
+  const [reload, setReload] = useState(0);
+  const scId = sc?.id;
+  useEffect(() => {
+    if (!cloud || !scId) return;
+    let alive = true;
+    import("../lib/cloud-state")
+      .then((m) => m.fetchPendingEditRequests(scId, state.me, isOwner ? "owner" : "requester"))
+      .then((list) => {
+        if (alive) setRemote(list);
+      })
+      .catch((error: unknown) => console.error("[scenarios] edit requests", error));
+    return () => {
+      alive = false;
+    };
+  }, [cloud, scId, state.me, isOwner, reload]);
+  const local = state.editRequests.filter((r) => r.scenarioId === scId && r.status === "pending");
+  const pending = cloud ? remote : local;
+  return {
+    isOwner,
+    /** 提案できるか: 足した人でなく、ログインしていれば足した人がいる（TALTO のものは TALTO で直す） */
+    canRequest: !isOwner && (!cloud || Boolean(sc?.addedByUid)),
+    incoming: isOwner ? pending.filter((r) => r.uid !== state.me) : [],
+    myPending: pending.some((r) => r.uid === state.me),
+    async send(changes: ScenarioEditChanges, note: string) {
+      if (!sc) return;
+      const has = Object.keys(changes).length > 0;
+      if (cloud) {
+        const { sendScenarioEditRequest } = await import("../lib/cloud-state");
+        await sendScenarioEditRequest({
+          scenarioId: sc.id,
+          ownerUid: sc.addedByUid!,
+          uid: state.me,
+          requesterName: state.users[state.me]?.name ?? "",
+          changes,
+          note: note || undefined,
+        });
+        setReload((n) => n + 1);
+        return;
+      }
+      update((s) => {
+        s.editRequests.push({
+          id: `er_${uid()}`,
+          scenarioId: sc.id,
+          uid: s.me,
+          at: new Date().toISOString(),
+          changes: has ? changes : undefined,
+          note: note || undefined,
+          status: "pending",
+        });
+      });
+    },
+    async resolve(req: ScenarioEditRequest, status: "accepted" | "rejected") {
+      if (cloud) {
+        const { resolveEditRequest } = await import("../lib/cloud-state");
+        await resolveEditRequest(req.id, status).catch((error: unknown) =>
+          console.error("[scenarios] resolve edit request", error),
+        );
+        setReload((n) => n + 1);
+        return;
+      }
+      update((s) => {
+        const target = s.editRequests.find((r) => r.id === req.id);
+        if (target) target.status = status;
+      });
+    },
+  };
+}
+
 function EditRequestModal({
   sc,
+  pending,
+  onSend,
   onClose,
 }: {
-  sc: ReturnType<typeof useStore>["state"]["scenarios"][string];
+  sc: Scenario;
+  /** 自分の提案がまだ決まっていない */
+  pending: boolean;
+  onSend: (changes: ScenarioEditChanges, note: string) => Promise<void>;
   onClose: () => void;
 }) {
-  const { state, update } = useStore();
+  const { state } = useStore();
   // キーワードの候補は、ほかのシナリオに付いているもの
   const keywordSuggestions = useMemo(() => tagOptions(Object.values(state.scenarios)), [state.scenarios]);
   const [formError, setFormError] = useState<string | null>(null);
-  const pending = state.editRequests.some(
-    (r) => r.scenarioId === sc.id && r.uid === state.me && r.status === "pending",
-  );
+  const [sending, setSending] = useState(false);
   const {
     register,
     control,
@@ -662,8 +831,8 @@ function EditRequestModal({
     },
   });
 
-  function onSubmit(values: EditRequestFormValues) {
-    if (pending) return;
+  async function onSubmit(values: EditRequestFormValues) {
+    if (pending || sending) return;
     const changes: ScenarioEditChanges = {};
     const nextTitle = values.title.trim();
     const nextAuthor = values.author.trim();
@@ -684,18 +853,15 @@ function EditRequestModal({
       return;
     }
     setFormError(null);
-    update((s) => {
-      s.editRequests.push({
-        id: `er_${uid()}`,
-        scenarioId: sc.id,
-        uid: s.me,
-        at: new Date().toISOString(),
-        changes: Object.keys(changes).length > 0 ? changes : undefined,
-        note: nextNote || undefined,
-        status: "pending",
-      });
-    });
-    onClose();
+    setSending(true);
+    try {
+      await onSend(changes, nextNote);
+      onClose();
+    } catch {
+      setFormError("提案を送れませんでした。通信状態を確かめて、もう一度送ってください。");
+    } finally {
+      setSending(false);
+    }
   }
 
   return (
@@ -711,7 +877,7 @@ function EditRequestModal({
           <button
             type="button"
             className="btn btn-primary"
-            disabled={pending || Boolean(errors.title)}
+            disabled={pending || sending || Boolean(errors.title)}
             onClick={handleSubmit(onSubmit)}
           >
             {pending ? "送信済み" : "提案を送る"}
@@ -915,7 +1081,7 @@ export function ScenarioNew() {
       s.scenarios[id] = {
         id,
         title: values.title.trim(),
-        author: values.author.trim() || "作者未設定",
+        author: values.author.trim(),
         systemId: values.systemId,
         source: sourceFromUrl(values.sourceUrl),
         sourceUrl: values.sourceUrl.trim() || undefined,
@@ -933,7 +1099,7 @@ export function ScenarioNew() {
   }
 
   return (
-    <div className="max-w-4xl">
+    <div>
       <PageHead back={{ to: "/scenarios", label: "シナリオ" }} title="シナリオを追加" />
       <form className="surface px-5 py-5 sm:px-6" onSubmit={handleSubmit(onSubmit)}>
         <Field

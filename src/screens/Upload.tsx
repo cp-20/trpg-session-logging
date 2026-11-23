@@ -11,12 +11,13 @@ import {
   PageHead,
   ScopeLabel,
   ScopePicker,
-  Seal,
+  ScoreInscription,
   Select,
   SittingsInput,
   SplitLayout,
   SysBadge,
   cx,
+  Seg,
 } from "../components/ui";
 import {
   Avatar,
@@ -29,6 +30,15 @@ import {
 } from "../components/identity";
 import { SessionTimeline, type TimelineFilter } from "../components/timeline";
 import { SYSTEMS } from "../data/systems";
+import {
+  directoryToScenario,
+  scenarioToDirectory,
+  withoutKnown,
+  type DirectoryScenario,
+} from "../lib/scenario-directory";
+import { useScenarioSearch } from "../lib/use-scenario-directory";
+import { sessionTitle } from "../lib/session-scenario";
+import { scoreMarks } from "../lib/score-marks";
 import { roleLabel, speakerRoleOptions } from "../lib/roles";
 import { recentSystemIds, systemOptions } from "../lib/system-options";
 import { fmtSessionWhen, todayStr } from "../lib/time";
@@ -70,7 +80,7 @@ const buildDraft = (opts: Omit<Parameters<typeof buildDraftWith>[0], "avatars">)
 /** 読み込んだログ 1 ファイル分。複数あれば 1 つのセッションにまとめる */
 type LogFilePart = { fileName: string; channels: Channel[] };
 
-type FlowError = { field: "title" | "sittings" | "general"; text: string; index?: number } | null;
+type FlowError = { field: "scenario" | "sittings" | "general"; text: string; index?: number } | null;
 
 const rowsFor = (d: Draft): SittingFields[] =>
   d.sittings.length > 0 ? d.sittings.map(sittingToFields) : [nextSittingFields([], todayStr())];
@@ -109,7 +119,7 @@ export default function Upload() {
 
   function setDraft(d: Draft) {
     setDraftState(d);
-    if (error?.field === "title" && d.meta.title.trim()) setError(null);
+    if (error?.field === "scenario" && (d.scenarioId || d.newScenario?.title.trim())) setError(null);
   }
 
   function applyParts(next: LogFilePart[]) {
@@ -171,11 +181,10 @@ export default function Upload() {
 
   async function handleCommit() {
     if (!draft || committing) return;
-    const scenario = state.scenarios[draft.scenarioId];
-    const title = draft.meta.title.trim() || scenario?.title || draft.newScenario?.title.trim() || "";
-    if (!title) {
-      setError({ field: "title", text: "タイトルを入力してください。" });
-      document.getElementById("upload-title")?.focus();
+    // セッションはシナリオの題名で呼ぶので、シナリオは必ず要る
+    if (!state.scenarios[draft.scenarioId] && !draft.newScenario?.title.trim()) {
+      setError({ field: "scenario", text: "遊んだシナリオを選ぶか、名前を打って追加してください。" });
+      document.getElementById("upload-scenario")?.focus();
       return;
     }
     const parsed = sittingsFromFields(sittingRows);
@@ -190,7 +199,7 @@ export default function Upload() {
         {
           fileName: draft.fileNames.length > 0 ? draft.fileNames.join("、") : null,
           attachId,
-          meta: { ...draft.meta, title },
+          meta: draft.meta,
           channels: draft.channels,
           kinds: draft.kinds,
           speakerIcons: draft.speakerIcons,
@@ -231,19 +240,17 @@ export default function Upload() {
   if (attachId && !attachLog) return <NotFound what="添付先のセッション" />;
 
   const backTo = attachLog
-    ? { to: `/sessions/${attachLog.id}`, label: attachLog.title }
+    ? { to: `/sessions/${attachLog.id}`, label: sessionTitle(attachLog, state.scenarios) }
     : presetTable
       ? { to: `/tables/${presetTable}`, label: state.tables[presetTable]?.name ?? "卓" }
       : { to: "/sessions", label: "セッション" };
 
-  const wideStudio = Boolean(draft && draft.channels.length > 0);
-
   return (
-    <div className={cx(!wideStudio && "mx-auto max-w-3xl")}>
+    <div>
       <PageHead
         back={backTo}
         title={attachLog ? "ログを添付" : "セッションを記録"}
-        sub={attachLog ? <>「{attachLog.title}」にログを添付します。</> : undefined}
+        sub={attachLog ? <>「{sessionTitle(attachLog, state.scenarios)}」にログを添付します。</> : undefined}
       />
       <div key={draft ? "review" : "pick"} className="motion-enter">
         {!draft ? (
@@ -514,16 +521,9 @@ function Review({
         基本情報
       </h2>
       <div className="list">
-        <FormRow label="タイトル" htmlFor="upload-title">
-          <input
-            id="upload-title"
-            aria-invalid={error?.field === "title" || undefined}
-            className={cx("input input-bordered w-full", error?.field === "title" && "input-error")}
-            value={draft.meta.title}
-            onChange={(e) => setDraft({ ...draft, meta: { ...draft.meta, title: e.target.value } })}
-            placeholder={scenario ? scenario.title : "例: 廃校の十三時間目（2陣）"}
-          />
-          <FieldError text={error?.field === "title" ? error.text : null} />
+        <FormRow label="シナリオ">
+          <ScenarioField draft={draft} setDraft={setDraft} invalid={error?.field === "scenario"} />
+          <FieldError text={error?.field === "scenario" ? error.text : null} />
         </FormRow>
         <FormRow label="遊んだ日時">
           <SittingsInput
@@ -543,9 +543,6 @@ function Review({
             pinned={recentSystems}
             placeholder="システムを探す"
           />
-        </FormRow>
-        <FormRow label="シナリオ">
-          <ScenarioField draft={draft} setDraft={setDraft} />
         </FormRow>
       </div>
     </section>
@@ -632,29 +629,47 @@ function Review({
 }
 
 /* ---------- シナリオ ---------- */
-function ScenarioField({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) => void }) {
-  const { state } = useStore();
+function ScenarioField({
+  draft,
+  setDraft,
+  invalid,
+}: {
+  draft: Draft;
+  setDraft: (d: Draft) => void;
+  invalid?: boolean;
+}) {
+  const { state, update } = useStore();
   const systemId = draft.meta.systemId;
   const hasSystem = Boolean(systemId && systemId !== "general");
   const systemName = SYSTEMS[systemId]?.name;
+  /* 共有シナリオ一覧はサーバーで探す。打った言葉で問い合わせ、このシステムのものを先に */
+  const [typed, setTyped] = useState("");
+  const remote = useScenarioSearch({
+    q: typed,
+    // 打つ前はこのシステムのよく遊ばれているもの、打ったらどのシステムからも（このシステムのものを先に）
+    systemId: hasSystem && !typed.trim() ? systemId : undefined,
+    prefer: hasSystem ? [systemId] : [],
+    pageSize: 20,
+  });
 
-  /* 候補の並び: このシステムのものを先に、ほかは後ろ。検索はタイトル・作者・システム名 */
+  /* 候補の並び: 手元の写し（遊んだもの・足したもの）と共有シナリオ一覧の結果を合わせ、このシステムのものを先に。検索はタイトル・作者・システム名 */
   const options = useMemo<ComboboxOption[]>(() => {
-    const all = Object.values(state.scenarios);
-    const mine = hasSystem ? all.filter((sc) => sc.systemId === systemId) : all;
-    const others = hasSystem ? all.filter((sc) => sc.systemId !== systemId) : [];
-    const toOption = (group?: string) => (sc: (typeof all)[number]) => ({
+    const local = Object.values(state.scenarios).map(scenarioToDirectory);
+    // 手元の写しと同じ作品（同じ ID、同じ TALTO の作品）は重ねて出さない
+    const all = [...local, ...withoutKnown(local, remote.items)];
+    const toOption = (group?: string) => (sc: DirectoryScenario) => ({
       value: sc.id,
       label: sc.title,
       hint: sc.author,
-      keywords: [sc.author, SYSTEMS[sc.systemId]?.name ?? ""],
+      keywords: [sc.author, sc.systemLabel ?? SYSTEMS[sc.systemId]?.name ?? "", ...sc.tags],
       group,
     });
+    if (!hasSystem) return all.map(toOption());
     return [
-      ...mine.map(toOption(hasSystem ? systemName : undefined)),
-      ...others.map(toOption("ほかのシステム")),
+      ...all.filter((sc) => sc.systemId === systemId).map(toOption(systemName)),
+      ...all.filter((sc) => sc.systemId !== systemId).map(toOption("ほかのシステム")),
     ];
-  }, [state.scenarios, hasSystem, systemId, systemName]);
+  }, [state.scenarios, remote.items, hasSystem, systemId, systemName]);
 
   /* 入力前に出す候補: ログ本文・ファイル名に題名が出てくるもの、自分が遊んだもの（新しい順） */
   const pinned = useMemo(() => {
@@ -678,7 +693,10 @@ function ScenarioField({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft)
   }, [draft.fileNames, draft.channels, state.scenarios, state.logs, state.me, hasSystem, systemId]);
 
   function pick(id: string) {
-    const sc = state.scenarios[id];
+    // 共有シナリオ一覧から選んだら、記録に結ぶので手元に写しを置く
+    const fromDirectory = state.scenarios[id] ? undefined : remote.items.find((d) => d.id === id);
+    const sc = state.scenarios[id] ?? (fromDirectory && directoryToScenario(fromDirectory, SYSTEMS));
+    if (fromDirectory && sc) update((s) => void (s.scenarios[id] ??= sc));
     if (!sc) return;
     setDraft({
       ...draft,
@@ -690,7 +708,7 @@ function ScenarioField({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft)
   }
 
   if (draft.newScenario) {
-    const set = (patch: Partial<{ title: string; author: string }>) =>
+    const set = (patch: Partial<NonNullable<Draft["newScenario"]>>) =>
       setDraft({
         ...draft,
         newScenario: {
@@ -701,9 +719,11 @@ function ScenarioField({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft)
     return (
       <div className="space-y-2">
         <input
+          id="upload-scenario"
           aria-label="シナリオのタイトル"
+          aria-invalid={invalid || undefined}
           placeholder="シナリオのタイトル"
-          className="input input-bordered w-full"
+          className={cx("input input-bordered w-full", invalid && "input-error")}
           value={draft.newScenario.title}
           onChange={(e) => set({ title: e.target.value })}
         />
@@ -713,6 +733,17 @@ function ScenarioField({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft)
           className="input input-bordered w-full"
           value={draft.newScenario.author}
           onChange={(e) => set({ author: e.target.value })}
+        />
+        {/* 自作のシナリオや事前相談のように、ほかの人が遊ばないものは自分だけにする（P14: 安全側を既定に） */}
+        <Seg<"private" | "public">
+          ariaLabel="このシナリオを選べる人"
+          size="sm"
+          value={draft.newScenario.private === false ? "public" : "private"}
+          onChange={(v) => set({ private: v === "private" })}
+          options={[
+            { v: "private", label: "自分だけ" },
+            { v: "public", label: "ほかの人も選べる" },
+          ]}
         />
         <button
           type="button"
@@ -728,6 +759,8 @@ function ScenarioField({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft)
   return (
     <div className="flex items-center gap-2">
       <Combobox
+        id="upload-scenario"
+        invalid={invalid}
         ariaLabel="シナリオ"
         className="min-w-0 flex-1"
         value={draft.scenarioId}
@@ -738,17 +771,19 @@ function ScenarioField({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft)
         allLabel={hasSystem ? systemName : "すべて"}
         placeholder="タイトル・作者で探す"
         emptyText="見つかりません。名前を打って追加できます"
-        onCreate={(text) => setDraft({ ...draft, scenarioId: "", newScenario: { title: text, author: "" } })}
+        // 共有シナリオ一覧の答えが届くまでは「追加」を出さない（共有シナリオ一覧にある作品を二重に足させない）
+        onCreate={
+          remote.loading
+            ? undefined
+            : (text) =>
+                setDraft({
+                  ...draft,
+                  scenarioId: "",
+                  newScenario: { title: text, author: "", private: true },
+                })
+        }
+        onQueryChange={setTyped}
       />
-      {state.scenarios[draft.scenarioId] && (
-        <button
-          type="button"
-          className="btn btn-quiet btn-sm shrink-0"
-          onClick={() => setDraft({ ...draft, scenarioId: "" })}
-        >
-          外す
-        </button>
-      )}
     </div>
   );
 }
@@ -1204,7 +1239,7 @@ function RecordedModal({
     <>
       <CompletionModal
         title={attach ? "ログを添付しました" : "セッションを記録しました"}
-        stamp={<Seal char="記" />}
+        stamp={<ScoreInscription marks={scoreMarks(log.channels)} />}
         onClose={onClose}
         primary={{ label: "セッションを開く", to: `/sessions/${log.id}` }}
         secondary={[
@@ -1247,11 +1282,10 @@ function RecordedModal({
         ]}
       >
         {/* 何を・いつ・だれと。1 行ずつ、大事な順に */}
-        <p className="text-base font-bold text-base-content">{log.title}</p>
-        {(sc || sys) && (
+        <p className="text-base font-bold text-base-content">{sessionTitle(log, state.scenarios)}</p>
+        {sys && (
           <p className="mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
-            {sc && sc.title !== log.title && <span>{sc.title}</span>}
-            {sys && <SysBadge sys={sys} />}
+            <SysBadge sys={sys} />
           </p>
         )}
         <p className="mt-1 flex flex-wrap items-center justify-center gap-x-3 gap-y-1">

@@ -14,8 +14,8 @@ export const AUDIT_ROUTES = [
   "/sessions",
   "/sessions/s02",
   "/sessions/s02?tab=log",
-  "/sessions/s08",
-  "/sessions/s08?tab=log",
+  "/sessions/s10",
+  "/sessions/s10?tab=log",
   "/calendar",
   "/tables",
   "/tables/t_haikou",
@@ -57,6 +57,15 @@ export const BANNED_VISIBLE_TEXT: readonly (string | RegExp)[] = [
   "開いたときに自動で同期",
   "サインイン",
   "サインアウト",
+  // 用語集の「避ける表現」（ソースは lint:glossary でも見る）
+  "目録",
+  "カルテ",
+  "実施日",
+  "公開範囲",
+  "プレイした人",
+  "自由記述（未登録）",
+  "未リンク",
+  "セッションのタイトル",
 ];
 
 export interface AuditIssue {
@@ -207,6 +216,14 @@ export async function auditPage(
           }
         }
       }
+      // 10b. サイドバーの現在地には左端の短い印を出す（「左端のちょこっとした border なくさないで」2026-11-22。
+      // 一度キャレットと取り違えて消した）
+      if (innerWidth >= 1024) {
+        const current = document.querySelector('aside nav[aria-label="メイン"] a[aria-current="page"]');
+        if (current && visible(current) && !current.querySelector("[data-nav-current-mark]")) {
+          out.push({ rule: "nav-current-mark", detail: describe(current) });
+        }
+      }
       // 11. アクセシビリティ基本構造（スキップリンク・フォーカスリング・主要ランドマーク）
       if (document.querySelector('nav[aria-label="メイン"]')) {
         const skip = document.querySelector('a[href="#main-content"]');
@@ -332,10 +349,12 @@ export async function auditPage(
         }
       }
 
-      // 17. 文字の入力位置（キャレット）に見える細い色付きの縦棒を置かない（/scenarios「カーソルっぽいの出てるの紛らわしい」）。
-      // 現在地の印は面の色と文字の太さで示す。灰色の区切り線は対象外（彩度のある色だけ）
+      // 17. 文字の入力位置（キャレット）に見える細い色付きの縦棒を置かない（/scenarios の検索欄「カーソルっぽいの出てるの紛らわしい」）。
+      // 灰色の区切り線は対象外（彩度のある色だけ）。サイドバーの現在地の短い印（data-nav-current-mark）は
+      // 入力欄から離れた nav の端にあり、利用者が残すよう求めたもの（2026-11-22）なので対象外
       for (const el of document.querySelectorAll<HTMLElement>("body *")) {
         if (
+          el.hasAttribute("data-nav-current-mark") ||
           el.childElementCount > 0 ||
           (el.textContent ?? "").trim() !== "" ||
           el.closest("[data-user-content]")
@@ -371,6 +390,36 @@ export async function auditPage(
             rule: "column-align",
             detail: `${describe(first!.el)} ${Math.round(first!.r.width)}px / ${describe(off.el)} ${Math.round(off.r.width)}px`,
           });
+        }
+      }
+      // 18b. 画面の幅は画面によって変えない（P13: 「画面によって幅が違うとがたがたする」/upload・/signin、2026-11-22）。
+      // アプリの本文は枠（main）の幅いっぱいを使い、画面ごとに max-w で狭めたり中央に寄せたりしない。
+      // 公開ページのヘッダー・フッターの中身は常に max-w-6xl（72rem）。単一の用件の面（ログインの面など）は中で中央に置いてよい
+      if (innerWidth >= 1024) {
+        const ms = getComputedStyle(main);
+        const inner = main.clientWidth - parseFloat(ms.paddingLeft) - parseFloat(ms.paddingRight);
+        const page = [...main.children].find((el) => visible(el) && !inDialog(el));
+        if (main.closest("[data-app-shell]") && page) {
+          const w = page.getBoundingClientRect().width;
+          if (Math.abs(w - inner) > 1) {
+            out.push({
+              rule: "page-width",
+              detail: `${describe(page)} ${Math.round(w)}px / 枠 ${Math.round(inner)}px`,
+            });
+          }
+        }
+        const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+        for (const bar of document.querySelectorAll("body > div > header > div, body > div > footer > div")) {
+          if (!visible(bar) || bar.closest("[data-app-shell]")) continue;
+          const want = Math.min(72 * rem, document.documentElement.clientWidth);
+          const w = bar.getBoundingClientRect().width;
+          if (Math.abs(w - want) > 1) {
+            out.push({
+              rule: "page-width",
+              detail: `${bar.parentElement!.tagName.toLowerCase()} ${Math.round(w)}px`,
+            });
+            break;
+          }
         }
       }
       // 19. 隣り合うボタンの見かけの大きさをそろえる（P13: 塗りの「共有」の隣で、枠の薄い「編集」が小さく見えた）。
@@ -416,6 +465,31 @@ export async function auditPage(
         }
       }
 
+      // 19b. 横に並ぶ入力欄・選択・ボタンの高さをそろえる（P13 の 3 回目: 日程調整の「時間・分」、記録の参加者の
+      // 「名前・役割」の左右で高さが違った、2026-11-22）。見かけで隣り合う（縦に半分以上重なり、間が 48px 未満）
+      // 操作部品どうしは、描画の高さが 1px 以内でそろうこと。部品の中の部品（入力欄の中の消すボタンなど）は外側だけを見る
+      {
+        const CONTROL = ".input, .btn, [role=radiogroup]";
+        const controls = [...document.querySelectorAll(CONTROL)]
+          .filter((el) => visible(el) && !el.parentElement?.closest(CONTROL) && !el.matches(".icon-btn"))
+          .map((el) => ({ el, r: el.getBoundingClientRect() }));
+        pairs: for (let i = 0; i < controls.length; i++) {
+          for (let j = i + 1; j < controls.length; j++) {
+            const a = controls[i]!;
+            const b = controls[j]!;
+            const overlap = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
+            const gap = Math.max(a.r.left, b.r.left) - Math.min(a.r.right, b.r.right);
+            if (overlap < Math.min(a.r.height, b.r.height) / 2 || gap < 0 || gap >= 48) continue;
+            if (Math.abs(a.r.height - b.r.height) > 1) {
+              out.push({
+                rule: "control-height-parity",
+                detail: `${describe(a.el)} ${Math.round(a.r.height)}px / ${describe(b.el)} ${Math.round(b.r.height)}px`,
+              });
+              break pairs;
+            }
+          }
+        }
+      }
       // 20. 行のホバーの面は、行の見かけの範囲と一致させる（P13: キャラクターの歩みの行で、左の線と点を外して
       // ホバーの面が欠けて見えた）。面（.surface）の中の角の無い行は面の左右の端まで届くこと。
       // 四隅を丸めた行（目次の行など）はそれ自体が 1 つの面なので対象外

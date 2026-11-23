@@ -6,6 +6,7 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 import { signInWithFakeGoogle } from "./support/emulator-auth";
+import { addScenario } from "./support/scenario";
 import {
   buttonPress,
   FAKE_CHANNEL_ID,
@@ -54,7 +55,7 @@ async function finishOnboarding(page: Page) {
   await page.getByRole("button", { name: "この ID にする" }).click();
   await page.getByRole("button", { name: "スキップ" }).click();
   await page.getByRole("button", { name: "スキップ" }).click();
-  await page.getByRole("link", { name: "続きを開く" }).click();
+  await page.getByRole("link", { name: "卓を開く" }).click();
   await expect(page).toHaveURL(/\/tables$/);
 }
 
@@ -184,7 +185,7 @@ test("Discord 連携: つなぐ → 日程調整 → ボタンで回答 → 確�
   const sessionTitle = `秘密のセッション ${stamp}`;
   await page.goto("/upload");
   await page.getByRole("button", { name: "ログなしで記録する" }).click();
-  await page.getByLabel("タイトル", { exact: true }).fill(sessionTitle);
+  await addScenario(page, sessionTitle);
   await page.getByRole("combobox", { name: "卓", exact: true }).click();
   await page.getByRole("option", { name: tableName }).click();
   await page.getByRole("button", { name: "記録する", exact: true }).click();

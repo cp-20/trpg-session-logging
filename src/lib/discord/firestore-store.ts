@@ -335,7 +335,7 @@ export function createFirestoreStore(db: Firestore): DiscordStore {
       await deleteDoc(ref.reminders(key));
     },
     async getSharedLog(slug) {
-      // 目録（持ち主・公開の範囲）は誰でも 1 件ずつ読める。中身は、匿名で読める公開のときだけ読む（ルールもそれだけを許す）
+      // 共有シナリオ一覧（持ち主・公開の範囲）は誰でも 1 件ずつ読める。中身は、匿名で読める公開のときだけ読む（ルールもそれだけを許す）
       const manifest = await getDoc(doc(db, "sharedLogs", slug));
       if (!manifest.exists()) return null;
       const meta = manifest.data();
@@ -355,10 +355,10 @@ export function createFirestoreStore(db: Firestore): DiscordStore {
       if (!log) return { ...info, revoked: true };
       if (typeof log.tableId === "string") info.tableId = log.tableId;
       upgradeLogSchedule(log);
-      info.title = str(log.title);
+      // 呼び名はシナリオの題名（以前に公開したものはセッションの名前だけを持つことがある）
+      info.title = str(data?.scenario?.title) || str(log.title);
       info.systemId = str(log.systemId);
       if (Array.isArray(log.sittings)) info.sittings = log.sittings as SharedLogInfo["sittings"];
-      if (data?.scenario?.title) info.scenarioTitle = data.scenario.title;
       return info;
     },
     async listSharedCharacters(uid, max) {

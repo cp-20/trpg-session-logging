@@ -166,7 +166,7 @@ function Sidebar() {
           <span className="text-lg font-bold tracking-tight">卓譜</span>
         </Link>
         {!authUser && (
-          <span className="ml-auto rounded-md bg-base-200 px-2 py-0.5 text-xs text-ink2">デモ</span>
+          <span className="ml-auto rounded-md bg-base-200 px-2 py-0.5 text-xs text-ink2">サンプル</span>
         )}
       </div>
 
@@ -191,6 +191,13 @@ function Sidebar() {
                       : "text-base-content/75 font-medium hover:bg-base-200 hover:text-base-content",
                   )}
                 >
+                  {active && (
+                    <span
+                      data-nav-current-mark
+                      className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-primary"
+                      aria-hidden
+                    />
+                  )}
                   <Icon width={20} height={20} className="shrink-0" />
                   {label}
                 </Link>
@@ -299,7 +306,7 @@ function MobileTopBar() {
       </Link>
       {!authUser && (
         <span className="shrink-0 rounded-md bg-base-200 px-2 py-0.5 text-xs text-ink2 whitespace-nowrap">
-          デモ
+          サンプル
         </span>
       )}
       <Link to="/upload" className="btn btn-primary btn-sm ml-auto shrink-0 whitespace-nowrap">
@@ -382,7 +389,7 @@ function CalendarFeedSync() {
 
 export function Shell({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-screen">
+    <div data-app-shell className="flex min-h-screen">
       <a href="#main-content" className="skip-link">
         メインコンテンツへ移動
       </a>

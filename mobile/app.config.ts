@@ -17,6 +17,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const envFile = readRootEnvLocal();
   const readEnv = (expoKey: string, nextKey: string, fallback = "") =>
     process.env[expoKey] || process.env[nextKey] || envFile[expoKey] || envFile[nextKey] || fallback;
+  /* iOS の Google ログインは、iOS クライアント ID を逆順にした URL スキームで戻ってくる */
+  const iosClientId = readEnv("EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID", "NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID");
+  const iosUrlScheme = iosClientId
+    ? `com.googleusercontent.apps.${iosClientId.replace(/\.apps\.googleusercontent\.com$/, "")}`
+    : "";
 
   return {
     ...config,
@@ -24,8 +29,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     slug: "takufu",
     version: "0.3.0",
     orientation: "portrait",
-    /* Google ログインの戻り先（expo-auth-session は `<applicationId>:/oauthredirect` を使う）も受ける */
-    scheme: ["takufu", "app.takufu.mobile"],
+    scheme: "takufu",
     userInterfaceStyle: "automatic",
     icon: "./assets/icon.png",
     backgroundColor: "#f2ebe0",
@@ -93,6 +97,15 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       "expo-notifications",
+      /* iOS 用の設定だけを足す。Android は自動リンクで足り、Google Cloud に package と SHA-1 を登録した Android クライアントがあればよい */
+      ...(iosUrlScheme
+        ? [
+            ["@react-native-google-signin/google-signin", { iosUrlScheme }] as [
+              string,
+              { iosUrlScheme: string },
+            ],
+          ]
+        : []),
     ],
     experiments: {
       typedRoutes: true,
@@ -111,11 +124,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         databaseId: readEnv("EXPO_PUBLIC_FIREBASE_DATABASE_ID", "NEXT_PUBLIC_FIREBASE_DATABASE_ID", "takufu"),
       },
       googleAuth: {
-        iosClientId: readEnv("EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID", "NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID"),
-        androidClientId: readEnv(
-          "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID",
-          "NEXT_PUBLIC_GOOGLE_ANDROID_CLIENT_ID",
-        ),
+        iosClientId,
         webClientId: readEnv("EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID", "NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID"),
       },
     },

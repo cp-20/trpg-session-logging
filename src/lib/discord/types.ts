@@ -83,10 +83,10 @@ export interface SharedLogInfo {
   scope: "members" | "passed" | "public";
   revoked: boolean;
   tableId?: string;
+  /** セッションの呼び名（= シナリオの題名） */
   title?: string;
   systemId?: string;
   sittings?: Sitting[];
-  scenarioTitle?: string;
 }
 
 export interface SharedCharacterInfo {
@@ -133,7 +133,7 @@ export interface DiscordStore {
   markReminderSent(key: string): Promise<void>;
   releaseReminder(key: string): Promise<void>;
 
-  /** 共有ページの目録。中身（題名・卓など）は、匿名で読める公開のときだけ */
+  /** 共有ページの見出しの文書。中身（題名・卓など）は、匿名で読める公開のときだけ */
   getSharedLog(slug: string): Promise<SharedLogInfo | null>;
   listSharedCharacters(uid: string, limit: number): Promise<SharedCharacterInfo[]>;
 }

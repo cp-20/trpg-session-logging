@@ -14,7 +14,12 @@ export const INTERNATIONAL_GROUP = "ほかの言語の版";
  * @param systems 候補にするシステム（絞り込みでは使われているものだけを渡す）
  */
 export function systemOptions(systems: readonly SystemDef[] = SYSTEM_LIST): SearchOption[] {
-  return systems.map((s) => ({
+  // 「汎用・その他」はどのシステムにも当たらないときの逃げ道なので、50 音の途中ではなく先頭に置く
+  const ordered = [
+    ...systems.filter((s) => s.id === "general"),
+    ...systems.filter((s) => s.id !== "general"),
+  ];
+  return ordered.map((s) => ({
     value: s.id,
     label: s.name,
     keywords: s.keywords,

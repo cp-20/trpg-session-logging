@@ -41,7 +41,7 @@ export function PublicFrame({
 }) {
   // 公開ページは記録（ストア）を読まずにサーバーで描画する。使い始めているかは端末の目印で見る
   const entered = useEnteredHint();
-  const headWidth = poster ? "max-w-6xl" : width;
+  const headWidth = "max-w-6xl";
   return (
     <div className={cx("flex min-h-screen flex-col bg-base-200", poster && "pst-root")}>
       <header className={poster ? "pst-header" : "border-b border-base-300 bg-base-100"}>
@@ -363,7 +363,7 @@ export default function Landing() {
                 <h3 className="pst-spec-title">録画・感想・絵をつなぐ</h3>
               </div>
               <p className="pst-spec-desc">
-                録画・配信アーカイブ・リプレイ動画・卓報告・ふせったー・イラストをセッションに紐付けます。ものごとの公開範囲とネタバレ設定、目次つきで、ログの時刻を押すと録画のその場面が開きます。
+                録画・配信アーカイブ・リプレイ動画・卓報告・ふせったー・イラストをセッションに紐付けます。ものごとの共有範囲とネタバレ設定、目次つきで、ログの時刻を押すと録画のその場面が開きます。
               </p>
               <div className="pst-spec-sample" aria-hidden="true">
                 <span className="pst-mini-time">23:41</span>
@@ -378,12 +378,12 @@ export default function Landing() {
               </div>
               <p className="pst-spec-desc">
                 卓メンバーでの日程調整、カレンダー購読、許可したときだけの Google
-                カレンダーとの空き時間の照合に対応しています。共有範囲はメンバー限定・プレイした人・公開から選べ、未通過の人にはネタバレを伏せます。X
+                カレンダーとの空き時間の照合に対応しています。共有範囲はメンバー限定・通過した人・公開から選べ、未通過の人にはネタバレを伏せます。X
                 用の卓報告カードも作れます。
               </p>
               <div className="pst-spec-sample" aria-hidden="true">
                 <IconLock width={16} height={16} aria-hidden />
-                <span className="text-sm font-bold">プレイした人だけに公開</span>
+                <span className="text-sm font-bold">通過した人だけに公開</span>
                 <span className="pst-tile-meta">未通過の人には本文を伏せる</span>
               </div>
             </article>
@@ -599,7 +599,7 @@ function SessionSheet() {
               <IconShare width={14} height={14} aria-hidden /> 共有とネタバレ配慮
             </div>
             <p className="text-sm leading-relaxed">
-              <b>プレイした人</b>だけに公開します。未通過の人には本文を伏せます。X
+              <b>通過した人</b>だけに公開します。未通過の人には本文を伏せます。X
               用の卓報告カードもここから作れます。
             </p>
           </div>

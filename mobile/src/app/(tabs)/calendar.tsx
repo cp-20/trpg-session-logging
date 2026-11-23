@@ -62,6 +62,7 @@ import { hapticSelection, hapticSuccess } from "../../native/haptics";
 import { useMobileStore } from "../../store/mobile-store";
 import { useTheme } from "../../theme/ThemeProvider";
 import { userFacingError } from "@shared/lib/user-error";
+import { sessionTitle } from "@shared/lib/session-scenario";
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"] as const;
 const UNRECORDED_LOOKBACK_DAYS = 30;
@@ -511,7 +512,7 @@ export default function CalendarScreen() {
                           style={{ paddingHorizontal: 16, paddingVertical: 12, gap: 4 }}
                         >
                           <Text style={{ fontSize: 15, fontWeight: "700", color: tokens.ink }}>
-                            {l.title}
+                            {sessionTitle(l, state.scenarios)}
                           </Text>
                           <MetaRow>
                             <Text style={{ fontSize: 12, color: tokens.ink2 }}>記録</Text>
@@ -958,7 +959,7 @@ function CalendarSyncSheet({
           <Text style={{ fontSize: 15, fontWeight: "700", color: tokens.ink }}>購読リンクで自動更新</Text>
           {!isSignedIn ? (
             <Text style={{ fontSize: 13, color: tokens.ink2 }}>
-              Google でサインインすると、外部カレンダー用の購読リンクを発行します。
+              Google でログインすると、外部カレンダー用の購読リンクを発行します。
             </Text>
           ) : links ? (
             <>

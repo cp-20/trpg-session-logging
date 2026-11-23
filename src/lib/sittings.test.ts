@@ -9,6 +9,8 @@ import {
   hasMessageTimes,
   migrateLegacySchedule,
   nextSittingFields,
+  normalizeEndTime,
+  endFieldFor,
   normalizeSittings,
   normalizeTime,
   sessionDays,
@@ -73,11 +75,11 @@ describe("集まりの並びから導く値", () => {
       sessionDays({ sittings: [{ start: at("2026-11-09", "02:00"), end: at("2026-11-09", "04:00") }] }),
     ).toEqual(["2026-11-08"]);
   });
-  it("表示: 1 回なら時刻まで、翌日に終わるなら「翌」、複数回なら回数", () => {
-    expect(fmtSitting(log.sittings[0]!)).toBe("11月8日(日) 21:00〜翌01:30");
+  it("表示: 1 回なら時刻まで、翌日に終わるなら 24 を足した時刻、複数回なら回数", () => {
+    expect(fmtSitting(log.sittings[0]!)).toBe("11月8日(日) 21:00〜25:30");
     expect(endsNextDay(log.sittings[1]!)).toBe(false);
     expect(fmtSessionWhen({ sittings: [log.sittings[1]!] })).toBe("11月15日(日) 20:00〜23:00");
-    expect(fmtSessionWhen(log)).toBe("11月8日(日)・15日(日)（2回）");
+    expect(fmtSessionWhen(log)).toBe("11月8日(日)・15日(日)");
     expect(fmtSessionWhen({ sittings: [] })).toBe("日付未定");
   });
 });
@@ -101,19 +103,29 @@ describe("normalizeSittings", () => {
 });
 
 describe("入力欄（日付・開始・終了）", () => {
-  it("終了が開始以前なら翌日に終わる。往復しても同じ", () => {
-    const s = sittingFromFields({ date: "2026-10-17", start: "21:00", end: "02:30" })!;
+  it("日をまたぐ終了は 26:30 と書く。開始以前の 02:30 も翌日とみなし、往復すると 26:30 になる", () => {
+    const s = sittingFromFields({ date: "2026-10-17", start: "21:00", end: "26:30" })!;
     expect(s).toEqual({ start: at("2026-10-17", "21:00"), end: at("2026-10-18", "02:30") });
-    expect(sittingToFields(s)).toEqual({ date: "2026-10-17", start: "21:00", end: "02:30" });
+    expect(sittingFromFields({ date: "2026-10-17", start: "21:00", end: "02:30" })).toEqual(s);
+    expect(sittingToFields(s)).toEqual({ date: "2026-10-17", start: "21:00", end: "26:30" });
+    expect(sittingFromFields({ date: "2026-10-17", start: "21:00", end: "24:00" })!.end).toBe(
+      at("2026-10-18", "00:00"),
+    );
+    expect(endFieldFor("21:00", "1:00")).toBe("25:00");
+    expect(endFieldFor("21:00", "23:30")).toBe("23:30");
+    expect(endFieldFor("21:00", "25:00")).toBe("25:00");
     expect(sittingFromFields({ date: "2026-10-17", start: "21:00", end: "21:00" })!.end).toBe(
       at("2026-10-18", "21:00"),
     );
   });
-  it("時刻は全角・コロンなし・1 桁の時も読む。24 時以降の書き方は受けない", () => {
+  it("時刻は全角・コロンなし・1 桁の時も読む。24 時以降は終了だけ（47 時まで）", () => {
     expect(normalizeTime("9:05")).toBe("09:05");
     expect(normalizeTime("２１：３０")).toBe("21:30");
     expect(normalizeTime("2130")).toBe("21:30");
     expect(normalizeTime("25:30")).toBeNull();
+    expect(normalizeEndTime("25:30")).toBe("25:30");
+    expect(normalizeEndTime("２５３０")).toBe("25:30");
+    expect(normalizeEndTime("48:00")).toBeNull();
     expect(normalizeTime("21")).toBeNull();
     expect(sittingFromFields({ date: "2026/10/17", start: "21:00", end: "23:00" })).toBeNull();
   });
@@ -147,7 +159,7 @@ describe("入力欄（日付・開始・終了）", () => {
       start: "20:00",
       end: "23:00",
     });
-    expect(nextSittingFields([], "2026-01-01")).toEqual({ date: "2026-01-01", start: "21:00", end: "00:00" });
+    expect(nextSittingFields([], "2026-01-01")).toEqual({ date: "2026-01-01", start: "21:00", end: "24:00" });
   });
 });
 

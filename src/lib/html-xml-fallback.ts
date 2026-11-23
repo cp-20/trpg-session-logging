@@ -172,6 +172,17 @@ export interface FallbackHtmlEntry {
   tab: string;
   sp: string;
   text: string;
+  /** 新形式のみ: data-channel と表示名(.channel-name)。同じ data-channel の表示名は共有される */
+  dataChannel?: string;
+  label?: string;
+  /** 新形式(article.message)のみ: <time datetime> の生の文字列 */
+  datetime?: string;
+  /** 新形式のみ: .roll-result の本文 */
+  rollText?: string;
+  /** 新形式のみ: .roll-result の判定クラス(success / failure / critical / fumble) */
+  rollClass?: string;
+  /** 新形式のみ: article.message.system */
+  system?: boolean;
 }
 
 /** CCFOLIA HTML（生ログ / 旧整形ログ / 新整形ログ）を DOMParser なしで解析する */
@@ -179,6 +190,37 @@ export function parseCcfoliaHtmlEntriesFallback(html: string): FallbackHtmlEntry
   const root = parseLightTree(html, false);
   const entries: FallbackHtmlEntry[] = [];
   let chIndex = 0;
+
+  // (0) 新形式: main.message-list > article.message[data-channel]
+  const empty: LightNode = { tag: "", attrs: {}, children: [] };
+  for (const art of findAll(root, (el) => el.tag === "article" && hasClass(el, "message"))) {
+    const first = (cls: string) => findAll(art, (el) => hasClass(el, cls))[0];
+    const system = hasClass(art, "system");
+    const sp = nodeText(first("speaker") ?? empty).trim();
+    const text = nodeText(first("message-text") ?? empty).trim();
+    const rollEl = first("roll-result");
+    const rollText = rollEl ? nodeText(rollEl).trim() : "";
+    if (!text && !rollText) continue;
+    const label = nodeText(first("channel-name") ?? empty)
+      .trim()
+      .replace(/^\[|\]$/g, "");
+    const rollClass = rollEl
+      ? (rollEl.attrs.class ?? "").split(/\s+/).find((c) => /^(success|failure|critical|fumble)$/.test(c))
+      : undefined;
+    const datetime = first("timestamp")?.attrs.datetime;
+    entries.push({
+      tab: label || (art.attrs["data-channel"] ?? "").trim() || "メイン",
+      dataChannel: (art.attrs["data-channel"] ?? "").trim(),
+      label,
+      sp: sp || (system ? "system" : "不明な発言者"),
+      text,
+      ...(datetime ? { datetime } : {}),
+      ...(rollText ? { rollText } : {}),
+      ...(rollClass ? { rollClass } : {}),
+      ...(system ? { system: true } : {}),
+    });
+  }
+  if (entries.length > 0) return entries;
 
   // (1) 生ログ: 直下に 3 つ以上の <span> を持つ <p>
   const rawPs = findAll(root, (el) => el.tag === "p" && childElements(el, "span").length >= 3);

@@ -58,6 +58,7 @@ import {
   revokeSharedMember,
   type SharedLogData,
 } from "../lib/cloud-state";
+import { sessionTitle } from "../lib/session-scenario";
 
 export default function SessionDetail() {
   const { id } = useParams<{ id?: string }>();
@@ -161,7 +162,7 @@ export default function SessionDetail() {
     <>
       <PageHead
         back={{ to: "/sessions", label: "セッション" }}
-        title={log.title}
+        title={sessionTitle(log, state.scenarios)}
         sub={
           <div className="space-y-1">
             <div className="meta text-ink">
@@ -324,14 +325,14 @@ export default function SessionDetail() {
             return overviewAside ? (
               <SplitLayout asideWidth="md" main={overviewMain} aside={overviewAside} />
             ) : (
-              <div className="max-w-4xl">{overviewMain}</div>
+              <div>{overviewMain}</div>
             );
           })()}
       </div>
 
       <div role="tabpanel" id="panel-timeline" aria-labelledby="tab-timeline" hidden={tab !== "timeline"}>
         {tab === "timeline" && (
-          <div className="max-w-4xl">
+          <div>
             {log.hasLog ? (
               !canRead ? (
                 <div className="surface">
@@ -478,7 +479,7 @@ export default function SessionDetail() {
           }
         >
           <p className="text-sm text-ink2">
-            「{log.title}」のログ・参加者の紐付け・感想が消えます。元に戻せません。
+            「{sessionTitle(log, state.scenarios)}」のログ・参加者の紐付け・感想が消えます。元に戻せません。
           </p>
         </Modal>
       )}
@@ -911,7 +912,7 @@ function MembersTab({ log }: { log: Log }) {
                     {char?.archetype && <span className="truncate text-xs text-ink2">{char.archetype}</span>}
                     {!char && (
                       <span className="text-xs text-ink3">
-                        {p.linked ? "キャラクター未設定" : "名前のみ（未リンク）"}
+                        {p.linked ? "キャラクター未設定" : "名前のみ"}
                       </span>
                     )}
                     {p.hidden && <span className="text-xs text-ink3">共有ページでは非表示</span>}
@@ -1050,7 +1051,7 @@ function MembersTab({ log }: { log: Log }) {
                   }}
                 >
                   <IconUserPlus width={15} height={15} />
-                  {inviting ? "作成中…" : "招待リンクを作る"}
+                  {inviting ? "作成中…" : "参加者の招待リンクを作る"}
                 </button>
               </div>
               {inviteUrl && <CopyBox text={inviteUrl} />}
@@ -1177,9 +1178,8 @@ function RollSummarySection({ log }: { log: Log }) {
 /* ---------- 編集 ---------- */
 function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
   const { state, update } = useStore();
-  const [title, setTitle] = useState(log.title);
   const [tableId, setTableId] = useState(log.tableId ?? "");
-  const [scenarioId, setScenarioId] = useState(log.scenarioId ?? "");
+  const [scenarioId, setScenarioId] = useState(log.scenarioId);
   const [sittings, setSittings] = useState<SittingFields[]>(() => log.sittings.map(sittingToFields));
   const [error, setError] = useState<{ index: number; text: string } | null>(null);
 
@@ -1191,10 +1191,9 @@ function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
     }
     update((s) => {
       const l = s.logs[log.id];
-      l.title = title.trim() || l.title;
       l.tableId = tableId || undefined;
-      l.scenarioId = scenarioId || undefined;
-      if (scenarioId && s.scenarios[scenarioId]) l.systemId = s.scenarios[scenarioId].systemId;
+      l.scenarioId = scenarioId;
+      if (s.scenarios[scenarioId]) l.systemId = s.scenarios[scenarioId].systemId;
       l.sittings = parsed.sittings;
     });
     onClose();
@@ -1202,7 +1201,7 @@ function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
 
   return (
     <Modal
-      title="セッション情報を編集"
+      title="セッションを編集"
       onClose={onClose}
       wide
       foot={
@@ -1216,9 +1215,6 @@ function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
         </>
       }
     >
-      <Field label="タイトル">
-        <input className="input w-full" value={title} onChange={(e) => setTitle(e.target.value)} />
-      </Field>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
         <Field label="卓">
           <Combobox
@@ -1237,15 +1233,12 @@ function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
             className="w-full"
             ariaLabel="シナリオ"
             value={scenarioId}
-            onChange={setScenarioId}
-            options={[
-              { value: "", label: "選択しない" },
-              ...Object.values(state.scenarios).map((s) => ({
-                value: s.id,
-                label: s.title,
-                keywords: [s.author],
-              })),
-            ]}
+            onChange={(v) => v && setScenarioId(v)}
+            options={Object.values(state.scenarios).map((s) => ({
+              value: s.id,
+              label: s.title,
+              keywords: [s.author],
+            }))}
           />
         </Field>
       </div>
@@ -1267,15 +1260,14 @@ export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => voi
   const shareUrl = `${location.origin}/share/l/${log.slug}`;
   const cardData = useMemo(
     () => ({
-      scenarioTitle: sc?.title,
       scenarioEmoji: sc?.emoji,
-      title: log.title,
+      title: sessionTitle(log, state.scenarios),
       dateLabel: fmtDates(sessionDays(log)),
       systemName: SYSTEMS[log.systemId]?.name ?? "汎用・その他",
       playerCount: Object.keys(log.players).length,
       shareUrl,
     }),
-    [sc?.title, sc?.emoji, log, shareUrl],
+    [sc?.emoji, log, shareUrl, state.scenarios],
   );
   const cardSvg = useMemo(() => buildReportCardSVG(cardData), [cardData]);
 
@@ -1357,12 +1349,12 @@ function ShareModal({
 
   return (
     <Modal title="共有" onClose={onClose}>
-      <h3 className="text-sm font-bold">読める人</h3>
+      <h3 className="text-sm font-bold">共有範囲</h3>
       <div className="mt-2">
-        <ScopePicker ariaLabel="読める人" value={log.scope} onChange={setScope} />
+        <ScopePicker ariaLabel="共有範囲" value={log.scope} onChange={setScope} />
       </div>
       {log.channels.some((c) => c.secret) && (
-        <p className="mt-1 text-sm text-ink2">シークレットタブも、読める人にはそのまま表示されます。</p>
+        <p className="mt-1 text-sm text-ink2">シークレットタブも、共有範囲の人にはそのまま表示されます。</p>
       )}
 
       <h3 className="mt-6 text-sm font-bold">共有リンク</h3>

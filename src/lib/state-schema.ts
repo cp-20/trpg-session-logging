@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { State } from "../types";
+import { upgradeLogScenario } from "./session-scenario";
 import { upgradeLogSchedule } from "./sittings";
 import { coerceSheet } from "./sheet";
 
@@ -129,6 +130,7 @@ export const RestoredStateSchema = z
         author: z.string(),
         systemId: z.string(),
         tags: z.array(z.string()).default([]),
+        private: z.boolean().optional(),
         externalSync: externalSyncSchema.optional(),
       }),
     ),
@@ -136,7 +138,7 @@ export const RestoredStateSchema = z
       z.string(),
       z.looseObject({
         id: z.string(),
-        title: z.string(),
+        scenarioId: z.string().min(1),
         systemId: z.string(),
         ownerId: z.string(),
         scope: z.enum(["members", "passed", "public"]),
@@ -209,6 +211,10 @@ export function validateSavedState(data: unknown): State | null {
       log.slug ??= id;
       // 遊んだ時間帯は dates + t0 + t1 から sittings（開始・終了の日時の並び）に改めた
       upgradeLogSchedule(log);
+      // セッションは名前を持たず、シナリオの題名で呼ぶ（シナリオのないものは名前から共有シナリオ一覧に出さないシナリオを作る）
+      obj.scenarios ??= {};
+      if (obj.scenarios && typeof obj.scenarios === "object")
+        upgradeLogScenario(log, obj.scenarios as Record<string, unknown>);
     }
   }
   // 以前の「予定のある日」（Google から許可なしに混ぜた日・手で入れた日）は扱わなくなった。

@@ -173,7 +173,7 @@ describe("Characters + ImportWizard + CharacterDetail 結合テスト", () => {
       initialState: fresh,
     });
     expect(await screen.findByRole("heading", { name: "キャラシ" })).toBeInTheDocument();
-    expect(screen.getByText("図書館")).toBeInTheDocument();
+    expect(screen.getAllByText("図書館").length).toBeGreaterThan(0);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

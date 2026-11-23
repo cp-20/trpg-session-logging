@@ -32,6 +32,7 @@ import { openExternalUrl } from "../../../native/native-share";
 import { getCachedSharedLog, setCachedSharedLog } from "../../../store/shared-cache";
 import { useMobileStore } from "../../../store/mobile-store";
 import { useTheme } from "../../../theme/ThemeProvider";
+import { sessionTitle } from "@shared/lib/session-scenario";
 
 export default function ShareLogScreen() {
   const { slug } = useLocalSearchParams<{ slug?: string }>();
@@ -145,7 +146,7 @@ function RemoteShareLog({ slug }: { slug: string }) {
       users: { ...state.users, ...shared.users },
       characters: {},
       logs: { [shared.log.id]: shared.log },
-      scenarios: shared.scenario ? { [shared.scenario.id]: shared.scenario } : {},
+      scenarios: { [shared.scenario.id]: shared.scenario },
     };
     return <ShareLogReader state={view} log={shared.log} serverAuthorized />;
   }
@@ -157,7 +158,7 @@ function RemoteShareLog({ slug }: { slug: string }) {
         <EmptyState
           kind="permission"
           icon={<IconLock size={28} color={tokens.ink3} />}
-          title={scope === "passed" ? "プレイした人に共有された記録です" : "メンバー限定の記録です"}
+          title={scope === "passed" ? "通過した人に共有された記録です" : "メンバー限定の記録です"}
           action={
             status === "error" ? (
               <Button variant="secondary" onPress={() => setRetry((n) => n + 1)}>
@@ -165,7 +166,7 @@ function RemoteShareLog({ slug }: { slug: string }) {
               </Button>
             ) : !authUser ? (
               <Button variant="primary" onPress={() => router.push("/sign-in")}>
-                サインイン画面を開く
+                ログイン画面を開く
               </Button>
             ) : scope === "passed" ? (
               <Button
@@ -184,7 +185,7 @@ function RemoteShareLog({ slug }: { slug: string }) {
                   }
                 }}
               >
-                {busy ? "確認中…" : "プレイ済みなので開く"}
+                {busy ? "確認中…" : "通過済みなので開く"}
               </Button>
             ) : undefined
           }
@@ -192,10 +193,10 @@ function RemoteShareLog({ slug }: { slug: string }) {
           {status === "error"
             ? error
             : !authUser
-              ? "Google でサインインすると、読めるかどうかを確認します。"
+              ? "Google でログインすると、読めるかどうかを確認します。"
               : scope === "passed"
-                ? "このシナリオをプレイ済みなら、記録を開けます。"
-                : "参加者として登録されたアカウントでサインインしてください。"}
+                ? "このシナリオを通過済みなら、記録を開けます。"
+                : "参加者として登録されたアカウントでログインしてください。"}
         </EmptyState>
         {error && status !== "error" && (
           <View style={{ padding: 16 }}>
@@ -240,7 +241,7 @@ function ShareLogReader({
     <View style={{ gap: 12, paddingTop: 14, paddingBottom: 8 }}>
       <PageHead
         back={{ label: "戻る" }}
-        title={log.title}
+        title={sessionTitle(log, state.scenarios)}
         sub={
           <View style={{ gap: 4 }}>
             <MetaRow>
@@ -368,7 +369,7 @@ function ShareLogReader({
             action={
               log.scope === "passed" ? (
                 <Button variant="primary" onPress={() => setAsPassed(true)}>
-                  プレイ済みなので開く
+                  通過済みなので開く
                 </Button>
               ) : undefined
             }

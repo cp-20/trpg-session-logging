@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chat-tab name="メイン">
+  <chat name="アリス" tab="メイン" time="1747480041000" type="PC">こんにちは</chat>
+  <chat name="ボブ" tab="メイン" time="1747480050000" type="KP">進めます &amp; &lt;開始&gt;</chat>
+  <chat name="ボブ" tab="密談" time="1747480060000">内緒</chat>
+</chat-tab>

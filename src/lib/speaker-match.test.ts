@@ -197,7 +197,6 @@ describe("buildDraft", () => {
     };
     const attachLog: Log = {
       id: "log1",
-      title: "添付先卓",
       tableId: "t1",
       scenarioId: "sc1",
       systemId: "sw25",
@@ -238,7 +237,7 @@ describe("buildDraft", () => {
       state: w,
       avatars,
     });
-    expect(attached.meta).toEqual({ title: "添付先卓", systemId: "sw25" });
+    expect(attached.meta).toEqual({ systemId: "sw25" });
     expect(attached.scope).toBe("public");
     expect(attached.scenarioId).toBe("sc1");
     expect(attached.tableId).toBe("t1");
@@ -256,7 +255,7 @@ describe("buildDraft", () => {
       ]),
     );
 
-    // presetScenario からの title/systemId 補完 + 卓なしは general / 空 players な attachLog / table.systemId / SYSTEM 優先順位 / 逆順タイムスタンプ再マップ
+    // presetScenario からの systemId 補完 + 卓なしは general / 空 players な attachLog / table.systemId / SYSTEM 優先順位 / 逆順タイムスタンプ再マップ
     w.tables.t2 = {
       id: "t2",
       name: "CoC6卓",
@@ -274,7 +273,7 @@ describe("buildDraft", () => {
       state: w,
       avatars,
     });
-    expect(presetOnly.meta).toEqual({ title: "潮騒", systemId: "emoklore" });
+    expect(presetOnly.meta).toEqual({ systemId: "emoklore" });
     expect(presetOnly.sittings).toEqual([]);
     expect(presetOnly.guess).toBeNull();
 
@@ -315,7 +314,7 @@ describe("carryDraftEdits: ログを足しても決めたことを残す", () =>
       kinds: { A: "PC" as const, B: "NPC" as const },
       speakerIcons: { A: "a.png", B: "b.png" },
       speakerLinks: { A: { userId: "u1", characterId: "c1" } },
-      meta: { title: "決めた題", systemId: "coc7" },
+      meta: { systemId: "coc7" },
       guess: null,
       scope: "public" as const,
       tableId: "t1",
@@ -331,7 +330,7 @@ describe("carryDraftEdits: ログを足しても決めたことを残す", () =>
       kinds: { A: "NPC" as const, C: "PC" as const },
       speakerIcons: { C: "c.png" },
       speakerLinks: {},
-      meta: { title: "", systemId: "general" },
+      meta: { systemId: "general" },
       scope: "members" as const,
       tableId: "",
       scenarioId: "",
@@ -346,7 +345,7 @@ describe("carryDraftEdits: ログを足しても決めたことを残す", () =>
     expect(out.kinds).toEqual({ A: "PC", C: "PC" });
     expect(out.speakerIcons).toEqual({ A: "a.png", C: "c.png" });
     expect(out.speakerLinks).toEqual({ A: { userId: "u1", characterId: "c1" } });
-    expect(out.meta).toEqual({ title: "決めた題", systemId: "coc7" });
+    expect(out.meta).toEqual({ systemId: "coc7" });
     expect([out.scope, out.tableId, out.scenarioId]).toEqual(["public", "t1", "sc1"]);
     expect(out.players.map((p) => p.userId)).toEqual(["u1", "u2"]);
     expect(out.sittings).toHaveLength(2);

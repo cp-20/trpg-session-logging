@@ -26,7 +26,7 @@ describe("cloud boundaries", () => {
     const source = Object.values(state.logs).find((log) => log.hasLog && log.channels.some((c) => c.secret))!;
     const log = structuredClone(source);
     log.scope = "public";
-    log.scenarioId = undefined;
+    log.scenarioId = "sc_missing";
     log.players[state.me] = { linked: true, hidden: true, characterIds: [] };
     const projected = sharedLogProjection(log, state);
     expect(projected.log.channels).toEqual(log.channels);

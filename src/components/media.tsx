@@ -7,7 +7,7 @@
  * - それ以外（卓報告・感想・絵など）は、種類の印・タイトル・見せる範囲を 1 行に並べた一覧にする。
  * - ネタバレは未通過の人にだけ伏せる（サムネイルはぼかし、タイトルは種類名に置き換える）。
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ComponentType, SVGProps } from "react";
 import {
   IconBook,
@@ -33,7 +33,7 @@ import {
   IconVideo,
   IconWorld,
 } from "./icons";
-import { Combobox, DateInput, Field, Menu, Modal, SectionTitle, Seg, Select, Toggle, cx } from "./ui";
+import { Combobox, DateInput, Field, FieldError, Menu, Modal, SectionTitle, Seg, Select, cx } from "./ui";
 import { todayStr, uid } from "../lib/format";
 import {
   MEDIA_KINDS,
@@ -44,11 +44,17 @@ import {
   expiryState,
   formatChapters,
   formatClock,
+  mediaEditorFields,
   mediaThumbnail,
+  mediaTitleLookupUrl,
+  needsConsentCheck,
+  normalizeMediaUrl,
   parseChapters,
   shouldHideSpoiler,
+  titleFromOembed,
   urlAt,
   visibleMedia,
+  type MediaField,
   type MediaKind,
   type MediaScope,
   type MediaViewer,
@@ -373,12 +379,16 @@ function LinkRow({ m, state, viewer, canEdit, onEdit, onDelete }: ItemProps) {
   );
 }
 
-/* ---------- 追加・編集 ---------- */
+/* ---------- 追加・編集 ----------
+ * 流れ: URL を貼る → 置き場所と種類を URL から決め、題名も引ける所からは引く → 見られる人・ネタバレ（録画などは了承）を決めて追加。
+ * パート・目次・開始時刻・視点・メモなど、使う人の少ない欄は「詳しく」に畳む（値が入っていれば開いておく）。
+ */
 interface Draft {
   url: string;
   kind: MediaKind;
   kindTouched: boolean;
   title: string;
+  titleTouched: boolean;
   scope: MediaScope;
   audience: string[];
   povUserId: string;
@@ -401,6 +411,7 @@ function toDraft(m: SessionMedia | null, log: Log): Draft {
     kind: m?.kind ?? "recording",
     kindTouched: Boolean(m),
     title: m?.title ?? "",
+    titleTouched: Boolean(m?.title),
     scope: m?.scope ?? "members",
     audience: m?.audience ?? [],
     povUserId: m?.povUserId ?? "",
@@ -415,6 +426,30 @@ function toDraft(m: SessionMedia | null, log: Log): Draft {
     consent: m?.consent ?? false,
   };
 }
+
+/** 値の入っている欄（種類を変えても消さずに見せる・「詳しく」を開いておく） */
+function filledFields(d: Draft): MediaField[] {
+  const has: Record<MediaField, boolean> = {
+    expiresAt: Boolean(d.expiresAt),
+    credits: Boolean(d.credits.trim()),
+    parts: Boolean(d.parts.trim()),
+    chapters: Boolean(d.chapters.trim()),
+    startedAt: Boolean(d.startTime),
+    pov: Boolean(d.povUserId),
+    note: Boolean(d.note.trim()),
+  };
+  return (Object.keys(has) as MediaField[]).filter((k) => has[k]);
+}
+
+const FIELD_LABEL: Record<MediaField, string> = {
+  expiresAt: "置き場所の期限",
+  credits: "クレジット",
+  parts: "パート",
+  chapters: "目次",
+  startedAt: "開始時刻",
+  pov: "視点",
+  note: "メモ",
+};
 
 function parseParts(text: string): { url: string; label?: string }[] {
   return text
@@ -443,26 +478,53 @@ function MediaEditor({
   onClose: () => void;
 }) {
   const [d, setD] = useState<Draft>(() => toDraft(initial, log));
+  const [withoutUrl, setWithoutUrl] = useState(Boolean(initial && !initial.url));
+  const [urlBlurred, setUrlBlurred] = useState(Boolean(initial));
   const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((cur) => ({ ...cur, [k]: v }));
-  const detected = d.url ? detectMediaLink(d.url) : null;
+  const url = normalizeMediaUrl(d.url);
+  const detected = url ? detectMediaLink(url) : null;
   const def = MEDIA_KIND_MAP[d.kind];
   const people = participantIds(log).filter((id) => state.users[id]);
+  // URL が読めたら（または URL なしと決めたら）残りを出す。編集は最初から全部
+  const ready = Boolean(initial) || Boolean(url) || withoutUrl;
+  const filled = filledFields(d);
+  const fields = mediaEditorFields(d.kind, detected?.service ?? null, filled);
+  const [moreOpen, setMoreOpen] = useState(() => fields.more.some((f) => filled.includes(f)));
+  const consentNeeded = needsConsentCheck(d.kind, d.scope);
+
+  // 題名を引ける置き場所（YouTube）なら引いて入れる。利用者が書いた題名は上書きしない
+  const lookup = url ? mediaTitleLookupUrl(url) : undefined;
+  useEffect(() => {
+    if (!lookup) return;
+    const ac = new AbortController();
+    fetch(lookup, { signal: ac.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: unknown) => {
+        const title = titleFromOembed(json);
+        if (title) setD((cur) => (cur.titleTouched ? cur : { ...cur, title }));
+      })
+      .catch(() => {});
+    return () => ac.abort();
+  }, [lookup]);
 
   function save() {
-    if (d.url && !detected) return setError("URL は https:// から始まる形で入れてください。");
-    if (!d.url && !d.title.trim()) return setError("URL かタイトルのどちらかを入れてください。");
-    if (def.needsConsent && d.scope !== "self" && !d.consent)
-      return setError("録画・録音・配信を共有するには、同卓者全員の了承が要ります。");
-    if (d.scope === "people" && d.audience.length === 0) return setError("見られる人を選んでください。");
+    if (d.url.trim() && !url) {
+      setUrlBlurred(true);
+      return setError(null);
+    }
+    if (!url && !d.title.trim())
+      return setError(ready ? "URL かタイトルを入れてください。" : "URL を入れてください。");
+    if (d.scope === "people" && d.audience.length === 0) return setError("共有する人を選んでください。");
+    if (consentNeeded && !d.consent) return setError("共有するには同卓者全員の了承が要ります。");
     const startedAt = def.timed ? jstEpoch(d.startDate, d.startTime) : undefined;
     const chapters = def.timed ? parseChapters(d.chapters) : [];
-    const parts = parseParts(d.parts);
+    const parts = def.timed ? parseParts(d.parts) : [];
     const m: SessionMedia = {
       id: initial?.id ?? uid("md_"),
       kind: d.kind,
       title: d.title.trim(),
-      ...(d.url ? { url: d.url.trim() } : {}),
+      ...(url ? { url } : {}),
       ...(parts.length ? { parts } : {}),
       spoiler: d.spoiler,
       scope: d.scope,
@@ -478,6 +540,103 @@ function MediaEditor({
       createdAt: initial?.createdAt ?? new Date().toISOString(),
     };
     onSave(m);
+  }
+
+  function renderField(f: MediaField) {
+    switch (f) {
+      case "expiresAt":
+        return (
+          <Field key={f} label={FIELD_LABEL[f]}>
+            <DateInput
+              value={d.expiresAt}
+              onChange={(e) => set("expiresAt", e.target.value)}
+              className="w-full"
+            />
+          </Field>
+        );
+      case "credits":
+        return (
+          <Field key={f} label={FIELD_LABEL[f]}>
+            <input
+              className="input input-bordered w-full"
+              placeholder="描いた人・編集した人"
+              value={d.credits}
+              onChange={(e) => set("credits", e.target.value)}
+            />
+          </Field>
+        );
+      case "parts":
+        return (
+          <Field key={f} label="2 本目以降の URL">
+            <textarea
+              className="textarea textarea-bordered w-full"
+              rows={2}
+              placeholder="Part2 https://…"
+              value={d.parts}
+              onChange={(e) => set("parts", e.target.value)}
+            />
+          </Field>
+        );
+      case "chapters":
+        return (
+          <Field key={f} label={FIELD_LABEL[f]}>
+            <textarea
+              className="textarea textarea-bordered w-full font-mono text-sm"
+              rows={3}
+              placeholder={"0:00 導入\n1:23:45 戦闘"}
+              value={d.chapters}
+              onChange={(e) => set("chapters", e.target.value)}
+            />
+          </Field>
+        );
+      case "startedAt":
+        return (
+          <div key={f} className="grid gap-x-4 sm:grid-cols-2">
+            <Field label="録画を始めた日">
+              <DateInput
+                value={d.startDate}
+                onChange={(e) => set("startDate", e.target.value)}
+                className="w-full"
+              />
+            </Field>
+            <Field label="録画を始めた時刻" hint="ログの発言から録画のその場面を開けます">
+              <input
+                className="input input-bordered w-full tabular-nums"
+                inputMode="numeric"
+                placeholder="21:00"
+                value={d.startTime}
+                onChange={(e) => set("startTime", e.target.value)}
+              />
+            </Field>
+          </div>
+        );
+      case "pov":
+        return (
+          <Field key={f} label="誰の視点か">
+            <Combobox
+              ariaLabel="誰の視点か"
+              value={d.povUserId}
+              options={[
+                { value: "", label: "指定しない" },
+                ...people.map((id) => ({ value: id, label: state.users[id]!.name })),
+              ]}
+              onChange={(v) => set("povUserId", v)}
+              className="w-full"
+            />
+          </Field>
+        );
+      case "note":
+        return (
+          <Field key={f} label={FIELD_LABEL[f]}>
+            <textarea
+              className="textarea textarea-bordered w-full"
+              rows={2}
+              value={d.note}
+              onChange={(e) => set("note", e.target.value)}
+            />
+          </Field>
+        );
+    }
   }
 
   return (
@@ -496,177 +655,145 @@ function MediaEditor({
         </>
       }
     >
-      <div className="space-y-4">
-        <Field
-          label="URL"
-          hint="YouTube・Google ドライブ・ふせったー・pixiv など。手元にしかないものは空でかまいません"
-        >
-          <input
-            className="input input-bordered w-full"
-            inputMode="url"
-            placeholder="https://"
-            value={d.url}
-            onChange={(e) => {
-              const url = e.target.value;
-              const hit = detectMediaLink(url);
-              setD((cur) => ({ ...cur, url, ...(hit && !cur.kindTouched ? { kind: hit.kindHint } : {}) }));
-            }}
-          />
-        </Field>
-        {detected && detected.service !== "web" && (
-          <p className="-mt-2 text-xs text-ink2">{detected.label} のリンクです。</p>
-        )}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="種類">
-            <Select
-              value={d.kind}
-              options={KIND_OPTIONS}
-              onChange={(kind) => setD((cur) => ({ ...cur, kind, kindTouched: true }))}
-              className="w-full"
-            />
-          </Field>
-          <Field label="タイトル">
-            <input
-              className="input input-bordered w-full"
-              placeholder={detected?.label ?? def.label}
-              value={d.title}
-              onChange={(e) => set("title", e.target.value)}
-            />
-          </Field>
-          <Field label="見られる人">
-            <Select
-              value={d.scope}
-              options={SCOPE_OPTIONS}
-              onChange={(v) => set("scope", v)}
-              className="w-full"
-            />
-          </Field>
-          <Field label="誰の視点か" hint="秘匿 HO の視点録画など">
-            <Combobox
-              ariaLabel="誰の視点か"
-              value={d.povUserId}
-              options={[
-                { value: "", label: "指定しない" },
-                ...people.map((id) => ({ value: id, label: state.users[id]!.name })),
-              ]}
-              onChange={(v) => set("povUserId", v)}
-              className="w-full"
-            />
-          </Field>
-        </div>
-        {d.scope === "people" && (
-          <fieldset>
-            <legend className="mb-1.5 text-sm font-semibold">見られる人を選ぶ</legend>
-            <div className="flex flex-wrap gap-x-5 gap-y-2">
-              {people.map((id) => (
-                <label key={id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="checkbox checkbox-sm"
-                    checked={d.audience.includes(id)}
-                    onChange={(e) =>
-                      set(
-                        "audience",
-                        e.target.checked ? [...d.audience, id] : d.audience.filter((x) => x !== id),
-                      )
-                    }
-                  />
-                  {state.users[id]!.name}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        )}
-        <Toggle on={d.spoiler} onChange={(v) => set("spoiler", v)} label="ネタバレを含む" showLabel />
+      <Field
+        label="URL"
+        noMargin
+        hint={detected && detected.service !== "web" ? `${detected.label} のリンク` : undefined}
+      >
+        <input
+          className="input input-bordered w-full"
+          inputMode="url"
+          placeholder="https://"
+          // oxlint-disable-next-line jsx-a11y/no-autofocus -- 追加を押した直後に貼れるように
+          autoFocus={!initial}
+          value={d.url}
+          onBlur={() => setUrlBlurred(true)}
+          onChange={(e) => {
+            const raw = e.target.value;
+            const hit = normalizeMediaUrl(raw);
+            const link = hit ? detectMediaLink(hit) : null;
+            setError(null);
+            setD((cur) => ({
+              ...cur,
+              url: raw,
+              ...(link && !cur.kindTouched ? { kind: link.kindHint } : {}),
+            }));
+          }}
+        />
+      </Field>
+      <FieldError text={urlBlurred && d.url.trim() && !url ? "URL として読めません。" : null} />
+      {!ready && (
+        <button type="button" className="btn btn-sm btn-quiet mt-3" onClick={() => setWithoutUrl(true)}>
+          URL なしで追加
+        </button>
+      )}
 
-        {def.timed && (
-          <>
-            <Field
-              label="パート"
-              hint="2 本目以降の URL を 1 行に 1 つ。「Part2 https://…」のように名前を付けても構いません"
-            >
-              <textarea
-                className="textarea textarea-bordered w-full"
-                rows={2}
-                value={d.parts}
-                onChange={(e) => set("parts", e.target.value)}
+      {ready && (
+        <div className="motion-enter">
+          <div className="grid gap-x-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+            <Field label="種類">
+              <Select
+                value={d.kind}
+                options={KIND_OPTIONS}
+                onChange={(kind) => setD((cur) => ({ ...cur, kind, kindTouched: true }))}
+                className="w-full"
               />
             </Field>
-            <Field
-              label="目次"
-              hint="「0:00 導入」「1:23:45 戦闘」のように 1 行に 1 つ。パートが変わるところに「Part2」の行を入れます"
-            >
-              <textarea
-                className="textarea textarea-bordered w-full font-mono text-sm"
-                rows={4}
-                value={d.chapters}
-                onChange={(e) => set("chapters", e.target.value)}
+            <Field label="タイトル">
+              <input
+                className="input input-bordered w-full"
+                placeholder={detected?.label && detected.service !== "web" ? detected.label : def.label}
+                value={d.title}
+                onChange={(e) => setD((cur) => ({ ...cur, title: e.target.value, titleTouched: true }))}
               />
             </Field>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="録画を始めた日">
-                <DateInput
-                  value={d.startDate}
-                  onChange={(e) => set("startDate", e.target.value)}
-                  className="w-full"
+          </div>
+
+          <div className="grid gap-x-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+            <Field label="共有範囲">
+              <Select
+                value={d.scope}
+                options={SCOPE_OPTIONS}
+                onChange={(v) => set("scope", v)}
+                className="w-full"
+              />
+            </Field>
+            <Field label="ネタバレ" group>
+              <div className="flex">
+                <Seg
+                  ariaLabel="ネタバレ"
+                  value={d.spoiler ? "yes" : "no"}
+                  options={[
+                    { v: "yes", label: "含む" },
+                    { v: "no", label: "含まない" },
+                  ]}
+                  onChange={(v) => set("spoiler", v === "yes")}
                 />
-              </Field>
-              <Field label="録画を始めた時刻" hint="入れると、ログの発言から録画のその場面を開けます">
-                <input
-                  className="input input-bordered w-full tabular-nums"
-                  inputMode="numeric"
-                  placeholder="21:00"
-                  value={d.startTime}
-                  onChange={(e) => set("startTime", e.target.value)}
-                />
-              </Field>
-            </div>
-          </>
-        )}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="置き場所の期限" hint="ギガファイル便など、消える置き場所のとき">
-            <DateInput
-              value={d.expiresAt}
-              onChange={(e) => set("expiresAt", e.target.value)}
-              className="w-full"
-            />
-          </Field>
-          <Field label="クレジット" hint="描いた人・編集した人など">
-            <input
-              className="input input-bordered w-full"
-              value={d.credits}
-              onChange={(e) => set("credits", e.target.value)}
-            />
-          </Field>
+              </div>
+            </Field>
+          </div>
+          {d.scope === "people" && (
+            <fieldset className="mt-3">
+              <legend className="sr-only">共有範囲を選ぶ</legend>
+              <div className="flex flex-wrap gap-x-5 gap-y-2">
+                {people.map((id) => (
+                  <label key={id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="checkbox checkbox-sm"
+                      checked={d.audience.includes(id)}
+                      onChange={(e) =>
+                        set(
+                          "audience",
+                          e.target.checked ? [...d.audience, id] : d.audience.filter((x) => x !== id),
+                        )
+                      }
+                    />
+                    {state.users[id]!.name}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
+          {consentNeeded && (
+            <label className="mt-4 flex items-start gap-2.5 text-sm leading-relaxed">
+              <input
+                type="checkbox"
+                className="checkbox checkbox-sm mt-0.5"
+                checked={d.consent}
+                onChange={(e) => set("consent", e.target.checked)}
+              />
+              同卓者全員から、記録と共有の了承を得ています。
+            </label>
+          )}
+
+          {fields.main.map(renderField)}
+
+          <details
+            open={moreOpen}
+            onToggle={(e) => setMoreOpen(e.currentTarget.open)}
+            className="group mt-5 border-t border-base-300 pt-4"
+          >
+            <summary className="cursor-pointer list-none text-sm font-semibold text-ink2 hover:text-base-content">
+              <span className="group-open:hidden">
+                ＋ {fields.more.map((f) => FIELD_LABEL[f]).join("・")}
+              </span>
+              <span className="hidden group-open:inline">詳しい設定</span>
+            </summary>
+            {fields.more.map(renderField)}
+          </details>
         </div>
-        <Field label="メモ">
-          <textarea
-            className="textarea textarea-bordered w-full"
-            rows={2}
-            value={d.note}
-            onChange={(e) => set("note", e.target.value)}
-          />
-        </Field>
-        {def.needsConsent && (
-          <label className="flex items-start gap-2.5 text-sm leading-relaxed">
-            <input
-              type="checkbox"
-              className="checkbox checkbox-sm mt-0.5"
-              checked={d.consent}
-              onChange={(e) => set("consent", e.target.checked)}
-            />
-            同卓者全員から、記録すること・選んだ範囲に共有することの了承を得ています。
-          </label>
-        )}
-        {error && (
-          <p role="alert" className="text-sm text-error">
-            {error}
-          </p>
-        )}
-      </div>
+      )}
+
+      {error && (
+        <p role="alert" className="mt-4 text-sm text-error">
+          {error}
+        </p>
+      )}
     </Modal>
   );
 }
+
 /* ---------- セクション ---------- */
 export function SessionMediaSection({
   log,
@@ -704,7 +831,8 @@ export function SessionMediaSection({
     <section aria-labelledby={`media-${log.id}`} className={className}>
       <SectionTitle
         right={
-          editable && (
+          editable &&
+          items.length > 0 && (
             <button type="button" className="btn btn-sm" onClick={() => setEditing("new")}>
               <IconPlus width={16} height={16} /> 追加
             </button>
@@ -717,22 +845,12 @@ export function SessionMediaSection({
         <button
           type="button"
           onClick={() => setEditing("new")}
-          className="media-empty flex w-full items-center gap-4 rounded-box px-5 py-5 text-left"
+          className="media-empty flex w-full items-center gap-3 rounded-box px-5 py-4 text-left"
         >
-          <span className="flex shrink-0 -space-x-1.5 text-ink2" aria-hidden>
-            {[IconVideo, IconNotes, IconPalette].map((I, i) => (
-              <span key={i} className="media-kind-mark">
-                <I width={18} height={18} />
-              </span>
-            ))}
+          <span className="media-kind-mark" aria-hidden>
+            <IconPlus width={18} height={18} />
           </span>
-          <span className="min-w-0">
-            <span className="block text-sm font-bold">録画・配信・卓報告・感想・イラストを紐付ける</span>
-            <span className="mt-0.5 block text-xs text-ink2">
-              置き場所の URL
-              を貼るだけ。目次を付けた録画は、ログの発言時刻からその場面を開けるようになります。
-            </span>
-          </span>
+          <span className="min-w-0 text-sm font-bold">録画・卓報告・感想・イラストを紐付ける</span>
         </button>
       ) : (
         <div className="space-y-4">

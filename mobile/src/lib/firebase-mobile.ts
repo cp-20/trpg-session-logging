@@ -33,7 +33,6 @@ interface ExtraFirebaseConfig {
 
 interface ExtraGoogleAuthConfig {
   iosClientId?: string;
-  androidClientId?: string;
   webClientId?: string;
 }
 
@@ -55,19 +54,10 @@ export const FIRESTORE_DATABASE_ID = extra.firebase?.databaseId || "takufu";
 
 export const googleAuthClientIds = {
   iosClientId: extra.googleAuth?.iosClientId ?? "",
-  androidClientId: extra.googleAuth?.androidClientId ?? "",
   webClientId: extra.googleAuth?.webClientId ?? "",
 };
 
 export const isFirebaseConfigured = Boolean(mobileFirebaseConfig.apiKey && mobileFirebaseConfig.projectId);
-
-export const isGoogleOAuthConfigured = Boolean(
-  Platform.OS === "web"
-    ? isFirebaseConfigured
-    : googleAuthClientIds.iosClientId ||
-        googleAuthClientIds.androidClientId ||
-        googleAuthClientIds.webClientId,
-);
 
 let appInstance: FirebaseApp | null = null;
 let firestoreInstance: Firestore | null = null;
@@ -152,14 +142,14 @@ ensureMobileCloudRuntime();
 
 export async function signInWithGoogleIdToken(idToken: string): Promise<FirebaseUser> {
   const auth = getMobileAuth();
-  if (!auth) throw new Error("サインインの接続設定がありません。");
+  if (!auth) throw new Error("ログインの接続設定がありません。");
   const credential = GoogleAuthProvider.credential(idToken);
   return (await signInWithCredential(auth, credential)).user;
 }
 
 export async function signInWithGoogleWebPopup(): Promise<FirebaseUser> {
   const auth = getMobileAuth();
-  if (!auth) throw new Error("サインインの接続設定がありません。");
+  if (!auth) throw new Error("ログインの接続設定がありません。");
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: "select_account" });
   return (await signInWithPopup(auth, provider)).user;
@@ -186,12 +176,12 @@ export function observeAuth(
 export function mobileAuthErrorMessage(error: unknown): string {
   const code = (error as { code?: string })?.code;
   const messages: Record<string, string> = {
-    "auth/popup-closed-by-user": "サインイン画面を閉じました。もう一度お試しください。",
-    "auth/cancelled-popup-request": "別のサインイン操作が進行中です。",
+    "auth/popup-closed-by-user": "ログイン画面を閉じました。もう一度お試しください。",
+    "auth/cancelled-popup-request": "別のログイン操作が進行中です。",
     "auth/network-request-failed": "接続できませんでした。通信状態を確認してください。",
-    "auth/unauthorized-domain": "このURLではまだサインインを利用できません。",
+    "auth/unauthorized-domain": "このURLではまだログインを利用できません。",
   };
   return (
-    (code && messages[code]) || userFacingError(error, "サインインできませんでした。もう一度お試しください。")
+    (code && messages[code]) || userFacingError(error, "ログインできませんでした。もう一度お試しください。")
   );
 }

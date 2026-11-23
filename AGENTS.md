@@ -4,11 +4,12 @@
 
 1. [DESIGN.md](DESIGN.md) と [docs/glossary.md](docs/glossary.md) を読む。画面ごとの「最初に答える問い」、面・文字・ボタンの段階、部品の一覧、統一された用語（GM / PL / プロフィール等）がある。
 2. 画面は `src/components/ui.tsx`（デザインシステム）と `src/components/identity.tsx`（人・キャラクター表示）の部品で組み立てる。足りない部品はページに作らず、そこに足す（同名の部品をページで定義すると lint で落ちる）。
-3. 画面を作る前に [docs/design-feedback.md](docs/design-feedback.md) §0 の原則 P1〜P16 に照らす。特に「説明文で補っていないか（P4）」「機械が分かることを入力させていないか（P2）」「データの形が自然か（P1）」。
+3. 画面を作る前に [docs/design-feedback.md](docs/design-feedback.md) §0 の原則 P1〜P19 に照らす。特に「説明文で補っていないか（P4）」「機械が分かることを入力させていないか（P2）」「データの形が自然か（P1）」。
 
 ## 指摘を受けたら
 
 - 画面上のレビューは `.live-review/notes.json`（`status: "open"` が未対応）に溜まる。「レビュー対応して」はこれを指す。直したら `status` を `fixed` にし、`agentReply` に何をしたかを 1 行で書く。
+- 件数が多いときの分け方・段の中まで撮って確かめる手順・はまり所は [.agents/skills/review-batch](.agents/skills/review-batch/SKILL.md)。
 - 直すだけでなく、指摘を §0 のどの原則の破れかに振り分け、台帳に 1 行足す。どれにも当たらなければ原則を足す。
 - 指摘された場所以外の同種の箇所も探して直す。
 - 同じ原則で 2 回目の指摘なら、検査を `目視` から `scripts/lint-design.ts`（ソース）・`e2e/design-audit.ts`（描画後）・型のどれかに上げる。文面だけを禁じる検査（その文言の禁止）で済ませない。

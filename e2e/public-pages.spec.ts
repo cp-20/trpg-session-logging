@@ -158,4 +158,29 @@ test("ログイン前にアプリの画面を開くとログイン画面に送�
   await expect(google.locator('img[src="/google-g.png"]')).toHaveCount(1);
   await page.getByRole("button", { name: "サンプルデータをそのまま見る" }).click();
   await expect(page).toHaveURL(/\/sessions$/);
+  // 使い始めたあとにログインの画面を開くと、画面を挟まず行き先へ送られる
+  await page.goto("/signin?next=%2Fcalendar");
+  await expect(page).toHaveURL(/\/calendar$/);
+});
+
+test("共有ページは SNS 向けの題名と OG 画像を head に持ち、読めない記録は中身に触れない札になる", async ({
+  request,
+}) => {
+  for (const [route, title] of [
+    ["/share/l/e2e-no-such-log", "共有されたセッションの記録 | 卓譜"],
+    ["/share/c/e2e-no-such-character", "共有されたキャラクター | 卓譜"],
+  ] as const) {
+    // SNS のクローラーには、題名などを流し込まずに head に入れて返す
+    const html = await (await request.get(route, { headers: { "User-Agent": "Twitterbot/1.0" } })).text();
+    expect(html).toContain(`<meta property="og:title" content="${title}"/>`);
+    const image = /<meta property="og:image" content="([^"]+)"/.exec(html)?.[1];
+    expect(image, route).toContain(`${route}/opengraph-image`);
+    const res = await request.get(new URL(image!).pathname + new URL(image!).search, { maxRedirects: 0 });
+    // 書体を取れない環境では LP の OG 画像に回す
+    if (res.status() === 307) expect(res.headers().location).toBe("/opengraph-image.png");
+    else {
+      expect(res.status()).toBe(200);
+      expect(res.headers()["content-type"]).toBe("image/png");
+    }
+  }
 });

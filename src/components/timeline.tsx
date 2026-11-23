@@ -14,7 +14,7 @@ export interface SpeakerMeta {
   roleLabel: string;
 }
 
-/** 誰とも結び付かない発言者の顔。発言者名を種にした既定の画像（GM 側は円印、ほかはコマ） */
+/** 誰とも結び付かない発言者の顔。発言者名を種にした既定の画像（GM 側は人の姿、ほかはキャラの姿） */
 function speakerFallbackSvg(sp: string, kind: Msg["kind"]): string {
   const isKeeper = kind === "KP" || kind === "GM" || kind === "SYSTEM";
   return identiconDataUri(sp, isKeeper ? "user" : "character");
@@ -365,7 +365,7 @@ export function LogReaderBar({
       )}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <label className="input flex min-w-0 basis-full items-center gap-2 sm:flex-1 sm:basis-auto">
+        <label className="input input-sm flex min-w-0 basis-full items-center gap-2 sm:flex-1 sm:basis-auto">
           <IconSearch width={16} height={16} className="shrink-0 opacity-50" aria-hidden />
           <input
             type="search"
@@ -469,7 +469,11 @@ export function LogReaderBar({
             </div>
           )}
           {days.length >= 2 && (
-            <div className="ml-auto flex flex-wrap items-center gap-1" role="group" aria-label="実施日へ移動">
+            <div
+              className="ml-auto flex flex-wrap items-center gap-1"
+              role="group"
+              aria-label="遊んだ日へ移動"
+            >
               {days.map((d) => (
                 <button
                   key={d}

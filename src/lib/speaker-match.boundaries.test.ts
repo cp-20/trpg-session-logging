@@ -200,9 +200,8 @@ const draft = (opts: Partial<Parameters<typeof buildDraft>[0]>) =>
 const attach = (extra: Partial<Pick<Log, "tableId" | "players" | "speakerIcons">>): Log => ({
   id: "log1",
   systemId: "general",
-  title: "添付先",
   tableId: "",
-  scenarioId: "",
+  scenarioId: "sc_x",
   ownerId: "u_kp",
   scope: "public",
   hasLog: false,
@@ -216,9 +215,9 @@ const attach = (extra: Partial<Pick<Log, "tableId" | "players" | "speakerIcons">
 });
 
 describe("buildDraft: 既定値と推定", () => {
-  it("何もなければ general・空タイトル・members・推定なし", () => {
+  it("何もなければ general・members・推定なし", () => {
     const d = draft({});
-    expect(d.meta).toEqual({ title: "", systemId: "general" });
+    expect(d.meta).toEqual({ systemId: "general" });
     expect(d.scope).toBe("members");
     expect(d.guess).toBeNull();
     expect(d.players).toEqual([]);

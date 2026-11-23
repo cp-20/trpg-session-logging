@@ -20,6 +20,7 @@ import {
   Toggle,
 } from "../components/ui";
 import { signOutAccount } from "../lib/firebase-mobile";
+import { signOutOfGoogle } from "../lib/google-sign-in";
 import { isBiometricAvailable, isBiometricLockEnabled, setBiometricLockEnabled } from "../native/biometrics";
 import { pickAndImportBackupJson } from "../native/file-import";
 import { hapticSuccess } from "../native/haptics";
@@ -103,7 +104,7 @@ export default function SettingsScreen() {
     setBusy(true);
     setError(null);
     try {
-      if (authUser) await signOutAccount();
+      if (authUser) await Promise.all([signOutAccount(), signOutOfGoogle()]);
       else exitDemo();
       router.replace("/sign-in");
     } catch (cause) {
@@ -155,7 +156,7 @@ export default function SettingsScreen() {
                   desc="サンプルの別の利用者になって、見え方を確かめられます。"
                 >
                   <Button size="sm" variant="secondary" onPress={() => setDemoPicker(true)}>
-                    デモ利用者を切替
+                    サンプルの利用者を切り替える
                   </Button>
                 </SettingRow>
               )}

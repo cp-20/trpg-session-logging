@@ -6,6 +6,9 @@ import {
   query,
   where,
   runTransaction,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
   writeBatch,
   Timestamp,
   type Firestore,
@@ -13,9 +16,25 @@ import {
 import { getTakufuFirestore } from "./firebase";
 import { mediaForSharedPage } from "./session-media";
 import { identiconDataUri } from "./identicon";
-import type { Character, Log, Scenario, Scope, State, User } from "../types";
+import type {
+  Character,
+  Log,
+  Scenario,
+  ScenarioEditChanges,
+  ScenarioEditRequest,
+  Scope,
+  State,
+  User,
+} from "../types";
 import { upgradeLogSchedule } from "./sittings";
+import {
+  sessionTitle,
+  UNKNOWN_SCENARIO_TITLE,
+  upgradeSharedScenario,
+  userScenario,
+} from "./session-scenario";
 import { sharedPageScope } from "./share-scope";
+import { docFields, sharedScenarioDoc } from "./scenario-directory";
 
 export interface CloudAuthUserLike {
   uid: string;
@@ -262,18 +281,22 @@ export async function saveCloudState(
 export interface SharedLogData {
   log: Log;
   users: Record<string, User>;
-  scenario?: Scenario;
+  /** 遊んだシナリオ（セッションの呼び名）。共有シナリオ一覧に出さないシナリオでも、共有ページを読める人には見せる */
+  scenario: Scenario;
 }
 
 export { sharedPageScope };
 
-/** 共有ページの目録に書く範囲。firestore.rules の validShare を必ず満たす（share-scope.test.ts） */
+/** 共有ページの見出しの文書に書く範囲。firestore.rules の validShare を必ず満たす（share-scope.test.ts） */
 export function sharedManifestAccess(log: Pick<Log, "scope">): { scope: Scope } {
   return { scope: sharedPageScope(log) };
 }
 
 export function sharedLogProjection(log: Log, state: State): SharedLogData {
-  const scenario = log.scenarioId ? state.scenarios[log.scenarioId] : undefined;
+  const scenario: Scenario = state.scenarios[log.scenarioId] ?? {
+    ...userScenario({ id: log.scenarioId, title: UNKNOWN_SCENARIO_TITLE, systemId: log.systemId, uid: "" }),
+    private: true,
+  };
   // Identity lives in individually controlled member documents, never in a public body snapshot.
   const players = {};
   const users: Record<string, User> = {
@@ -292,7 +315,7 @@ export function sharedLogProjection(log: Log, state: State): SharedLogData {
   return {
     log: sharedLog,
     users,
-    ...(scenario ? { scenario: { ...scenario, claimedBy: undefined, addedByUid: undefined } } : {}),
+    scenario: { ...scenario, claimedBy: undefined, addedByUid: undefined },
   };
 }
 
@@ -373,8 +396,9 @@ export async function fetchSharedLog(slug: string): Promise<SharedLogData | null
   const loaded = await readGeneration(db, ["sharedLogs", slug], ["sharedLogs", slug]);
   if (!loaded) return null;
   const payload = loaded.payload as SharedLogData;
-  // 以前に公開したページは遊んだ時間帯を dates + t0 + t1 で持っている。読むときに今の形にする
+  // 以前に公開したページは遊んだ時間帯を dates + t0 + t1 で持ち、セッションに名前があった。読むときに今の形にする
   upgradeLogSchedule(payload.log as unknown as Record<string, unknown>);
+  upgradeSharedScenario(payload);
   const visibleMembers = await getDocs(
     query(
       collection(db, "sharedLogs", slug, "members"),
@@ -407,7 +431,7 @@ export async function getSharedLogAccess(slug: string): Promise<{ scope: Scope }
 /** This is a self-declaration, not a proof of play. Rules check scope and the declaring UID. */
 export async function confirmPlayedLog(slug: string): Promise<void> {
   const { user } = await resolveCurrentUserAndProfile();
-  if (!user) throw new Error("Googleでログインしてから、プレイ済みか確認してください。");
+  if (!user) throw new Error("Googleでログインしてから、通過済みか確認してください。");
   const db = database();
   const batch = writeBatch(db);
   batch.set(doc(db, "sharedLogs", slug, "access", user.uid), { passed: true });
@@ -516,9 +540,9 @@ export async function fetchSharedCharacter(id: string): Promise<SharedCharacterD
 
 export interface SharedInvite {
   slug: string;
+  /** セッションの呼び名（= シナリオの題名） */
   title: string;
   systemId: string;
-  scenarioTitle?: string;
   expiresAt: string;
 }
 
@@ -532,9 +556,10 @@ export async function createSharedInvite(log: Log, state: State): Promise<string
   batch.set(doc(database(), "sharedInvites", token), {
     slug: log.slug,
     ownerId: state.me,
-    title: log.title,
+    title: sessionTitle(log, state.scenarios),
     systemId: log.systemId,
-    scenarioTitle: log.scenarioId ? state.scenarios[log.scenarioId]?.title || "" : "",
+    // 以前は名前とシナリオを別に持っていた。ルールが欄を求めるので空で書く
+    scenarioTitle: "",
     expiresAt,
   });
   await batch.commit();
@@ -552,9 +577,9 @@ export async function getSharedInvite(token: string): Promise<SharedInvite | nul
   if (!(expiresAt instanceof Timestamp) || expiresAt.toMillis() <= Date.now()) return null;
   return {
     slug,
-    title,
+    // 以前の招待はセッションの名前とシナリオの題名を別に持つ。呼び名はシナリオの題名
+    title: scenarioTitle || title,
     systemId,
-    scenarioTitle: scenarioTitle || undefined,
     expiresAt: expiresAt.toDate().toISOString(),
   };
 }
@@ -625,4 +650,80 @@ export async function revokeSharedMember(slug: string, uid: string): Promise<voi
   const batch = writeBatch(db);
   batch.update(ref, { linked: false });
   await batch.commit();
+}
+
+/**
+ * 自分が足したシナリオを、共有シナリオ一覧（scenarios/{id}）へ出す。サーバーの検索（/api/scenarios）がここを読む。
+ * 消すことはしない（ほかの人の記録が結んでいるかもしれないため）
+ */
+export async function publishSharedScenario(scenario: Scenario, uid: string): Promise<void> {
+  const db = database();
+  await setDoc(doc(db, "scenarios", scenario.id), {
+    ...docFields(sharedScenarioDoc(scenario, uid)),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/* ---------- シナリオの修正の提案（scenarioEditRequests/{id}。足した人だけが反映・却下する） ---------- */
+
+const editRequestsOf = (db: Firestore) => collection(db, "scenarioEditRequests");
+
+function toEditRequest(id: string, d: Record<string, unknown>): ScenarioEditRequest {
+  const at = d.createdAt instanceof Timestamp ? d.createdAt.toDate().toISOString() : new Date().toISOString();
+  return {
+    id,
+    scenarioId: String(d.scenarioId ?? ""),
+    uid: String(d.uid ?? ""),
+    requesterName: typeof d.requesterName === "string" ? d.requesterName : undefined,
+    at,
+    changes: (d.changes as ScenarioEditChanges | undefined) ?? undefined,
+    note: typeof d.note === "string" ? d.note : undefined,
+    status: d.status === "accepted" || d.status === "rejected" ? d.status : "pending",
+  };
+}
+
+/** 修正を提案する。送れるのは足した人ではない人で、足した人（ownerUid）にだけ届く */
+export async function sendScenarioEditRequest(req: {
+  scenarioId: string;
+  ownerUid: string;
+  uid: string;
+  requesterName: string;
+  changes: ScenarioEditChanges;
+  note?: string;
+}): Promise<void> {
+  const db = database();
+  await setDoc(doc(editRequestsOf(db)), {
+    scenarioId: req.scenarioId,
+    uid: req.uid,
+    requesterName: req.requesterName.slice(0, 100),
+    ownerUid: req.ownerUid,
+    changes: Object.fromEntries(Object.entries(req.changes).filter(([, v]) => v !== undefined)),
+    ...(req.note ? { note: req.note.slice(0, 1000) } : {}),
+    status: "pending",
+    createdAt: serverTimestamp(),
+  });
+}
+
+/** そのシナリオで未決の提案: 足した人には届いているもの、ほかの人には自分が送ったもの */
+export async function fetchPendingEditRequests(
+  scenarioId: string,
+  uid: string,
+  role: "owner" | "requester",
+): Promise<ScenarioEditRequest[]> {
+  const db = database();
+  const snap = await getDocs(
+    query(
+      editRequestsOf(db),
+      where(role === "owner" ? "ownerUid" : "uid", "==", uid),
+      where("scenarioId", "==", scenarioId),
+      where("status", "==", "pending"),
+    ),
+  );
+  return snap.docs.map((d) => toEditRequest(d.id, d.data())).sort((a, b) => a.at.localeCompare(b.at));
+}
+
+/** 足した人が、提案を反映した・却下したと記す */
+export async function resolveEditRequest(id: string, status: "accepted" | "rejected"): Promise<void> {
+  const db = database();
+  await updateDoc(doc(editRequestsOf(db), id), { status });
 }

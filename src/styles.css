@@ -9,12 +9,13 @@
    *   fast   150ms  ホバー・押下の色、行が入る
    *   normal 200ms  現れる（fade + rise）、浮かぶ層
    *   slow   300ms  モーダルが開く
-   *   stamp  380ms  完了の印を押す（少し浮いてから押し込む）
+   *   完了の演出だけは、モーダルが開き切ってから（--dur-slow のあと）段階を追って 1.2 秒まで使う。
+   *   区切りの見せ場なので、速すぎて見えないほうが悪い（2026-11-22「アニメーションがちょっと早すぎて見えない」）
    */
   --dur-fast: 150ms;
   --dur-normal: 200ms;
   --dur-slow: 300ms;
-  --dur-stamp: 380ms;
+  --dur-draw: 480ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
   /* わずかに行き過ぎて戻る。完了の印だけに使う */
@@ -72,6 +73,22 @@ body {
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "palt" 0;
   line-height: 1.6;
+}
+/*
+ * 日本語の改行は文節で（「ログを入れると、日時と参加|者が」のように語の途中で折らない）。
+ * 見出しは行の長さをそろえ、文は最後の行に 1〜2 字だけ残さない。
+ * auto-phrase のないブラウザ（Firefox）はふつうの改行になる。利用者の書いた本文（ログ・感想）は書いたとおりに折る
+ */
+body {
+  word-break: auto-phrase;
+  text-wrap: pretty;
+}
+[data-user-content] {
+  word-break: normal;
+  text-wrap: wrap;
+}
+:where(h1, h2, h3, .pst-display):not([data-user-content]) {
+  text-wrap: balance;
 }
 
 /* ============================================================
@@ -218,6 +235,13 @@ body {
   min-height: 2.25rem;
   padding-block: 0.25rem;
   font-size: 0.875rem;
+}
+/*
+ * 中に入力欄やボタンを持つ外枠（検索欄・Combobox・ID の欄）は上下の余白を持たない。
+ * 中身の行の高さ（.input-sm は 2rem）に余白が足されて 36/40px を超え、隣の欄とそろわなくなる
+ */
+.input:has(> input, > button) {
+  padding-block: 0;
 }
 .input:focus,
 .input:focus-within,
@@ -516,7 +540,8 @@ main#main-content:focus {
  *   .motion-fade    暗幕などの fade だけ
  *   .motion-pop     浮かぶ層・モーダル: 少し縮んだ所から（300ms）
  *   .motion-insert  一覧に足された行（150ms）
- *   .motion-stamp   完了の印: 浮いて（溜め）→ 押し込む → 落ち着く。朱が滲む輪が 1 回広がる
+ *   .motion-reveal  完了の印として出す顔など: モーダルが開いてから、ゆっくり現れる（500ms）
+ *   .done-mark / .score-inscription  完了の印: 線で描き切る（DoneMark / ScoreInscription）
  * ボタンはホバーで動かさない。押したときだけ scale(0.98)（.btn:active）
  * ============================================================ */
 @keyframes tk-enter {
@@ -542,39 +567,34 @@ main#main-content:focus {
     transform: translateY(-4px);
   }
 }
-@keyframes tk-stamp {
-  0% {
+@keyframes tk-reveal {
+  from {
     opacity: 0;
-    transform: translateY(-10px) scale(1.5) rotate(-18deg);
-  }
-  /* 溜め: 紙の上で一瞬止まる */
-  38% {
-    opacity: 1;
-    transform: translateY(-14px) scale(1.42) rotate(-14deg);
-    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
-  }
-  /* 押す。離すときは少し行き過ぎて戻る */
-  70% {
-    transform: translateY(0) scale(0.9) rotate(-8deg);
-    animation-timing-function: var(--ease-pop);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1) rotate(-8deg);
+    transform: translateY(6px) scale(0.86);
   }
 }
-@keyframes tk-stamp-ink {
-  0%,
-  68% {
-    opacity: 0;
-    transform: scale(0.85);
+@keyframes tk-draw {
+  from {
+    stroke-dashoffset: 1;
   }
-  76% {
-    opacity: 0.35;
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes tk-dot {
+  from {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+}
+@keyframes tk-ring {
+  0% {
+    opacity: 0.5;
+    stroke-width: 0;
   }
   100% {
     opacity: 0;
-    transform: scale(1.35);
+    stroke-width: 10;
   }
 }
 .motion-enter {
@@ -589,23 +609,50 @@ main#main-content:focus {
 .motion-insert {
   animation: tk-insert var(--dur-fast) var(--ease-out) both;
 }
-.motion-stamp {
-  position: relative;
+.motion-reveal {
   display: inline-flex;
-  transform: rotate(-8deg);
-  /* モーダルが開き切ってから押す */
-  animation: tk-stamp var(--dur-stamp) linear 160ms both;
+  animation: tk-reveal 500ms var(--ease-out) var(--dur-slow) both;
 }
-.motion-stamp::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  /* 角印（Seal）の角に合わせる */
-  border-radius: 18%;
-  border: 3px solid oklch(var(--p));
-  opacity: 0;
-  pointer-events: none;
-  animation: tk-stamp-ink 560ms var(--ease-out) 160ms both;
+/* 完了の印: モーダルが開き切ってから描く */
+.done-mark .done-ring {
+  stroke-dasharray: 1;
+  animation: tk-draw var(--dur-draw) var(--ease-out) var(--dur-slow) both;
+}
+.done-mark .done-check {
+  stroke-dasharray: 1;
+  animation: tk-draw 320ms var(--ease-out) calc(var(--dur-slow) + var(--dur-draw) - 80ms) both;
+}
+/* 譜: 段を引く（0.3〜0.9 秒）→ 点が時間の順に置かれる → 終止線（〜1.2 秒） */
+.score-inscription .score-line {
+  fill: none;
+  stroke: oklch(var(--bc) / 0.22);
+  stroke-width: 1.5;
+  stroke-dasharray: 1;
+  animation: tk-draw 600ms var(--ease-out) var(--dur-slow) both;
+}
+.score-inscription .score-mark {
+  fill: oklch(var(--bc) / 0.72);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: tk-dot var(--dur-normal) var(--ease-pop) calc(var(--dur-slow) + 120ms + var(--x) * 600ms) both;
+}
+.score-inscription .score-mark.is-crit {
+  fill: oklch(var(--p));
+  stroke: oklch(var(--p));
+  stroke-opacity: 0.35;
+  stroke-width: 0;
+  animation:
+    tk-dot var(--dur-normal) var(--ease-pop) calc(var(--dur-slow) + 120ms + var(--x) * 600ms) both,
+    tk-ring 700ms var(--ease-out) calc(var(--dur-slow) + 300ms + var(--x) * 600ms) both;
+}
+.score-inscription .score-mark.is-fumble {
+  fill: oklch(var(--b1));
+  stroke: oklch(var(--bc) / 0.72);
+  stroke-width: 1.8;
+}
+.score-inscription .score-end {
+  stroke: oklch(var(--bc) / 0.8);
+  animation: tk-fade var(--dur-normal) var(--ease-out) calc(var(--dur-slow) + 820ms) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -620,8 +667,9 @@ main#main-content:focus {
   .motion-fade,
   .motion-pop,
   .motion-insert,
-  .motion-stamp,
-  .motion-stamp::after {
+  .motion-reveal,
+  .done-mark *,
+  .score-inscription * {
     animation: none !important;
   }
 }

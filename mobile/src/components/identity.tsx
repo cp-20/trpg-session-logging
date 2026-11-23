@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { SvgXml } from "react-native-svg";
 import type { Character, MsgKind, Provider, State, Table, User } from "@shared/types";
@@ -22,6 +22,7 @@ import {
 
 const boothIcon = require("../../assets/booth-icon.png");
 const taltoIcon = require("../../assets/talto-icon.png");
+const googleG = require("../../assets/google-g.png");
 
 function hashName(name: string): number {
   let hash = 0;
@@ -64,12 +65,12 @@ export const PRESET_NPC_ICONS: readonly { id: string; label: string; src: string
   },
 ];
 
-/** 人の顔。画像がなければ、変わらない ID から作った印（@shared/lib/identicon）。頭文字は使わない（P9） */
+/** 人の顔。画像がなければ、変わらない ID から作った人の姿（@shared/lib/identicon）。頭文字は使わない（P9） */
 export function userAvatarSrc(u: Pick<User, "id" | "handle" | "image">): string {
   return u.image || identiconDataUri(u.handle ?? u.id, "user");
 }
 
-/** キャラクターの顔。画像がなければキャラクター ID から作ったコマの絵 */
+/** キャラクターの顔。画像がなければキャラクター ID から作った人の姿（和柄の地） */
 export function characterAvatarSrc(c: Pick<Character, "id" | "image">): string {
   return c.image || identiconDataUri(c.id, "character");
 }
@@ -150,6 +151,52 @@ export function CharAvatar({ c, size = 44 }: { c: Character; size?: number }) {
 /** 卓の印（角の丸い四角。顔の代わりに卓を見分ける）。読み上げでは卓名が隣にあるので隠す */
 export function TableMark({ table, size = 20 }: { table: Pick<Table, "id" | "image">; size?: number }) {
   return <AvatarImage uri={tableMarkSrc(table)} size={size} shape="square" />;
+}
+
+/*
+ * Google のログインボタン。Google のブランドガイドライン（developers.google.com/identity/branding-guidelines）の
+ * 独自ボタンの指定どおりに作る（Web の GoogleSignInButton と同じ）: 白（ダークでは黒）の地・灰の枠・
+ * 14/20 の Medium・G は公式の画像を 20px、左右 12px / G と文字の間 10px。色や G を変えない。
+ * この色はテーマのトークンではなく Google の指定値なので、ここにだけ書く。
+ */
+const GSI_COLORS = {
+  light: { bg: "#FFFFFF", bgPressed: "#EBEBEB", border: "#747775", text: "#1F1F1F" },
+  dark: { bg: "#131314", bgPressed: "#2A2A2B", border: "#8E918F", text: "#E3E3E3" },
+} as const;
+
+export function GoogleSignInButton({
+  onPress,
+  busy,
+  disabled,
+}: {
+  onPress: () => void;
+  busy?: boolean;
+  disabled?: boolean;
+}) {
+  const { isDark } = useTheme();
+  const c = isDark ? GSI_COLORS.dark : GSI_COLORS.light;
+  const inactive = disabled || busy;
+  const label = busy ? "ログイン中…" : "Google でログイン";
+  return (
+    <Pressable
+      onPress={() => {
+        if (inactive) return;
+        hapticSelection();
+        onPress();
+      }}
+      disabled={inactive}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: inactive, busy }}
+      style={({ pressed }) => [
+        styles.gsiButton,
+        { backgroundColor: pressed ? c.bgPressed : c.bg, borderColor: c.border, opacity: inactive ? 0.6 : 1 },
+      ]}
+    >
+      <Image source={googleG} style={styles.gsiLogo} contentFit="contain" />
+      <Text style={[styles.gsiText, { color: c.text }]}>{label}</Text>
+    </Pressable>
+  );
 }
 
 export function ProviderIcon({ provider, size = 20 }: { provider: Provider; size?: number }) {
@@ -444,6 +491,18 @@ export function SpeakerConfigList({
 }
 
 const styles = StyleSheet.create({
+  gsiButton: {
+    height: 44,
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  gsiLogo: { width: 20, height: 20 },
+  gsiText: { fontSize: 14, lineHeight: 20, fontWeight: "500" },
   providerCircle: {
     alignItems: "center",
     justifyContent: "center",

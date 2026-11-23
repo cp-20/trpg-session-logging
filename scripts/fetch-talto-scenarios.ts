@@ -1,25 +1,37 @@
 /**
- * 体験版の見本用に、TALTO（https://talto.cc）の公開シナリオ一覧から事実情報だけを取る。
+ * TALTO（https://talto.cc）の公開シナリオ一覧から事実情報だけを取る。
  *   node scripts/fetch-talto-scenarios.ts [--cache <dir>] [--offline]
  *
+ * 出力は scripts/data/talto-catalog.json: 公開シナリオの一覧（全件を新着順にたどり、いいねの多い順に並べる）。
+ * これを scripts/sync-scenario-directory.ts が Firestore の scenarios（共有シナリオ一覧）へ書き込む。画面は /api/scenarios で探す。
  * - talto.cc/robots.txt は /search 等を禁止しているが、カテゴリ一覧とプロジェクトページは許可。
  *   ここで使うのはサイト自身がカテゴリ一覧の表示に使う公開 API（GET /v1/projects?category=…）だけ。
  * - 1 秒に 1 回まで。応答はキャッシュに保存し、再実行では取りに行かない（--offline でキャッシュのみ）。
  * - 持つのはタイトル・作者・システム・人数・時間・URL・表紙画像 URL。あらすじや画像本体は持たない。
  * - 成人向けと明示された作品と、シナリオ以外の出品（データ集・配信用素材など）は入れない。
- * 出力: src/data/talto-scenarios.json（src/data/seed.ts が体験版の読み込み時にだけ使う）
+ * - 一覧は表紙画像の URL も持たない（一覧にも詳細にも出さないので。P5）。
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { isAdultListing, isNonScenarioListing, type TaltoScenarioRow } from "../src/lib/talto-scenarios.ts";
+import {
+  encodeTaltoCatalog,
+  isAdultListing,
+  isNonScenarioCategory,
+  isNonScenarioListing,
+  type TaltoCatalogEntry,
+  type TaltoScenarioRow,
+} from "../src/lib/talto-scenarios.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const OUT = path.join(ROOT, "src/data/talto-scenarios.json");
+const CATALOG_OUT = path.join(ROOT, "scripts/data/talto-catalog.json");
+/** 一覧に入れる最大数。全件たどったうえで、いいねの多い順にここまで残す */
+const CATALOG_MAX = 20000;
+/** 全件をたどるときのページ数の上限（暴走しないための歯止め） */
+const MAX_PAGES = 2000;
 const API = "https://us-central1-talto-trpg.cloudfunctions.net/api";
 const UA = "Mozilla/5.0 (compatible; sample-data-fetcher)";
 const PAGE = 30; // API の上限
-const TARGET = 500;
 
 const args = process.argv.slice(2);
 const argValue = (name: string): string | undefined => {
@@ -28,21 +40,6 @@ const argValue = (name: string): string | undefined => {
 };
 const CACHE = path.resolve(argValue("--cache") ?? path.join(ROOT, "node_modules/.cache/talto"));
 const OFFLINE = args.includes("--offline");
-
-/** 新着順の全体一覧（サイトの実際の偏りがそのまま出る）のページ数 */
-const RECENT_PAGES = 7;
-/** 全体一覧だけでは少ないシステムを、カテゴリ一覧から足す（slug: ページ数） */
-const CATEGORY_TOPUPS: Record<string, number> = {
-  call_of_cthulhu_7th: 1,
-  emoklore: 2,
-  "sword_world_2.5": 2,
-  murder_mystery: 1,
-  shinobigami: 1,
-  double_cross: 1,
-  insane: 1,
-  nechronica: 1,
-  stellar_knights: 1,
-};
 
 interface Category {
   id: number;
@@ -61,6 +58,7 @@ interface Project {
   players_min?: number | null;
   players_max?: number | null;
   playing_hour_max?: number | null;
+  likes?: number;
 }
 
 let lastFetch = 0;
@@ -116,47 +114,51 @@ function toRow(p: Project, slugById: Map<number, string>): TaltoScenarioRow {
   };
 }
 
+/** 新着順の全体一覧を最後までたどる。各ページはキャッシュに残るので、途中で止めても続きから取れる */
+async function fetchAll(): Promise<Project[]> {
+  const out: Project[] = [];
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const page = await getJson<Project[]>(`/v1/projects?limit=${PAGE}&offset=${i * PAGE}`);
+    out.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return out;
+}
+
+async function writeCatalog(slugById: Map<number, string>): Promise<void> {
+  const all = await fetchAll();
+  const seen = new Set<string>();
+  const kept: { p: Project; idx: number }[] = [];
+  let adult = 0;
+  all.forEach((p, idx) => {
+    if (seen.has(p.id) || !p.name?.trim()) return;
+    seen.add(p.id);
+    if (isAdultListing(p)) {
+      adult++;
+      return;
+    }
+    if (isNonScenarioListing(p.name) || isNonScenarioCategory(slugById.get(p.category_id) ?? "")) return;
+    kept.push({ p, idx });
+  });
+  // いいねの多い順（同じなら新しい順）。一覧の並びがそのまま「よく遊ばれている順」の候補になる
+  kept.sort((a, b) => (b.p.likes ?? 0) - (a.p.likes ?? 0) || a.idx - b.idx);
+  const entries: TaltoCatalogEntry[] = kept.slice(0, CATALOG_MAX).map(({ p }) => {
+    const { thumbnail: _cover, ...row } = toRow(p, slugById);
+    return row;
+  });
+  const text = encodeTaltoCatalog(entries, new Date().toISOString().slice(0, 10));
+  writeFileSync(CATALOG_OUT, text);
+  console.log(
+    `wrote ${entries.length} of ${all.length} listings to ${path.relative(ROOT, CATALOG_OUT)} ` +
+      `(${(text.length / 1024).toFixed(0)} KiB, skipped ${adult} adult listings)`,
+  );
+}
+
 async function main(): Promise<void> {
   await checkRobots();
   const categories = await getJson<Category[]>("/v1/categories");
   const slugById = new Map(categories.map((c) => [c.id, c.slug]));
-  const idBySlug = new Map(categories.map((c) => [c.slug, c.id]));
-
-  const rows = new Map<string, TaltoScenarioRow>();
-  let adult = 0;
-  const add = (list: Project[]) => {
-    for (const p of list) {
-      if (rows.has(p.id) || !p.name?.trim()) continue;
-      if (isAdultListing(p)) {
-        adult++;
-        continue;
-      }
-      if (isNonScenarioListing(p.name)) continue;
-      rows.set(p.id, toRow(p, slugById));
-    }
-  };
-
-  for (let i = 0; i < RECENT_PAGES; i++)
-    add(await getJson<Project[]>(`/v1/projects?limit=${PAGE}&offset=${i * PAGE}`));
-  for (const [slug, pages] of Object.entries(CATEGORY_TOPUPS)) {
-    const id = idBySlug.get(slug);
-    if (id == null) {
-      console.warn(`unknown TALTO category: ${slug}`);
-      continue;
-    }
-    for (let i = 0; i < pages; i++)
-      add(await getJson<Project[]>(`/v1/projects?category=${id}&limit=${PAGE}&offset=${i * PAGE}`));
-  }
-
-  const out = [...rows.values()].slice(0, TARGET);
-  // 1 行 1 作品にして差分を読みやすくする
-  writeFileSync(OUT, `[\n${out.map((r) => JSON.stringify(r)).join(",\n")}\n]\n`);
-  const bySystem = new Map<string, number>();
-  out.forEach((r) => bySystem.set(r.systemName, (bySystem.get(r.systemName) ?? 0) + 1));
-  console.log(
-    `wrote ${out.length} scenarios to ${path.relative(ROOT, OUT)} (skipped ${adult} adult listings)`,
-  );
-  [...bySystem].sort((a, b) => b[1] - a[1]).forEach(([k, v]) => console.log(`  ${v}\t${k}`));
+  await writeCatalog(slugById);
 }
 
 await main();

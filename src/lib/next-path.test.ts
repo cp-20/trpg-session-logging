@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeNextPath } from "./next-path";
+import { destinationLabel, safeNextPath } from "./next-path";
 
 describe("safeNextPath", () => {
   it("卓譜の中のパスはそのまま戻り先にする", () => {
@@ -20,5 +20,14 @@ describe("safeNextPath", () => {
     ]) {
       expect(safeNextPath(raw)).toBe("/home");
     }
+  });
+});
+
+describe("destinationLabel", () => {
+  it("戻る先を画面の名前で言う", () => {
+    expect(destinationLabel("/settings")).toBe("設定を開く");
+    expect(destinationLabel("/tables/discord?code=x")).toBe("卓を開く");
+    expect(destinationLabel("/home")).toBe("ホームを開く");
+    expect(destinationLabel("/unknown")).toBe("元の画面に戻る");
   });
 });

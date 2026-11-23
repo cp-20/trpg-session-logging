@@ -882,6 +882,21 @@ const scenarios = [
     claimedBy: null,
     addedBy: "system",
   },
+  {
+    // シナリオを持たない集まり（事前相談）は、共有シナリオ一覧に出さないシナリオとして記録する
+    id: "sc_haikou_prep",
+    title: "キャラクター作成・事前相談",
+    author: "夜霜",
+    systemId: "coc7",
+    source: "manual",
+    emoji: "CoC7",
+    bg: "#ede4d7",
+    tags: [],
+    claimedBy: null,
+    addedBy: "user",
+    addedByUid: "u_yashimo",
+    private: true,
+  },
 ];
 
 type CharTuple = [
@@ -1298,9 +1313,9 @@ const charsDef: CharTuple[] = [
 
 interface SessionSeed {
   id: string;
-  title: string;
   tableId: string;
-  scenarioId: string | null;
+  /** セッションは遊んだシナリオの題名で呼ぶ（名前を持たない） */
+  scenarioId: string;
   systemId: string;
   ownerId: string;
   dates: string[];
@@ -1315,7 +1330,6 @@ interface SessionSeed {
 const sessions: SessionSeed[] = [
   {
     id: "s01",
-    title: "廃校の十三時間目",
     tableId: "t_haikou",
     scenarioId: "sc_kankyo",
     systemId: "coc7",
@@ -1327,34 +1341,20 @@ const sessions: SessionSeed[] = [
     secret: true,
   },
   {
+    // 3 夜に分けて遊んだ 1 つのセッション
     id: "s02",
-    title: "深淵の呼び声 第一夜",
     tableId: "t_shiosai",
     scenarioId: "sc_abyss",
     systemId: "coc7",
     ownerId: "u_mikan",
-    dates: ["2026-09-26"],
+    dates: ["2026-09-26", "2026-10-10", "2026-11-07"],
     start: "20:30",
     scope: "public",
     hasLog: true,
     secret: true,
   },
   {
-    id: "s03",
-    title: "深淵の呼び声 第二夜",
-    tableId: "t_shiosai",
-    scenarioId: "sc_abyss",
-    systemId: "coc7",
-    ownerId: "u_mikan",
-    dates: ["2026-10-10"],
-    start: "20:00",
-    scope: "public",
-    hasLog: true,
-    secret: true,
-  },
-  {
     id: "s04",
-    title: "王都の黄金亭",
     tableId: "t_ougonto",
     scenarioId: "sc_oudan",
     systemId: "sw25",
@@ -1367,7 +1367,6 @@ const sessions: SessionSeed[] = [
   },
   {
     id: "s05",
-    title: "放課後の標本室",
     tableId: "t_haikou",
     scenarioId: "sc_hitori",
     systemId: "coc7",
@@ -1380,7 +1379,6 @@ const sessions: SessionSeed[] = [
   },
   {
     id: "s06",
-    title: "雨宮家の食卓",
     tableId: "t_nyuumon",
     scenarioId: "sc_amamiya",
     systemId: "coc7",
@@ -1393,7 +1391,6 @@ const sessions: SessionSeed[] = [
   },
   {
     id: "s07",
-    title: "狂宴は儂の隣で",
     tableId: "t_yomatsuri",
     scenarioId: "sc_kyouen",
     systemId: "emoklore",
@@ -1405,22 +1402,7 @@ const sessions: SessionSeed[] = [
     secret: false,
   },
   {
-    id: "s08",
-    title: "深淵の呼び声 最終夜",
-    tableId: "t_shiosai",
-    scenarioId: "sc_abyss",
-    systemId: "coc7",
-    ownerId: "u_mikan",
-    dates: ["2026-11-07"],
-    start: "20:00",
-    scope: "members",
-    hasLog: true,
-    secret: true,
-    multiday: true,
-  },
-  {
     id: "s09",
-    title: "月長石の夢路",
     tableId: "t_nyuumon",
     scenarioId: "sc_tsukiyuki",
     systemId: "coc7",
@@ -1433,7 +1415,6 @@ const sessions: SessionSeed[] = [
   },
   {
     id: "s10",
-    title: "廃校の十三時間目（2陣）",
     tableId: "t_haikou",
     scenarioId: "sc_kankyo",
     systemId: "coc7",
@@ -1447,7 +1428,6 @@ const sessions: SessionSeed[] = [
   },
   {
     id: "s11",
-    title: "雨の夜の館で",
     tableId: "t_madamis",
     scenarioId: "sc_ameya",
     systemId: "madamis",
@@ -1460,7 +1440,6 @@ const sessions: SessionSeed[] = [
   },
   {
     id: "s12",
-    title: "銘茶と殺意",
     tableId: "t_madamis",
     scenarioId: "sc_meicha",
     systemId: "madamis",
@@ -1473,7 +1452,6 @@ const sessions: SessionSeed[] = [
   },
   {
     id: "s13",
-    title: "王都の黄金亭（2陣）",
     tableId: "t_ougonto",
     scenarioId: "sc_oudan",
     systemId: "sw25",
@@ -1486,7 +1464,6 @@ const sessions: SessionSeed[] = [
   },
   {
     id: "s14",
-    title: "風来の旅路 第一話",
     tableId: "t_ougonto",
     scenarioId: "sc_kaze",
     systemId: "sw25",
@@ -1499,7 +1476,6 @@ const sessions: SessionSeed[] = [
   },
   {
     id: "s15",
-    title: "雪見の二人",
     tableId: "t_keizoku",
     scenarioId: "sc_yukimi",
     systemId: "coc7",
@@ -1512,9 +1488,8 @@ const sessions: SessionSeed[] = [
   },
   {
     id: "s16",
-    title: "廃校部 キャラクター作成・事前相談",
     tableId: "t_haikou",
-    scenarioId: null,
+    scenarioId: "sc_haikou_prep",
     systemId: "coc7",
     ownerId: "u_yashimo",
     dates: ["2026-11-15"],
@@ -1884,10 +1859,15 @@ function genMessages(s: SessionSeed) {
 
   let ts = jstEpoch(s.dates[0]!, s.start);
   const halfway = Math.floor(seq.length * 0.55);
+  // 何夜かに分けて遊んだセッションは、発言を夜の数に分けてそれぞれの日に置く
+  const nights = s.multiday ? 1 : s.dates.length;
   seq.forEach((m, i) => {
     if (s.multiday && i === halfway) {
       ts = jstEpoch(s.dates[1] ?? nextDay(s.dates[0]!), "21:00");
     }
+    const night = Math.floor((i * nights) / seq.length);
+    if (night > 0 && Math.floor(((i - 1) * nights) / seq.length) < night)
+      ts = jstEpoch(s.dates[night]!, s.start);
     ts += ri(180, 420);
     m.ts = ts;
   });
@@ -1950,6 +1930,20 @@ const IMPRESSIONS_BY_LOG: Record<
       createdAt: "2026-09-27T01:20:00",
       spoiler: false,
     },
+    {
+      id: "imp_s08_1",
+      userId: "u_sora",
+      text: "3 夜の集大成として忘れられない最終夜になりました。みんなお疲れさまでした！",
+      createdAt: "2026-11-08T02:10:00",
+      spoiler: false,
+    },
+    {
+      id: "imp_s08_2",
+      userId: "u_natsu",
+      text: "灯台の鐘を止める役を引き受けた場面、ダイス目が震えました。あの選択に後悔なし。",
+      createdAt: "2026-11-08T02:30:00",
+      spoiler: true,
+    },
   ],
   s05: [
     {
@@ -1974,22 +1968,6 @@ const IMPRESSIONS_BY_LOG: Record<
       text: "食卓の作法を一つずつ確認しながら進む緊張感が絶妙でした。また同卓したいです。",
       createdAt: "2026-10-18T00:15:00",
       spoiler: false,
-    },
-  ],
-  s08: [
-    {
-      id: "imp_s08_1",
-      userId: "u_sora",
-      text: "全3話の集大成として忘れられない最終夜になりました。みんなお疲れさまでした！",
-      createdAt: "2026-11-08T02:10:00",
-      spoiler: false,
-    },
-    {
-      id: "imp_s08_2",
-      userId: "u_natsu",
-      text: "灯台の鐘を止める役を引き受けた場面、ダイス目が震えました。あの選択に後悔なし。",
-      createdAt: "2026-11-08T02:30:00",
-      spoiler: true,
     },
   ],
 };
@@ -2044,9 +2022,8 @@ for (const s of sessions) {
 
   logs[s.id] = {
     id: s.id,
-    title: s.title,
     tableId: s.tableId,
-    scenarioId: s.scenarioId ?? undefined,
+    scenarioId: s.scenarioId,
     systemId: s.systemId,
     ownerId: s.ownerId,
     scope: s.scope,
@@ -2113,7 +2090,7 @@ for (const [, [id, owner, name, systemId, color, archetype, bio, tags, stats]] o
       sessionsStat.push({
         logId: String(l.id),
         date,
-        title: String(l.title),
+        title: scenarios.find((sc) => sc.id === l.scenarioId)?.title ?? "",
         scenarioId: l.scenarioId ? String(l.scenarioId) : undefined,
         rolls,
         delta,

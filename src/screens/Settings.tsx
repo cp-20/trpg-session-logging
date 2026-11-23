@@ -104,7 +104,7 @@ export default function Settings() {
     : "お試し中の記録は、このブラウザだけに保存されます。";
 
   return (
-    <div className="max-w-3xl">
+    <div>
       <PageHead title="設定" />
 
       <SectionTitle>アカウント</SectionTitle>
@@ -124,7 +124,7 @@ export default function Settings() {
         {!authUser && (
           <SettingRow title="表示する利用者" desc="サンプルの別の利用者になって、見え方を確かめられます。">
             <button className="btn btn-sm" onClick={() => setDemoPicker(true)}>
-              デモ利用者を切替
+              サンプルの利用者を切り替える
             </button>
           </SettingRow>
         )}
@@ -151,7 +151,7 @@ export default function Settings() {
         >
           {authUser && (
             <button className="btn btn-sm" disabled={busy} onClick={() => connectX(Boolean(x))}>
-              {busy ? "接続中…" : x ? "連携を解除" : "連携する"}
+              {busy ? "連携中…" : x ? "連携を解除" : "連携する"}
             </button>
           )}
         </SettingRow>
@@ -428,7 +428,7 @@ function UserDetailView({ id }: { id: string | undefined }) {
 
   if (!isMe && user.profilePublic === false) {
     return (
-      <div className="max-w-4xl">
+      <div>
         <PageHead lead={<Avatar u={user} size={64} />} title={user.name} />
         <div className="surface">
           <EmptyState kind="permission" title="プロフィールは非公開です" />
@@ -441,7 +441,7 @@ function UserDetailView({ id }: { id: string | undefined }) {
   const visibleLogs = shownLogs.slice(0, logCount);
 
   return (
-    <div className="max-w-4xl">
+    <div>
       <PageHead
         lead={<Avatar u={user} size={64} />}
         title={user.name}
@@ -520,8 +520,8 @@ function UserDetailView({ id }: { id: string | undefined }) {
             <ImageUploadField
               value={imageDraft}
               onChange={setImageDraft}
-              label="プロフィール画像を選ぶ"
-              preview={<Avatar u={{ ...user, image: imageDraft || undefined }} size={56} />}
+              label="アイコン"
+              render={(src) => <Avatar u={{ ...user, image: src || undefined }} size={56} />}
             />
 
             <Field label="表示名" noMargin>

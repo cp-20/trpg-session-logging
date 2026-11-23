@@ -260,7 +260,7 @@ export function GoogleBusySettings({ frame = "surface" }: { frame?: "surface" | 
                   disabled={working}
                   onClick={() => void allow()}
                 >
-                  {working ? "接続中…" : "Google で許可する"}
+                  {working ? "確認中…" : "Google で許可する"}
                 </button>
               ) : (
                 <button

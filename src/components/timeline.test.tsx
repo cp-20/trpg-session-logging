@@ -37,7 +37,7 @@ const state = {
 function makeLog(extra?: Partial<Log>): Log {
   return {
     id: "l1",
-    title: "test",
+    scenarioId: "sc_test",
     systemId: "coc7",
     ownerId: "u2",
     scope: "public",

@@ -6,6 +6,8 @@ import { useMobileStore } from "../store/mobile-store";
 import { useTheme } from "../theme/ThemeProvider";
 import { AvatarStack } from "./identity";
 import { DateBlock, InteractiveRow, MetaRow, SysBadge } from "./ui";
+import { sessionTitle } from "@shared/lib/session-scenario";
+import { roleLabel } from "@shared/lib/roles";
 
 export function SessionRow({
   log,
@@ -22,13 +24,18 @@ export function SessionRow({
 }) {
   const { tokens } = useTheme();
   const { state } = useMobileStore();
-  const sc = log.scenarioId ? state.scenarios[log.scenarioId] : null;
   const tb = log.tableId ? state.tables[log.tableId] : null;
   const sys = SYSTEMS[log.systemId];
   const playMin = sessionPlayMinutes(log);
-  const showScenario = Boolean(sc && context !== "scenario" && !log.title.includes(sc.title));
 
   const kp = state.users[log.ownerId];
+  // セッションの呼び名はシナリオの題名。シナリオのページでは各行で繰り返さず、どの卓で遊んだかを見出しにする
+  const heading =
+    context === "scenario"
+      ? (tb?.name ??
+        (kp ? `${roleLabel(log.systemId, "GM")} ${kp.name}` : sessionTitle(log, state.scenarios)))
+      : sessionTitle(log, state.scenarios);
+  const showTable = Boolean(tb && context !== "table" && heading !== tb.name);
   const people = Object.entries(log.players)
     .filter(([uid]) => uid !== log.ownerId && state.users[uid])
     .map(([uid, p]) => {
@@ -40,7 +47,7 @@ export function SessionRow({
   const names = people.map((p) => (p.kind === "char" ? p.char.name : p.user.name));
 
   return (
-    <InteractiveRow onPress={onPress} accessibilityLabel={log.title}>
+    <InteractiveRow onPress={onPress} accessibilityLabel={heading}>
       <View style={styles.row}>
         <DateBlock
           date={sessionDays(log)[0] ?? "2026-01-01"}
@@ -49,16 +56,11 @@ export function SessionRow({
         />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[styles.title, { color: tokens.ink }]} numberOfLines={2}>
-            {log.title}
+            {heading}
           </Text>
           <MetaRow style={{ marginTop: 4 }}>
             <SysBadge sys={sys} />
-            {showScenario && sc && (
-              <Text style={[styles.metaItem, { color: tokens.ink2 }]} numberOfLines={1}>
-                {sc.title}
-              </Text>
-            )}
-            {tb && context !== "table" && (
+            {showTable && tb && (
               <Text style={[styles.metaItem, { color: tokens.ink2 }]} numberOfLines={1}>
                 {tb.name}
               </Text>

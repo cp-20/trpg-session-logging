@@ -35,6 +35,7 @@ import { hapticSuccess } from "../../native/haptics";
 import { useMobileStore } from "../../store/mobile-store";
 import { useTheme } from "../../theme/ThemeProvider";
 import { RADII } from "../../theme/tokens";
+import { sessionTitle } from "@shared/lib/session-scenario";
 
 const SEARCH_THRESHOLD = 6;
 
@@ -89,7 +90,9 @@ export default function TableDetailScreen() {
     .map((mid) => state.users[mid])
     .filter((u): u is NonNullable<typeof u> => Boolean(u));
   const needle = q.trim().toLowerCase();
-  const shown = needle ? sessions.filter((l) => l.title.toLowerCase().includes(needle)) : sessions;
+  const shown = needle
+    ? sessions.filter((l) => sessionTitle(l, state.scenarios).toLowerCase().includes(needle))
+    : sessions;
   const activeDetailEvent = openEvent ? (state.events[openEvent.id] ?? openEvent) : null;
 
   return (

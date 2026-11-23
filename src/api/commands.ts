@@ -1,20 +1,22 @@
 import { uid } from "../lib/time";
 import { deriveSittings, normalizeSittings, type Sitting } from "../lib/sittings";
-import { SYSTEMS } from "../data/systems";
+import { userScenario } from "../lib/session-scenario";
 import type { Channel, Log, MsgKind, Scope, SelfRole, State } from "../types";
 
 /** Upload フローの確定入力(Step3 を終えた時点の内容) */
 export interface CommitLogInput {
   fileName: string | null;
   attachId: string | null;
-  meta: { title: string; systemId: string };
+  meta: { systemId: string };
   channels: Channel[];
   kinds: Record<string, MsgKind>;
   speakerIcons?: Record<string, string>;
   scope?: Scope;
   tableId: string;
+  /** 遊んだシナリオ。共有シナリオ一覧から選ぶか、newScenario で足す（どちらかは必ず要る） */
   scenarioId: string;
-  newScenario: { title: string; author: string } | null;
+  /** private なら共有シナリオ一覧に出さない（自作・事前相談など） */
+  newScenario: { title: string; author: string; private?: boolean } | null;
   players: { userId: string; characterIds: string[]; role?: SelfRole }[];
   /**
    * 遊んだ時間帯。ログの発言時刻から導いたもの、または手で入れ直したもの。
@@ -59,28 +61,19 @@ export async function commitLogImport(
         reason: "ログを添付できるのは、このセッションを記録した人だけです",
       };
     const newScenarioId = input.newScenario?.title.trim() ? "sc_" + uid() : undefined;
-    const scenarioId = newScenarioId ?? (input.scenarioId || undefined);
+    const scenarioId = newScenarioId ?? (input.scenarioId || target.scenarioId);
     const given = normalizeSittings(input.sittings ?? []);
     const sittings = given.length > 0 ? given : deriveSittings(input.channels);
     const id = input.attachId;
     const slug = target.slug;
     apply((s) => {
-      if (input.newScenario && input.newScenario.title.trim()) {
-        const scid = newScenarioId!;
-        s.scenarios[scid] = {
-          id: scid,
-          title: input.newScenario.title.trim(),
-          author: input.newScenario.author.trim() || "自由記述（未登録）",
+      if (newScenarioId && input.newScenario)
+        s.scenarios[newScenarioId] = userScenario({
+          ...input.newScenario,
+          id: newScenarioId,
           systemId: input.meta.systemId,
-          source: "manual",
-          emoji: SYSTEMS[input.meta.systemId]?.emoji ?? "🎲",
-          bg: "#e6e6f0",
-          tags: [],
-          claimedBy: null,
-          addedBy: "user",
-          addedByUid: s.me,
-        };
-      }
+          uid: s.me,
+        });
       let n = 0;
       const channels: Channel[] = JSON.parse(JSON.stringify(input.channels));
       channels.forEach((c) =>
@@ -119,27 +112,19 @@ export async function commitLogImport(
   const given = normalizeSittings(input.sittings ?? []);
   const sittings = given.length > 0 ? given : deriveSittings(hasLog ? input.channels : []);
   if (sittings.length === 0) return { ok: false, id: "", slug: "", reason: "遊んだ日時を入れてください。" };
+  const newScenarioId = input.newScenario?.title.trim() ? "sc_" + uid() : undefined;
+  const scenarioId = newScenarioId ?? input.scenarioId;
+  if (!scenarioId) return { ok: false, id: "", slug: "", reason: "シナリオを選んでください。" };
   const id = "s_" + uid();
   const slug = uid("s") + uid("");
   apply((s) => {
-    let scenarioId = input.scenarioId || undefined;
-    if (input.newScenario && input.newScenario.title.trim()) {
-      const scid = "sc_" + uid();
-      s.scenarios[scid] = {
-        id: scid,
-        title: input.newScenario.title.trim(),
-        author: input.newScenario.author.trim() || "自由記述（未登録）",
+    if (newScenarioId && input.newScenario)
+      s.scenarios[newScenarioId] = userScenario({
+        ...input.newScenario,
+        id: newScenarioId,
         systemId: input.meta.systemId,
-        source: "manual",
-        emoji: SYSTEMS[input.meta.systemId]?.emoji ?? "🎲",
-        bg: "#e6e6f0",
-        tags: [],
-        claimedBy: null,
-        addedBy: "user",
-        addedByUid: s.me,
-      };
-      scenarioId = scid;
-    }
+        uid: s.me,
+      });
     let n = 0;
     const channels: Channel[] = hasLog ? JSON.parse(JSON.stringify(input.channels)) : [];
     channels.forEach((c) =>
@@ -151,7 +136,6 @@ export async function commitLogImport(
     const speakerIcons = normalizeSpeakerIcons(input.speakerIcons);
     s.logs[id] = {
       id,
-      title: input.meta.title.trim() || "未タイトルの卓",
       tableId: input.tableId || undefined,
       scenarioId,
       systemId: input.meta.systemId,
@@ -182,5 +166,5 @@ export async function commitLogImport(
 
 /** 編集モーダルなどから使う Log の一部更新の共通ラッパ(将来 revision 競合をここで扱う) */
 export type LogPatch = Partial<
-  Pick<Log, "title" | "sittings" | "scenarioId" | "tableId" | "systemId" | "scope" | "speakerIcons">
+  Pick<Log, "sittings" | "scenarioId" | "tableId" | "systemId" | "scope" | "speakerIcons">
 >;

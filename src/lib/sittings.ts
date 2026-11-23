@@ -1,8 +1,8 @@
 /**
  * セッションを遊んだ時間帯（集まり）。1 つのセッションは 1 回以上の集まりでできている。
- * 1 回の集まりは開始と終了の日時（epoch 秒）で持つ。終了は翌日でもよい（21:00〜翌 2:00）。
+ * 1 回の集まりは開始と終了の日時（epoch 秒）で持つ。終了は翌日でもよく、書くときは 24 を足す（21:00〜26:00）。
  *
- * 「実施日の一覧 + 初日の開始時刻 + 最終日の終了時刻（25:30 のような 30 時間制）」という以前の持ち方は、
+ * 「遊んだ日の一覧 + 初日の開始時刻 + 最終日の終了時刻」という以前の持ち方は、
  * 2 日目以降の時間帯が表せず、入力も不自然だったのでやめた（P1）。古い保存データは migrateLegacySchedule で読み替える。
  */
 import { fmtDate, fmtDates, jstDate, jstEpoch, jstTime } from "./format";
@@ -86,30 +86,45 @@ export function sittingsMinutes(sittings: readonly Sitting[]): number {
   return Math.round(sec / 60);
 }
 
-/** 終了が開始の翌日以降か（「翌 2:00」と書く） */
+/** 終了が開始の翌日以降か（「25:00」のように 24 を足して書く） */
 export function endsNextDay(s: Sitting): boolean {
   return jstDate(s.end) !== jstDate(s.start);
 }
 
-/** 「10月17日(土) 19:30〜23:50」「10月17日(土) 21:00〜翌2:00」 */
-export function fmtSitting(s: Sitting): string {
+/**
+ * 終了時刻を開始の日から数えて書く。日をまたいだら 24 を足す（翌 1:00 → 25:00）。
+ * 卓の夜更かしはこの書き方が通じる（2026-11-22 の指摘で「翌」から改めた）。持ち方は開始・終了の日時のまま
+ */
+export function endClock(s: Sitting): string {
   const end = jstTime(s.end);
-  return `${fmtDate(jstDate(s.start))} ${jstTime(s.start)}〜${endsNextDay(s) ? `翌${end}` : end}`;
+  if (!endsNextDay(s)) return end;
+  const days = Math.round((jstEpoch(jstDate(s.end), "00:00") - jstEpoch(jstDate(s.start), "00:00")) / 86400);
+  const [h, m] = end.split(":");
+  return `${Number(h) + days * 24}:${m}`;
+}
+
+/** 「10月17日(土) 19:30〜23:50」「10月17日(土) 21:00〜25:00」 */
+export function fmtSitting(s: Sitting): string {
+  return `${fmtDate(jstDate(s.start))} ${jstTime(s.start)}〜${endClock(s)}`;
 }
 
 /**
- * セッションの「いつ」を 1 行で。集まりが 1 回なら時刻まで、複数回なら日付と回数。
- * 例: 「10月17日(土) 19:30〜23:50」「11月8日(土)・15日(土)（2回）」
+ * セッションの「いつ」を 1 行で。集まりが 1 回なら時刻まで、複数回なら日付を並べる。
+ * 回数は並んだ日付を数えれば分かるので書かない（P5）。
+ * 例: 「10月17日(土) 19:30〜23:50」「11月8日(土)・15日(土)」
  */
 export function fmtSessionWhen(log: WithSittings): string {
   if (log.sittings.length === 0) return "日付未定";
   if (log.sittings.length === 1) return fmtSitting(log.sittings[0]!);
-  return `${fmtDates(sessionDays(log))}（${log.sittings.length}回）`;
+  return fmtDates(sessionDays(log));
 }
 
 /* ---------- 入力（日付・開始時刻・終了時刻） ---------- */
 
-/** 入力欄の値。日付は YYYY-MM-DD、時刻は HH:MM（0〜23 時）。終了が開始以前なら翌日の終了とみなす */
+/**
+ * 入力欄の値。日付は YYYY-MM-DD、開始は HH:MM（0〜23 時）。終了は開始の日から数えた時刻で、
+ * 日をまたぐなら 24 を足して書く（25:00）。24 を足さずに開始以前の時刻を書いても翌日の終了とみなす
+ */
 export interface SittingFields {
   date: string;
   start: string;
@@ -119,26 +134,50 @@ export interface SittingFields {
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const HM = /^([01]?\d|2[0-3])[:：]([0-5]\d)$/;
 
+const HM_LATE = /^(\d{1,2})[:：]([0-5]\d)$/;
+
+const halfWidth = (raw: string) =>
+  raw.trim().replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+
 /** "9:05" / "09:05" / "9：05" / "0905" → "09:05"。読めなければ null */
 export function normalizeTime(raw: string): string | null {
-  const s = raw.trim().replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+  const s = halfWidth(raw);
   const compact = /^(\d{1,2})(\d{2})$/.exec(s);
   const m = HM.exec(compact ? `${compact[1]}:${compact[2]}` : s);
   if (!m) return null;
   return `${m[1]!.padStart(2, "0")}:${m[2]}`;
 }
 
-export function sittingToFields(s: Sitting): SittingFields {
-  return { date: jstDate(s.start), start: jstTime(s.start), end: jstTime(s.end) };
+/** 終了時刻: 0〜47 時（"25:30"・"2530" も）→ "25:30"。読めなければ null */
+export function normalizeEndTime(raw: string): string | null {
+  const s = halfWidth(raw);
+  const compact = /^(\d{1,2})(\d{2})$/.exec(s);
+  const m = HM_LATE.exec(compact ? `${compact[1]}:${compact[2]}` : s);
+  if (!m || Number(m[1]) > 47) return null;
+  return `${m[1]!.padStart(2, "0")}:${m[2]}`;
 }
 
-/** 入力欄の値を集まりにする。終了が開始と同じかそれより前なら、翌日の終了とする */
+/** 開始から見た終了時刻を、日をまたぐなら 24 を足した書き方にそろえる（21:00 と 01:00 → "25:00"） */
+export function endFieldFor(start: string, end: string): string {
+  const st = normalizeTime(start);
+  const en = normalizeEndTime(end);
+  if (!st || !en) return end;
+  return Number(en.slice(0, 2)) < 24 && en <= st ? `${Number(en.slice(0, 2)) + 24}:${en.slice(3)}` : en;
+}
+
+export function sittingToFields(s: Sitting): SittingFields {
+  return { date: jstDate(s.start), start: jstTime(s.start), end: endClock(s).padStart(5, "0") };
+}
+
+/** 入力欄の値を集まりにする。終了が 24 時以降、または開始と同じかそれより前なら、翌日の終了とする */
 export function sittingFromFields(f: SittingFields): Sitting | null {
   const start = normalizeTime(f.start);
-  const end = normalizeTime(f.end);
+  const end = normalizeEndTime(f.end);
   if (!YMD.test(f.date) || !start || !end) return null;
   const s = jstEpoch(f.date, start);
-  let e = jstEpoch(f.date, end);
+  const [h, m] = end.split(":").map(Number);
+  let e = jstEpoch(f.date, `${String(h! % 24).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
+  e += Math.floor(h! / 24) * 24 * 3600;
   if (e <= s) e += 24 * 3600;
   return { start: s, end: e };
 }
@@ -168,7 +207,7 @@ export function sittingsFromFields(
 /** 次に足す集まりの初期値: 直前の集まりの翌日、同じ時刻 */
 export function nextSittingFields(rows: readonly SittingFields[], today: string): SittingFields {
   const last = rows.at(-1);
-  if (!last || !YMD.test(last.date)) return { date: today, start: "21:00", end: "00:00" };
+  if (!last || !YMD.test(last.date)) return { date: today, start: "21:00", end: "24:00" };
   const d = new Date(`${last.date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + 1);
   return { date: d.toISOString().slice(0, 10), start: last.start, end: last.end };

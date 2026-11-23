@@ -8,7 +8,7 @@ export interface ShareGateResult {
 }
 
 export interface ShareViewerOptions {
-  /** 「このシナリオをプレイした(自己申告)」のチェック */
+  /** 「このシナリオを通過した(自己申告)」のチェック */
   asPassed?: boolean;
 }
 
@@ -27,7 +27,7 @@ export function evaluateShareGate(
     return { visible: false, reason: "このログはメンバー限定です。卓のメンバーだけが読めます。" };
   }
   if (log.scope === "passed" && !isParticipant && !opts.asPassed) {
-    return { visible: false, reason: "このログは、このシナリオをプレイした人だけが読めます（自己申告）。" };
+    return { visible: false, reason: "このログは、このシナリオを通過した人だけが読めます（自己申告）。" };
   }
   return { visible: true, reason: null };
 }

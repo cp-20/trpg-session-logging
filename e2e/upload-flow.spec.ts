@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { auditPage, enterDemo } from "./design-audit";
+import { addScenario } from "./support/scenario";
 
 /**
  * 記録の流れの各段（ログを選ぶ・ログを読んだあと・ログなし・記録した）を、デスクトップ・モバイル・ダークで描画後の検査にかける。
@@ -39,7 +40,7 @@ for (const mode of MODES) {
     await expect(page.getByText("サンプルログ", { exact: true })).toBeVisible();
     await audit(page, "ログを読んだあと", report, mode.dark);
 
-    await page.getByLabel("タイトル", { exact: true }).fill("流れの検査");
+    await addScenario(page, "流れの検査");
     await page.getByRole("button", { name: "記録する", exact: true }).first().click();
     const done = page.getByRole("dialog", { name: "セッションを記録しました" });
     await expect(done).toBeVisible();
@@ -85,13 +86,27 @@ test("卓を選ぶとメンバーから参加者を選べ、全員を 1 回で�
   }
 });
 
-test("シナリオは数百件から検索して選べ、見つからなければその名前で追加できる", async ({ page }) => {
+test("シナリオは共有シナリオ一覧からサーバーで探して選べ、見つからなければその名前で追加できる", async ({
+  page,
+}) => {
   await enterDemo(page);
+  // 共有シナリオ一覧は取り直すたびに変わるので、探す作品はサーバーに聞く（体験版の手元にはない TALTO の作品）
+  const res = await page.request.get("/api/scenarios?limit=1&offset=100");
+  const { items } = (await res.json()) as { items: { id: string; title: string }[] };
+  const target = items[0]!;
   await page.goto("/upload?manual=1");
   const sc = page.getByRole("combobox", { name: "シナリオ" });
   await sc.click();
-  // 入力前は候補（遊んだもの）と、全件の一部が出る。多い分は「ほか N 件」
-  await expect(page.getByText(/ほか \d+ 件/)).toBeVisible();
+  await sc.fill(target.title);
+  // 答えが届くまでは「追加」を出さない（同じ作品を二重に足させない）。届いたら共有シナリオ一覧の作品を選ぶ
+  await page
+    .getByRole("option")
+    .filter({ hasText: target.title })
+    .filter({ hasNotText: "追加" })
+    .first()
+    .click();
+  await expect(sc).toHaveValue(target.title);
+  await sc.click();
   await sc.fill("まだ誰も書いていないシナリオ名");
   await page.getByRole("option", { name: /追加/ }).click();
   await expect(page.getByLabel("シナリオのタイトル")).toHaveValue("まだ誰も書いていないシナリオ名");

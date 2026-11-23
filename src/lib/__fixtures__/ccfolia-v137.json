@@ -1,0 +1,24 @@
+{
+  "meta": { "version": "1.37" },
+  "entities": {
+    "room": {},
+    "messages": {
+      "a": {
+        "name": "アリス",
+        "text": "こんにちは",
+        "channel": "main",
+        "createdAt": 1747480041000,
+        "color": "#4caf50"
+      },
+      "b": {
+        "name": "ボブ",
+        "text": "CCB<=60",
+        "channel": "secret",
+        "createdAt": 1747480100000,
+        "extend": {
+          "roll": { "cmd": "CCB<=60", "skill": "目星", "dice": [{ "value": "25" }], "result": "成功" }
+        }
+      }
+    }
+  }
+}

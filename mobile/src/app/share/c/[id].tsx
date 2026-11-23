@@ -36,7 +36,7 @@ export default function ShareCharacterScreen() {
   type Status = "idle" | "loading" | "missing" | "ready";
   const authUid = authUser?.uid ?? null;
   const hasLocal = Boolean(local);
-  /* 自分のカルテは手元のものを出す。他人のカルテだけ共有先から読む */
+  /* 自分のキャラクターは手元のものを出す。他人のものだけ共有先から読む */
   const ownView = Boolean(local && (!authUid || local.ownerId === authUid));
   const canFetch = Boolean(id) && isFirebaseConfigured;
   const statusOnRefetch = (prev: Status): Status => {
@@ -108,7 +108,7 @@ export default function ShareCharacterScreen() {
           <EmptyState
             kind="permission"
             icon={<IconLock size={28} color={tokens.ink3} />}
-            title="このカルテは非公開です"
+            title="このキャラクターは共有されていません"
           >
             持ち主が共有を有効にすると、このリンクで読めるようになります。
           </EmptyState>
@@ -129,7 +129,7 @@ export default function ShareCharacterScreen() {
           <EmptyState
             kind="permission"
             icon={<IconLock size={28} color={tokens.ink3} />}
-            title="このカルテは非公開です"
+            title="このキャラクターは共有されていません"
           >
             持ち主が共有を有効にすると、このリンクで読めるようになります。
           </EmptyState>
@@ -218,7 +218,7 @@ export default function ShareCharacterScreen() {
 
       {share.includeSessions && sessions.length > 0 && (
         <View style={{ marginBottom: 22 }}>
-          <SectionTitle>セッション履歴</SectionTitle>
+          <SectionTitle>これまでのセッション</SectionTitle>
           <Surface>
             <DividerList>
               {sessions.map((s) => {

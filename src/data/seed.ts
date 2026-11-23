@@ -2,9 +2,6 @@ import type { State, User, Table, Character, Scenario, Log, Channel, Provider, T
 import generated from "./generated.json";
 import { sessionStart, uid } from "../lib/time";
 import { DEMO_SHEETS } from "./demo-sheets";
-import taltoRows from "./talto-scenarios.json";
-import { SYSTEMS } from "./systems";
-import { taltoRowToScenario } from "../lib/talto-scenarios";
 
 /** generated.json の logs はオブジェクト（Record）なので正しく扱う */
 const g = generated as unknown as {
@@ -34,11 +31,6 @@ export function seedState(): State {
   }
   const scenarios: Record<string, Scenario> = {};
   g.scenarios.forEach((s) => (scenarios[s.id] = s));
-  // 一覧の量を実際に近づけるため、TALTO の公開シナリオ（scripts/fetch-talto-scenarios.ts）を足す。手書きの見本は上書きしない
-  taltoRows.forEach((row) => {
-    const sc = taltoRowToScenario(row, SYSTEMS);
-    scenarios[sc.id] ??= sc;
-  });
   const characters: Record<string, Character> = {};
   Object.values(g.characters).forEach((c) => {
     /* 共有は既定でオフ。キャラシから取り込んだサンプルは、そのサイトの JSON から作る */

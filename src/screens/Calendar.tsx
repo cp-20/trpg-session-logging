@@ -6,6 +6,7 @@ import {
   IconCheck,
   IconChevronLeft,
   IconChevronRight,
+  IconClock,
   IconPencil,
   IconPlus,
   IconX,
@@ -26,7 +27,6 @@ import {
   cx,
   weekdayTone,
   DateInput,
-  NumberInput,
 } from "../components/ui";
 import { Avatar, AvatarStack } from "../components/identity";
 import { GoogleBusySettings } from "../components/google-busy";
@@ -61,6 +61,7 @@ import { fmtDate, fmtDur, sessionPlayMinutes, todayStr, uid, sessionDays } from 
 import { useStore } from "../store";
 import type { ComboboxOption } from "../components/ui";
 import type { Availability, Log, Scenario, State, Table, TableEvent, TableEventCandidate } from "../types";
+import { sessionTitle } from "../lib/session-scenario";
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"] as const;
 
@@ -79,12 +80,11 @@ const DURATION_PRESETS = [
   { minutes: 300, label: "5時間" },
 ] as const;
 
-const MINUTE_OPTIONS = [
-  { value: "0", label: "00分" },
-  { value: "15", label: "15分" },
-  { value: "30", label: "30分" },
-  { value: "45", label: "45分" },
-] as const;
+/** 「その他」の長さ: 30 分刻みで 30 分〜12 時間。時間と分を別の欄に分けない（1 つで選べる） */
+const DURATION_CHOICES = Array.from({ length: 24 }, (_, i) => (i + 1) * 30).map((m) => ({
+  value: String(m),
+  label: fmtDur(m),
+}));
 
 /** 終わった予定のうち「記録がまだ」と促す期間 */
 const UNRECORDED_LOOKBACK_DAYS = 30;
@@ -544,7 +544,8 @@ function candidateTally(cand: TableEventCandidate, memberIds: string[]) {
 
 /** 候補の日時。長さは日程調整全体で 1 つなので、候補には開始だけを出す */
 function candidateLabel(cand: Pick<TableEventCandidate, "date" | "startTime">): string {
-  return `${fmtDate(cand.date)} ${cand.startTime}`;
+  // 候補は開始だけを持つ（長さは日程調整に 1 つ）。「21:00〜」で始まりだと分かるようにする
+  return `${fmtDate(cand.date)} ${cand.startTime}〜`;
 }
 
 /** 候補日の一覧（閲覧用）。押して返事はしない。返事は「回答する」から */
@@ -718,23 +719,28 @@ function PollAnswerList({
   );
 }
 
+/**
+ * 日程調整の「どこで・何を・どれくらい」。卓の画面では卓名を省く。作った人は判断に使わないので出さない（P5）。
+ * 長さは「長さ」の見出しではなく時計の印で示す
+ */
 function PollMeta({
   event,
   state,
   durMin,
+  inTable,
   onNavigate,
 }: {
   event: ExtendedTableEvent;
   state: State;
   durMin: number;
+  inTable?: boolean;
   onNavigate?: () => void;
 }) {
   const tb = event.tableId ? state.tables[event.tableId] : undefined;
   const sc = event.scenarioId ? state.scenarios[event.scenarioId] : undefined;
-  const organiser = state.users[event.createdBy];
   return (
     <div className="meta text-xs sm:text-sm">
-      {tb ? (
+      {inTable ? null : tb ? (
         <Link
           to={`/tables/${tb.id}`}
           onClick={onNavigate}
@@ -754,8 +760,13 @@ function PollMeta({
           {sc.title}
         </Link>
       )}
-      {organiser && <span>主催 {organiser.name}</span>}
-      {durMin > 0 && <span className="tabular-nums">長さ {fmtDur(durMin)}</span>}
+      {durMin > 0 && (
+        <span className="inline-flex items-center gap-1 tabular-nums">
+          <IconClock width={14} height={14} aria-hidden />
+          <span className="sr-only">所要時間</span>
+          {fmtDur(durMin)}
+        </span>
+      )}
     </div>
   );
 }
@@ -800,11 +811,14 @@ export function PollDetailModal({
   event,
   state,
   initialMode = "view",
+  inTable,
   onClose,
   onConfirmed,
 }: {
   event: ExtendedTableEvent;
   state: State;
+  /** 卓の画面から開いたとき（卓名を省く） */
+  inTable?: boolean;
   /** 「返事する」から開いたときは回答画面から始める */
   initialMode?: Exclude<PollMode, "edit">;
   onClose: () => void;
@@ -891,7 +905,7 @@ export function PollDetailModal({
         <PollEditForm formId={editFormId} event={event} onSaved={() => setMode("view")} />
       ) : (
         <>
-          <PollMeta event={event} state={state} durMin={durMin} onNavigate={onClose} />
+          <PollMeta event={event} state={state} durMin={durMin} inTable={inTable} onNavigate={onClose} />
           {mode === "view" && event.note && (
             <p data-user-content className="mt-2 text-sm leading-relaxed text-ink2">
               {event.note}
@@ -976,7 +990,7 @@ function PollEditForm({
         />
         <FieldError text={titleError} />
       </Field>
-      <Field label="長さ" noMargin>
+      <Field label="所要時間" noMargin>
         <DurationPicker durationMin={durationMin} onChange={setDurationMin} />
       </Field>
       <CandidateEditor
@@ -1013,14 +1027,14 @@ function entryKindWord(e: GridEntry): string | null {
   return e.kind === "poll" ? "候補" : e.kind === "log" ? "記録" : null;
 }
 
-function entryTitle(e: GridEntry): string {
+function entryTitle(e: GridEntry, scenarios: State["scenarios"]): string {
   if (e.kind === "event") return `${e.ev.startTime} ${e.ev.title}`;
-  return e.kind === "poll" ? e.ev.title : e.log.title;
+  return e.kind === "poll" ? e.ev.title : sessionTitle(e.log, scenarios);
 }
 
-function entryLabel(e: GridEntry): string {
+function entryLabel(e: GridEntry, scenarios: State["scenarios"]): string {
   const word = entryKindWord(e);
-  return word ? `${word} ${entryTitle(e)}` : entryTitle(e);
+  return word ? `${word} ${entryTitle(e, scenarios)}` : entryTitle(e, scenarios);
 }
 
 function EntryCard({ entry, state }: { entry: GridEntry; state: State }) {
@@ -1035,7 +1049,7 @@ function EntryCard({ entry, state }: { entry: GridEntry; state: State }) {
       });
     return (
       <span className="block">
-        <span className="block font-bold leading-snug">{l.title}</span>
+        <span className="block font-bold leading-snug">{sessionTitle(l, state.scenarios)}</span>
         <span className="meta mt-0.5 text-xs">
           <span>記録</span>
           {tb && <span>{tb.name}</span>}
@@ -1274,7 +1288,7 @@ const MonthCalendar = memo(function MonthCalendar({
                   tabIndex={isTabTarget ? 0 : -1}
                   aria-pressed={isSelected}
                   aria-label={`${fmtDate(dayStr)}${holidayName ? ` ${holidayName}` : ""}${
-                    entries.length ? `、${entries.map(entryLabel).join("、")}` : ""
+                    entries.length ? `、${entries.map((e) => entryLabel(e, state.scenarios)).join("、")}` : ""
                   }`}
                   onClick={() => onSelectDay(dayStr)}
                   onKeyDown={(e) => handleDayKeyDown(e, dayStr, col, day)}
@@ -1315,7 +1329,7 @@ const MonthCalendar = memo(function MonthCalendar({
                         <button
                           type="button"
                           tabIndex={-1}
-                          aria-label={entryLabel(e)}
+                          aria-label={entryLabel(e, state.scenarios)}
                           onClick={() => openEntry(e)}
                           className={cx(
                             "block w-full truncate rounded px-1.5 py-0.5 text-left text-xs leading-tight",
@@ -1329,7 +1343,7 @@ const MonthCalendar = memo(function MonthCalendar({
                           {entryKindWord(e) && (
                             <span className="mr-1 font-semibold text-ink2">{entryKindWord(e)}</span>
                           )}
-                          {entryTitle(e)}
+                          {entryTitle(e, state.scenarios)}
                         </button>
                       </HoverCard>
                     ))}
@@ -1385,7 +1399,7 @@ const MonthCalendar = memo(function MonthCalendar({
                   : e.kind === "poll"
                     ? `${e.cand.startTime} 開始`
                     : fmtDur(sessionPlayMinutes(e.log));
-              const title = e.kind === "log" ? e.log.title : e.ev.title;
+              const title = e.kind === "log" ? sessionTitle(e.log, state.scenarios) : e.ev.title;
               const tableId = e.kind === "log" ? e.log.tableId : e.ev.tableId;
               return (
                 <li key={e.key}>
@@ -1536,10 +1550,10 @@ function DurationPicker({
   error?: string;
 }) {
   const safeDuration = Number.isFinite(durationMin) ? Math.max(0, durationMin) : 180;
-  const hours = Math.floor(safeDuration / 60);
-  const mins = Math.floor((safeDuration % 60) / 15) * 15;
   const isPreset = DURATION_PRESETS.some((p) => p.minutes === safeDuration);
   const [custom, setCustom] = useState(!isPreset);
+  // 30 分刻みに丸めて、選択肢にない値（古い 15 分刻み）でも空欄にしない
+  const customValue = String(Math.min(720, Math.max(30, Math.round(safeDuration / 30) * 30)));
 
   return (
     <div>
@@ -1555,39 +1569,24 @@ function DurationPicker({
           onChange={(v) => {
             if (v === "custom") {
               setCustom(true);
+              onChange(Number(customValue));
             } else {
               setCustom(false);
               onChange(Number(v));
             }
           }}
         />
-      </div>
-      {custom && (
-        <div className="mt-2 flex items-center gap-2">
-          <NumberInput
-            aria-label="予定時間（時間）"
-            min={0}
-            max={24}
-            size="sm"
-            className="w-32"
-            value={hours}
-            onChange={(e) => {
-              const raw = Number(e.target.value);
-              const nextHours = Number.isFinite(raw) ? Math.max(0, Math.min(24, Math.floor(raw))) : 0;
-              onChange(nextHours * 60 + mins);
-            }}
-          />
-          <span className="text-sm text-ink2">時間</span>
+        {custom && (
           <Select
             size="sm"
-            ariaLabel="予定時間（分）"
-            className="w-24"
-            value={String(mins)}
-            options={MINUTE_OPTIONS}
-            onChange={(v) => onChange(hours * 60 + Number(v))}
+            ariaLabel="予定時間"
+            className="w-36"
+            value={customValue}
+            options={DURATION_CHOICES}
+            onChange={(v) => onChange(Number(v))}
           />
-        </div>
-      )}
+        )}
+      </div>
       <FieldError text={error} />
     </div>
   );
@@ -1705,7 +1704,7 @@ function ConfirmedEventForm({
         </Field>
       </div>
 
-      <Field label="長さ" noMargin>
+      <Field label="所要時間" noMargin>
         <Controller
           control={control}
           name="durationMin"
@@ -1762,7 +1761,11 @@ function ConfirmedEventForm({
       </div>
 
       <Field label="メモ（任意）" noMargin>
-        <input {...register("note")} className="input w-full" placeholder="例: 探索者の調整や持ち物の連絡" />
+        <input
+          {...register("note")}
+          className="input w-full"
+          placeholder="例: キャラクターの調整や持ち物の連絡"
+        />
       </Field>
     </form>
   );
@@ -2007,7 +2010,7 @@ function PollForm({
         </Field>
       </div>
 
-      <Field label="長さ" noMargin>
+      <Field label="所要時間" noMargin>
         <Controller
           control={control}
           name="durationMin"
@@ -2036,7 +2039,11 @@ function PollForm({
       />
 
       <Field label="メモ（任意）" noMargin>
-        <input {...register("note")} className="input w-full" placeholder="例: 探索者の調整や持ち物の連絡" />
+        <input
+          {...register("note")}
+          className="input w-full"
+          placeholder="例: キャラクターの調整や持ち物の連絡"
+        />
       </Field>
     </form>
   );

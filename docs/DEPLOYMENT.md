@@ -41,6 +41,19 @@ Routes are Next.js App Router paths (`/sessions`, `/share/l/{slug}`, …) served
 
 Official guidance: https://deploy.lolipop.jp/docs/frameworks/nextjs
 
+## Scenario directory
+
+Scenarios are shared by all users and live in Firestore `scenarios/{id}`; nothing keeps the directory in memory. `/api/scenarios` (`src/server/scenario-directory.ts`) queries it through Firestore's public REST API:
+
+- **Search by words**: every document stores a map `t` of the 1- and 2-character grams of its normalized title, author, keywords and system name. A query becomes up to six `t.<gram> == true` equality filters (plus `systemId ==`), which Firestore answers by merging single-field indexes, so no composite index is needed. The server reads at most 300 matching documents and ranks them (title exact → prefix → contains → all words anywhere; then the viewer's systems; then popularity).
+- **Browse**: ordered by `rank` (TALTO likes order; user-added scenarios get 1,000,000,000), or by `sysRank` (`"<systemId>:<rank padded to 10>"`) within a system, plus a count aggregation.
+
+Writers: the TALTO catalog (`scripts/data/talto-catalog.json`, refreshed with `node scripts/fetch-talto-scenarios.ts`) is written by `node scripts/sync-scenario-directory.ts` as the bot user (only the bot may write `sc_talto_*`). It writes only changed documents and deletes listings that disappeared; `--dry-run` shows the counts and `--emulator` targets the emulators. A signed-in browser publishes the scenarios its user added (`publishSharedScenario`); rules fix their `rank`/`sysRank`, limit `t` to 400 grams, let only the adder update them, and never delete them.
+
+Edit proposals live in `scenarioEditRequests/{id}` (`sendScenarioEditRequest`, `fetchPendingEditRequests`, `resolveEditRequest`). Only signed-in non-adders can create one, its `ownerUid` must equal the scenario's `addedByUid`, only the sender and the adder can read it, and only the adder can set `status` to `accepted`/`rejected`. Signed-out demo use keeps proposals in local state.
+
+Tests: `src/lib/scenario-directory.emulator.test.ts` (rules, REST queries, proposals), `src/app/api/scenarios/route.test.ts`.
+
 ## Google Calendar busy times
 
 The setting 「Google カレンダーの空き時間を使う」 (`src/components/google-busy.tsx`, shown on `/settings` and in カレンダー連携 on `/calendar`) runs entirely in the browser: Firebase `reauthenticateWithPopup` asks Google for the scopes `calendar.freebusy` and `calendar.calendarlist.readonly`, and the short-lived access token is used once to read the calendar list and FreeBusy (`src/lib/google-calendar.ts`). The token is never stored or sent to the server, and no refresh token is requested, so the server holds no Google credentials. Only the busy time ranges and calendar names are saved in the user's own state.
@@ -109,3 +122,7 @@ Set each with `lolipop env create NAME --value-stdin --sensitive --project <id> 
 ### Local end-to-end with the emulators
 
 With `NEXT_PUBLIC_FIREBASE_USE_EMULATORS=true`, the server's bot connects to the Auth (`NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_URL` or `FIREBASE_AUTH_EMULATOR_HOST`, default `127.0.0.1:9099`) and Firestore (`127.0.0.1:8080`) emulators and, unless `TAKUFU_BOT_EMAIL` / `TAKUFU_BOT_PASSWORD` are set, signs in with fixed emulator-only credentials. The emulator starts empty, so the server creates the bot user with the uid from `BOT_UID` on first use (`node scripts/discord.ts setup-bot --emulator` does the same by hand). Run `firebase emulators:start --only auth,firestore --project takufu-app`, then `pnpm run dev` with the emulator variables and the four `DISCORD_*` values in `.env.local` / `.env.discord.local`. Emulator checks: `firebase emulators:exec --only auth,firestore --project takufu-app "<script>"` where the script exports `NEXT_PUBLIC_FIREBASE_USE_EMULATORS=true NEXT_PUBLIC_FIREBASE_API_KEY=demo-key NEXT_PUBLIC_FIREBASE_PROJECT_ID=takufu-app` and runs `node scripts/emulator-smoke.ts` and `pnpm exec vitest run src/lib/*.emulator.test.ts src/lib/discord/*.emulator.test.ts`.
+
+## Share-page OG images
+
+`/share/l/{slug}` and `/share/c/{id}` have dynamic titles (`layout.tsx` → `generateMetadata`) and OG images (`opengraph-image.tsx`, drawn by `src/server/og-image.tsx` from `src/lib/og-card.ts`). The server reads the share through Firestore's public REST API without credentials (`src/server/shared-pages.ts`), so it sees only what the rules show to anyone: public logs and shared characters. Members-only or passphrase logs get a generic card without the title. The Noto Sans JP TTFs are fetched once per process from Google Fonts (no user text is sent); if that fails, the image route redirects to the LP's `/opengraph-image.png`. Tests: `src/lib/og-card.test.ts`, `src/lib/share-og.emulator.test.ts`, and the OG test in `e2e/public-pages.spec.ts`.
