@@ -139,11 +139,23 @@ export interface Roll {
   cmd: string;
   skill: string;
   dice: string;
+  /** 繰り返しロールでは各回の結果をまとめた文（例: 成功 2・失敗 1）。段階を見るときは repeats を使う */
   result: string;
   secret?: boolean;
+  /** 繰り返しロール（x3 CC<=70 …）の各回。1 回だけのロールには無い */
+  repeats?: RollOutcome[];
 }
 
-export type MsgKind = "PC" | "NPC" | "ENEMY" | "KP" | "PL" | "GM" | "SYSTEM";
+export interface RollOutcome {
+  dice: string;
+  result: string;
+}
+
+/**
+ * 発言の種類。NARRATION は登場人物でない名前（場面・場所の見出し、あらすじ）で GM が流す描写。
+ * SYSTEM はツールの進行メッセージ（入室・ステータスの変更など）
+ */
+export type MsgKind = "PC" | "NPC" | "ENEMY" | "KP" | "PL" | "GM" | "NARRATION" | "SYSTEM";
 export type MsgType = "text" | "note" | "roll";
 
 export interface Msg {

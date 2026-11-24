@@ -34,13 +34,21 @@ describe("speakerRoleOptions", () => {
   it("エネミーはエネミーのいるシステムだけに出す", () => {
     expect(systemHasEnemies("sw25")).toBe(true);
     expect(systemHasEnemies("coc7")).toBe(false);
-    expect(speakerRoleOptions("coc7").map((o) => o.label)).toEqual(["KP", "PC", "PL", "NPC", "システム"]);
+    expect(speakerRoleOptions("coc7").map((o) => o.label)).toEqual([
+      "KP",
+      "PC",
+      "PL",
+      "NPC",
+      "描写",
+      "システム",
+    ]);
     expect(speakerRoleOptions("sw25").map((o) => o.value)).toEqual([
       "GM",
       "PC",
       "PL",
       "NPC",
       "ENEMY",
+      "NARRATION",
       "SYSTEM",
     ]);
   });

@@ -103,6 +103,8 @@ describe("HTML / XML fallback parsers without DOMParser (Hermes compatibility)",
     </html>`;
     expect(parseCcfoliaHtmlEntriesFallback(html)).toEqual([
       { tab: "ch0", sp: "空タブ者", text: "1行目\n2行目" },
+      // 発言者が空でも本文は残す（名前は呼び出し側で「不明な発言者」にする）
+      { tab: "雑談", sp: "", text: "欠落発言者" },
     ]);
 
     const divHtml = `<html><head><script>ignored</script><style>ignored</style></head><body>

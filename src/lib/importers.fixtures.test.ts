@@ -60,7 +60,10 @@ for (const withDom of [true, false]) {
       expect(main.msgs[0]!.text).toBe('1行目\n2行目 <b> & "引用"');
       expect(main.msgs[1]).toMatchObject({ sp: "system", kind: "SYSTEM", text: "ボブが入室しました" });
       expect(ch(res, "密談")).toMatchObject({ secret: true });
-      expect(ch(res, "密談").msgs[0]!.roll).toMatchObject({ dice: "", result: "成功" });
+      expect(ch(res, "密談").msgs[0]).toMatchObject({
+        type: "roll",
+        roll: { cmd: "CCB<=60 【目星】", skill: "目星", dice: "25", result: "成功" },
+      });
       expect(ch(res, "情報").msgs[0]!.ts).toBeLessThan(main.msgs[0]!.ts);
     });
 

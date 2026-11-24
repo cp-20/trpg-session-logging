@@ -28,6 +28,7 @@ import { LogReaderBar, SessionTimeline, TimelineFilter, RecordingLinkContext } f
 import { SessionMediaSection, recordingLinksAt } from "../components/media";
 import { SYSTEMS } from "../data/systems";
 import { roleLabel } from "../lib/roles";
+import { isGoodRoll, rollOutcomes, rollTone } from "../lib/roll-tone";
 import { userHref } from "../lib/people";
 import { fmtDates, fmtDur, fmtSessionWhen, sessionDays, sessionPlayMinutes, uid } from "../lib/time";
 import { sittingToFields, sittingsFromFields, type SittingFields } from "../lib/sittings";
@@ -1073,19 +1074,21 @@ function RollSummarySection({ log }: { log: Log }) {
     for (const c of log.channels) {
       for (const m of c.msgs) {
         if (m.type !== "roll" || !m.roll) continue;
-        count++;
-        const sp = m.sp;
-        nextBySp[sp] ??= { crit: 0, fumble: 0, fail: 0, ok: 0, spec: 0 };
-        const r = m.roll.result;
-        if (/クリティカル/.test(r)) nextBySp[sp].crit++;
-        else if (/ファンブル/.test(r)) nextBySp[sp].fumble++;
-        else if (/スペシャル/.test(r)) nextBySp[sp].spec++;
-        else if (/失敗/.test(r)) nextBySp[sp].fail++;
-        else if (/SAN/.test(r)) {
-          /* SANは分布に含めない */
-        } else nextBySp[sp].ok++;
-        const key = /SAN/.test(r) ? "SANチェック" : r;
-        nextDist[key] = (nextDist[key] ?? 0) + 1;
+        /* 繰り返しロールは 1 回ずつ数える */
+        for (const { result } of rollOutcomes(m.roll)) {
+          count++;
+          /* 合計値や表の結果のように判定の無いロールは、回数にだけ数える */
+          const tone = rollTone(result);
+          if (!tone) continue;
+          nextBySp[m.sp] ??= { crit: 0, fumble: 0, fail: 0, ok: 0, spec: 0 };
+          const row = nextBySp[m.sp];
+          if (tone === "crit") row.crit++;
+          else if (tone === "fumble") row.fumble++;
+          else if (tone === "special") row.spec++;
+          else if (tone === "fail") row.fail++;
+          else row.ok++;
+          nextDist[result] = (nextDist[result] ?? 0) + 1;
+        }
       }
     }
     return {
@@ -1117,9 +1120,9 @@ function RollSummarySection({ log }: { log: Log }) {
                     <span
                       className={cx(
                         "block h-full rounded-full",
-                        /クリティカル|スペシャル/.test(k)
+                        isGoodRoll(k)
                           ? "bg-success"
-                          : /ファンブル/.test(k)
+                          : rollTone(k) === "fumble"
                             ? "bg-error"
                             : "bg-base-content/35",
                       )}

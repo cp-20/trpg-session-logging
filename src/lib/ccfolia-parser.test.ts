@@ -177,19 +177,21 @@ describe("parseCcfoliaLog", () => {
 
     // 正規チャンネル名判定とメイン先頭ソート
     expect(out.channels[0]?.name).toBe("メイン");
+    // 表記の違う情報タブ（info / 情報）は 1 つにまとまり、中は時刻の順
     const infoCh = out.channels.filter((c) => c.name === "情報");
-    expect(infoCh).toHaveLength(2);
-    expect(infoCh.every((c) => c.secret === false)).toBe(true);
-    expect(infoCh[0]?.msgs[0]?.ts).toBe(1000000000);
-    expect(infoCh[1]?.msgs[0]?.ts).toBe(1e12);
+    expect(infoCh).toHaveLength(1);
+    expect(infoCh[0]?.secret).toBe(false);
+    expect(infoCh[0]?.msgs.map((m) => m.ts)).toEqual([1000000000, 1e12]);
     expect(out.channels.filter((c) => c.name === "チャット").every((c) => !c.secret)).toBe(true);
 
     const chat = out.channels.find((c) => c.name === "チャット")!;
     expect(chat.secret).toBe(false);
-    expect(chat.msgs[0]).toMatchObject({
+    // 雑談 と chat_sub は同じチャットタブにまとまる。ロールを持つ発言は type: "roll"
+    expect(chat.msgs.map((m) => m.sp)).toEqual(["GM 進行", "案内役"]);
+    expect(chat.msgs[1]).toMatchObject({
       sp: "案内役",
       kind: "SYSTEM",
-      type: "text",
+      type: "roll",
       ts: 1794831610,
       roll: { cmd: "1d100<=50", skill: "目星", dice: "1", result: "クリティカル" },
     });
@@ -200,7 +202,7 @@ describe("parseCcfoliaLog", () => {
     const main = out.channels.find((c) => c.name === "メイン")!;
     expect(main.msgs[0]).toMatchObject({ sp: "不正時刻", ts: 0 });
     expect(summarizeParsed(out)).toContain("秘匿A(2) [シークレット]");
-    expect(summarizeParsed(out)).toContain("チャット(1)");
+    expect(summarizeParsed(out)).toContain("チャット(2)");
     expect(sessionDatesOf(out).length).toBeGreaterThanOrEqual(2);
   });
 
@@ -213,7 +215,8 @@ describe("parseCcfoliaLog", () => {
       <p><span>[main]</span><span>system</span><span>◆ 開始</span></p>
     </body></html>`;
     const fromRaw = parseCcfoliaLog(rawHtml)!;
-    expect(fromRaw.messageCount).toBe(3);
+    // 発言者の無い行も本文があれば残す（名前を消したダイスなど）
+    expect(fromRaw.messageCount).toBe(4);
     expect(fromRaw.channels[0]?.name).toBe("メイン");
     expect(fromRaw.channels[0]?.msgs[0]).toMatchObject({ kind: "SYSTEM", type: "note" });
     const emptyTabCh = fromRaw.channels.find((c) => c.id === "ch0")!;

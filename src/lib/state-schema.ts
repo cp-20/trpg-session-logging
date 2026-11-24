@@ -21,7 +21,7 @@ const message = z
     id: z.string(),
     ts: z.number().finite(),
     sp: z.string(),
-    kind: z.enum(["PC", "NPC", "ENEMY", "KP", "PL", "GM", "SYSTEM"]),
+    kind: z.enum(["PC", "NPC", "ENEMY", "KP", "PL", "GM", "NARRATION", "SYSTEM"]),
     type: z.enum(["text", "note", "roll"]),
     roll: z
       .looseObject({ cmd: z.string(), skill: z.string(), dice: z.string(), result: z.string() })

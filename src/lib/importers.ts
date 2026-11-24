@@ -1,6 +1,8 @@
-import type { Channel, Msg, MsgKind } from "../types";
 import { toCharacterFields, type ParsedCharacter } from "./ccfolia-character";
 import {
+  assembleLogEntries,
+  isExplicitKind,
+  mapKind,
   parseCcfoliaLog,
   parseCcfoliaLogHtml,
   parseCcfoliaLogZip,
@@ -48,69 +50,6 @@ export function guessSystemFromText(text: string): string | undefined {
   if (/Emoklore|エモクロア|共鳴/i.test(text)) return "emoklore";
   if (/\bCC(?:<=|\s)/i.test(text)) return "coc7";
   return undefined;
-}
-
-function mapKind(sp: string, explicit?: string): MsgKind {
-  const e = explicit?.toUpperCase();
-  if (e === "PC" || e === "NPC" || e === "KP" || e === "PL" || e === "GM" || e === "SYSTEM") {
-    return e as MsgKind;
-  }
-  if (/^(KP|GM)[\s:：]/i.test(sp) || sp === "KP" || sp === "GM") return "KP";
-  if (sp.toLowerCase() === "system") return "SYSTEM";
-  return "PC";
-}
-
-function assembleLogEntries(entries: LogEntry[]): ParsedLog | null {
-  if (entries.length === 0) return null;
-  const msgs: Msg[] = entries.map(
-    (e, i) =>
-      ({
-        id: `p${i}`,
-        ts: e.ts,
-        sp: e.sp,
-        kind: e.kind,
-        type: e.type === "note" ? "note" : "text",
-        text: e.text,
-        ...(e.roll ? { roll: e.roll } : {}),
-      }) as Msg,
-  );
-
-  const groups = new Map<string, Msg[]>();
-  msgs.forEach((m, i) => {
-    const rawCh = entries[i]!.channel;
-    const arr = groups.get(rawCh) ?? [];
-    arr.push(m);
-    groups.set(rawCh, arr);
-  });
-  groups.forEach((arr) => arr.sort((a, b) => a.ts - b.ts));
-
-  const nameFor = (raw: string, speakerCount: number): { name: string; secret: boolean } => {
-    const lower = raw.toLowerCase();
-    if (lower === "main" || raw === "メイン" || lower.includes("main")) {
-      return { name: "メイン", secret: false };
-    }
-    if (lower === "info" || raw === "情報" || raw.includes("info")) {
-      return { name: "情報", secret: false };
-    }
-    if (lower === "chat" || raw === "チャット" || raw.includes("chat") || raw === "雑談") {
-      return { name: "チャット", secret: false };
-    }
-    return { name: raw, secret: speakerCount <= 2 };
-  };
-
-  const channels: Channel[] = [...groups.entries()]
-    .map(([key, gmsgs]) => {
-      const speakers = new Set(gmsgs.map((m) => m.sp));
-      const { name, secret } = nameFor(key, speakers.size);
-      return { id: key, name, secret, msgs: gmsgs };
-    })
-    .sort((a, b) => (a.name === "メイン" ? -1 : b.name === "メイン" ? 1 : 0));
-
-  const kinds: Record<string, MsgKind> = {};
-  channels.forEach((c) => c.msgs.forEach((m) => (kinds[m.sp] = m.kind)));
-
-  const messageCount = channels.reduce((a, c) => a + c.msgs.length, 0);
-  return { channels, kinds, messageCount };
 }
 
 /** 呼び出し元で DOMParser の有無を確かめてから使う */
@@ -317,12 +256,13 @@ function parseUdonariumChatXml(raw: string): ParsedLog | null {
       const sp = chat.name || "不明な発言者";
       const tab = chat.tab || "メイン";
       const ts = parseTimestampAttr(chat.time);
-      const kind = mapKind(sp, chat.type);
+      const kind = mapKind(sp, chat.type, true);
       entries.push({
         sp,
         text: chat.text,
         ts,
         kind,
+        kindExplicit: isExplicitKind(chat.type),
         type: chat.text.startsWith("◆") ? "note" : "text",
         channel: tab,
       });
@@ -348,12 +288,13 @@ function parseUdonariumChatXml(raw: string): ParsedLog | null {
     const tab = (el.getAttribute("tab") ?? "").trim() || "メイン";
     const ts = parseTimestampAttr(el.getAttribute("time") ?? el.getAttribute("timestamp"));
     const typeAttr = (el.getAttribute("type") ?? "").trim().toLowerCase();
-    const kind = mapKind(sp, typeAttr);
+    const kind = mapKind(sp, typeAttr, true);
     entries.push({
       sp,
       text,
       ts,
       kind,
+      kindExplicit: isExplicitKind(typeAttr),
       type: text.startsWith("◆") ? "note" : "text",
       channel: tab,
     });

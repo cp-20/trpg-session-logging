@@ -235,7 +235,7 @@ export function parseCcfoliaHtmlEntriesFallback(html: string): FallbackHtmlEntry
       .map((s) => nodeText(s))
       .join("\n")
       .trim();
-    if (!sp || !text) continue;
+    if (!text) continue;
     entries.push({ tab: tab || `ch${chIndex}`, sp, text });
   }
   if (entries.length > 0) return entries;
@@ -286,7 +286,7 @@ export interface FallbackUdonariumChat {
 
 /** Udonarium chat.xml を DOMParser なしで解析する */
 export function parseUdonariumChatsFallback(xml: string): FallbackUdonariumChat[] {
-  const root = parseLightTree(xml, true);
+  const root = parseLightTree(xml.replace(/\r\n?/g, "\n"), true);
   return findAll(root, (el) => el.tag === "chat").map((el) => ({
     name: (el.attrs.name ?? el.attrs.from ?? "").trim(),
     tab: (el.attrs.tab ?? "").trim(),

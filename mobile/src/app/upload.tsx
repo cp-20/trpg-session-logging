@@ -79,6 +79,7 @@ const ROLE_OPTIONS: readonly SelectOption<MsgKind>[] = [
   { value: "PC", label: "PC" },
   { value: "PL", label: "PL" },
   { value: "NPC", label: "NPC" },
+  { value: "NARRATION", label: "描写" },
   { value: "SYSTEM", label: "システム" },
 ];
 

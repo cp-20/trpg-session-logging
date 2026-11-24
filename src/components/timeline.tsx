@@ -2,6 +2,7 @@ import { createContext, memo, useContext, useDeferredValue, useEffect, useMemo }
 import type { ReactNode } from "react";
 import { identiconDataUri } from "../lib/identicon";
 import { roleLabel } from "../lib/roles";
+import { rollTone } from "../lib/roll-tone";
 import { fmtDate, fmtDateShort, jstTime, sessionDay } from "../lib/time";
 import type { Character, Log, Msg, State, User } from "../types";
 import { IconCalendarTime, IconDice, IconFileText, IconLock, IconSearch } from "./icons";
@@ -146,10 +147,11 @@ export function makeColorOf(state: State) {
 
 /** 判定結果: 例外的な結果（クリティカル・ファンブル）だけを目立たせる */
 function RollResult({ result }: { result: string }) {
-  if (/クリティカル|スペシャル/.test(result)) return <Tag v="ok">{result}</Tag>;
-  if (/ファンブル/.test(result)) return <Tag v="danger">{result}</Tag>;
+  const tone = rollTone(result);
+  if (tone === "crit" || tone === "special") return <Tag v="ok">{result}</Tag>;
+  if (tone === "fumble") return <Tag v="danger">{result}</Tag>;
   return (
-    <span className={cx("text-sm font-semibold", /失敗/.test(result) ? "text-ink2" : "text-base-content")}>
+    <span className={cx("text-sm font-semibold", tone === "fail" ? "text-ink2" : "text-base-content")}>
       {result}
     </span>
   );
@@ -270,8 +272,51 @@ function MsgTime({ ts, className }: { ts: number; className: string }) {
   );
 }
 
+/** 繰り返しロールの 1 回分。出目だけを並べ、段階は色で見せる（判定の文はまとめの行と読み上げに） */
+function RepeatOutcome({ n, dice, result }: { n: number; dice: string; result: string }) {
+  const tone = rollTone(result);
+  const judged = tone !== undefined;
+  return (
+    <li
+      className={cx(
+        "min-w-7 rounded border px-1 text-center font-mono text-xs leading-5",
+        tone === "crit" || tone === "special"
+          ? "border-success text-success font-bold"
+          : tone === "fumble"
+            ? "border-error text-error font-bold"
+            : tone === "fail"
+              ? "border-transparent text-ink3"
+              : "border-base-300 text-base-content",
+      )}
+    >
+      <span className="sr-only">{`#${n} `}</span>
+      {judged ? dice : result}
+      {judged && <span className="sr-only">{` ${result}`}</span>}
+    </li>
+  );
+}
+
 function RollBody({ m }: { m: Msg }) {
   const r = m.roll!;
+  if (r.repeats?.length) {
+    return (
+      <span className="inline-flex max-w-full flex-col gap-1.5 rounded-lg bg-base-200/75 px-2.5 py-1.5 tabular-nums">
+        <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+          <IconDice width={15} height={15} className="opacity-65" aria-hidden />
+          <span className="font-semibold">{r.cmd}</span>
+          <span className="text-ink3" aria-hidden>
+            →
+          </span>
+          <span className="text-sm font-semibold">{r.result}</span>
+        </span>
+        <ol className="flex flex-wrap gap-1" aria-label={`${r.repeats.length} 回の結果`}>
+          {r.repeats.map((o, i) => (
+            <RepeatOutcome key={i} n={i + 1} dice={o.dice} result={o.result} />
+          ))}
+        </ol>
+      </span>
+    );
+  }
   return (
     <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-base-200/75 px-2.5 py-1 tabular-nums">
       <IconDice width={15} height={15} className="opacity-65" aria-hidden />
@@ -304,6 +349,42 @@ const NoteLine = memo(function NoteLine({ row }: { row: Row }) {
       </span>
       <span className="h-px min-w-4 flex-1 bg-base-300" aria-hidden />
     </div>
+  );
+});
+
+/**
+ * 描写（場面・場所の見出しやあらすじの名前で流す地の文）。登場人物の発言ではないので顔と役割を出さず、
+ * 見出しと本文にして発言の列に揃える
+ */
+const NarrationBlock = memo(function NarrationBlock({ row }: { row: Row }) {
+  const { m, chName, secret } = row;
+  return (
+    <section
+      aria-label={m.sp}
+      className={cx("my-4 rounded-lg px-2 py-2 sm:px-3", secret && "bg-warning/[0.06]")}
+    >
+      <div className="flex gap-3">
+        <div className="flex w-9 shrink-0 justify-center pt-0.5 text-ink3">
+          <IconFileText width={18} height={18} aria-hidden />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span data-user-content className="text-sm font-bold text-ink2">
+              {m.sp}
+            </span>
+            {secret && chName && <SecretMark name={chName} />}
+            {!secret && chName && <span className="text-xs text-ink3">#{chName}</span>}
+            <MsgTime ts={m.ts} className="ml-auto text-xs tabular-nums text-ink3" />
+          </div>
+          <p
+            data-user-content
+            className="max-w-[46em] whitespace-pre-wrap break-words text-[0.9375rem] leading-[1.8] text-base-content/85"
+          >
+            {m.text}
+          </p>
+        </div>
+      </div>
+    </section>
   );
 });
 
@@ -598,6 +679,11 @@ export function SessionTimeline({
     }
     if (m.type === "note") {
       out.push(<NoteLine key={m.id} row={row} />);
+      prev = null;
+      return;
+    }
+    if (m.kind === "NARRATION" && m.type === "text") {
+      out.push(<NarrationBlock key={m.id} row={row} />);
       prev = null;
       return;
     }

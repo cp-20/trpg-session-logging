@@ -78,7 +78,8 @@ const buildDraft = (opts: Omit<Parameters<typeof buildDraftWith>[0], "avatars">)
   buildDraftWith({ ...opts, avatars: { character: characterAvatarSrc, user: userAvatarSrc } });
 
 /** 読み込んだログ 1 ファイル分。複数あれば 1 つのセッションにまとめる */
-type LogFilePart = { fileName: string; channels: Channel[] };
+/** source: 書き出し元（CCFOLIA・Udonarium）。時刻の無いログに書き出し直しを勧めるのに使う */
+type LogFilePart = { fileName: string; channels: Channel[]; source?: string };
 
 type FlowError = { field: "scenario" | "sittings" | "general"; text: string; index?: number } | null;
 
@@ -141,7 +142,8 @@ export default function Upload() {
     for (const f of list) {
       try {
         const res = await importLogFromFile(f);
-        if (res && res.log.messageCount > 0) read.push({ fileName: f.name, channels: res.log.channels });
+        if (res && res.log.messageCount > 0)
+          read.push({ fileName: f.name, channels: res.log.channels, source: res.sourceLabel });
         else failed.push(f.name);
       } catch {
         failed.push(f.name);
@@ -489,7 +491,11 @@ function Review({
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{p.fileName}</span>
                   <span className="block text-xs tabular-nums text-ink2">
-                    {when.length > 0 ? fmtSessionWhen({ sittings: when }) : "発言の時刻なし"}
+                    {when.length > 0
+                      ? fmtSessionWhen({ sittings: when })
+                      : p.source === "CCFOLIA"
+                        ? "発言の時刻なし。CCFOLIA で書き出し直すと時刻も入ります"
+                        : "発言の時刻なし"}
                   </span>
                 </span>
                 {parts.length > 1 && (

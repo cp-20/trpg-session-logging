@@ -332,7 +332,11 @@ describe("parseCcfoliaLogHtml (DOMParser)", () => {
       <p><span>[main]</span><span>D</span></p>
     </body>`;
     const parsed = parseCcfoliaLogHtml(html)!;
-    expect(parsed.messageCount).toBe(2);
+    expect(parsed.messageCount).toBe(3);
+    expect(parsed.channels.find((c) => c.id === "main")!.msgs[1]).toMatchObject({
+      sp: "不明な発言者",
+      text: "発言者なし",
+    });
     const tab = parsed.channels.find((c) => c.id === "a[b]c")!;
     expect(tab.msgs[0]).toMatchObject({ sp: "太郎", text: "一行目 \n 二行目", kind: "PC", type: "text" });
     expect(parsed.channels.find((c) => c.id === "main")!.msgs[0]).toMatchObject({

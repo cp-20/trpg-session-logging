@@ -1772,13 +1772,6 @@ export function SectionTitle({
   );
 }
 
-export function rollCls(result: string): "crit" | "fumble" | "san" | "" {
-  if (/クリティカル/.test(result)) return "crit";
-  if (/ファンブル/.test(result)) return "fumble";
-  if (/SAN/.test(result)) return "san";
-  return "";
-}
-
 /** 空・絞り込み結果なし・権限なし・読み込み失敗などの状態。面の中に置くか、単独で置く */
 export function EmptyState({
   kind = "first",

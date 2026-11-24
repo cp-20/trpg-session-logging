@@ -79,6 +79,7 @@ const ROLE_LABEL: Record<Msg["kind"], string> = {
   KP: "GM",
   GM: "GM",
   PL: "PL",
+  NARRATION: "描写",
   SYSTEM: "システム",
 };
 

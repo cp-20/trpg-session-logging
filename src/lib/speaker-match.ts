@@ -210,6 +210,8 @@ export function buildDraft(opts: {
     });
     if (matched.character) {
       const ch = matched.character;
+      // 登録済みのキャラクターに結び付いたなら、ログからの推定（NPC）より確か
+      if (kinds[sp] === "NPC") kinds[sp] = "PC";
       speakerLinks[sp] = { userId: ch.ownerId, characterId: ch.id };
       if (!speakerIcons[sp]) speakerIcons[sp] = avatars.character(ch);
       if (ch.ownerId !== state.me) {

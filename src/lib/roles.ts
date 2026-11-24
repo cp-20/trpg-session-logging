@@ -16,10 +16,10 @@ const GENERIC_LABEL: Record<RoleKey, string> = {
   ENEMY: "エネミー",
 };
 
-/** 発言の種類（MsgKind）を役割に直す。取り込みで KP と読んだものも GM として扱う。SYSTEM は役割ではない */
+/** 発言の種類（MsgKind）を役割に直す。取り込みで KP と読んだものも GM として扱う。描写・システムは役割ではない */
 export function roleOfKind(kind: MsgKind): RoleKey | null {
   if (kind === "KP" || kind === "GM") return "GM";
-  if (kind === "SYSTEM") return null;
+  if (kind === "SYSTEM" || kind === "NARRATION") return null;
   return kind;
 }
 
@@ -35,6 +35,7 @@ export function roleLabel(
   context: RoleContext = "system",
 ): string {
   if (role === "SYSTEM") return "システム";
+  if (role === "NARRATION") return "描写";
   const key: RoleKey = role === "KP" ? "GM" : role;
   if (context === "system" && systemId) {
     const own = SYSTEMS[systemId]?.roles?.[key];
@@ -58,7 +59,7 @@ export function speakerRoleOptions(
 ): { value: MsgKind; label: string }[] {
   const kinds: MsgKind[] = ["GM", "PC", "PL", "NPC"];
   if (systemHasEnemies(systemId) || current === "ENEMY") kinds.push("ENEMY");
-  kinds.push("SYSTEM");
+  kinds.push("NARRATION", "SYSTEM");
   return kinds.map((k) => ({
     // 取り込みで KP と読んだ発言者は、値を KP のまま保つ（選び直すまで書き換えない）
     value: k === "GM" && current === "KP" ? "KP" : k,

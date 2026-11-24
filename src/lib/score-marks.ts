@@ -3,6 +3,7 @@
  * 卓譜の名のとおり、遊んだ回が 1 枚の譜になるところを見せる（記録の完了の演出。src/components/ui.tsx の ScoreInscription）
  */
 import type { Channel } from "../types";
+import { strongestTone } from "./roll-tone";
 
 export interface ScoreMark {
   /** 時間の位置（0〜1） */
@@ -16,13 +17,15 @@ const LANES = 3;
 
 /**
  * ダイスの振られた所を点にする（記録した本人にだけ出す演出で、中身は出さない点だけなので、どのタブも含める）。
- * ダイスが少なければ発言で代える。多すぎるときは時間の順に間引き、クリティカル・ファンブルは残す
+ * ダイスが少なければ発言で代える。多すぎるときは時間の順に間引き、クリティカル・ファンブルは残す。
+ * 時刻の無いログ（CCFOLIA の生ログ）は発言の順を時間の代わりにする
  */
 export function scoreMarks(channels: readonly Channel[], max = 16): ScoreMark[] {
-  const msgs = channels
-    .flatMap((c) => c.msgs)
-    .filter((m) => m.ts > 0)
-    .sort((a, b) => a.ts - b.ts);
+  const flat = channels.flatMap((c) => c.msgs);
+  const timed = flat.some((m) => m.ts > 0);
+  const msgs = timed
+    ? flat.filter((m) => m.ts > 0).sort((a, b) => a.ts - b.ts)
+    : flat.map((m, i) => ({ ...m, ts: i + 1 }));
   const rolls = msgs.filter((m) => m.type === "roll" && m.roll);
   const source = rolls.length >= 3 ? rolls : msgs;
   if (source.length === 0) return [];
@@ -30,11 +33,11 @@ export function scoreMarks(channels: readonly Channel[], max = 16): ScoreMark[] 
   const span = Math.max(1, source.at(-1)!.ts - t0);
   const speakers = [...new Set(source.map((m) => m.sp))];
   const all: ScoreMark[] = source.map((m) => {
-    const result = m.roll?.result ?? "";
+    const tone = m.roll ? strongestTone(m.roll) : undefined;
     return {
       x: source.length === 1 ? 0.5 : (m.ts - t0) / span,
       lane: (speakers.indexOf(m.sp) % LANES) as ScoreMark["lane"],
-      tone: /クリティカル|スペシャル/.test(result) ? "crit" : /ファンブル/.test(result) ? "fumble" : "plain",
+      tone: tone === "crit" || tone === "special" ? "crit" : tone === "fumble" ? "fumble" : "plain",
     };
   });
   if (all.length <= max) return all;
