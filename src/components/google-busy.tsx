@@ -189,7 +189,7 @@ export function GoogleBusySettings({ frame = "surface" }: { frame?: "surface" | 
           title="Google カレンダーの空き時間を使う"
           desc={
             g || available
-              ? "日程調整の候補と時間が重なると「自分の予定あり」と出します。"
+              ? "カレンダーと日程調整の自分の列に、予定のある時間を出します。"
               : "ログインすると使えます。"
           }
         >

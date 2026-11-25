@@ -2,6 +2,7 @@ import { uid } from "../lib/time";
 import { deriveSittings, normalizeSittings, type Sitting } from "../lib/sittings";
 import { userScenario } from "../lib/session-scenario";
 import type { Channel, Log, MsgKind, Scope, SelfRole, State } from "../types";
+import type { NewScenarioInput } from "../lib/new-scenario";
 
 /** Upload フローの確定入力(Step3 を終えた時点の内容) */
 export interface CommitLogInput {
@@ -16,7 +17,7 @@ export interface CommitLogInput {
   /** 遊んだシナリオ。共有シナリオ一覧から選ぶか、newScenario で足す（どちらかは必ず要る） */
   scenarioId: string;
   /** private なら共有シナリオ一覧に出さない（自作・事前相談など） */
-  newScenario: { title: string; author: string; private?: boolean } | null;
+  newScenario: NewScenarioInput | null;
   players: { userId: string; characterIds: string[]; role?: SelfRole }[];
   /**
    * 遊んだ時間帯。ログの発言時刻から導いたもの、または手で入れ直したもの。

@@ -884,8 +884,8 @@ function Step2Review({
                 }
               />
             </Field>
-            {/* 自作のシナリオや事前相談のように、ほかの人が遊ばないものは自分だけにする（P14: 安全側を既定に） */}
-            <Field label="このシナリオを選べる人">
+            {/* 自作のシナリオや事前相談のように、ほかの人が遊ばないものは検索に出さない（P14: 安全側を既定に） */}
+            <Field label="共有範囲">
               <Seg<"private" | "public">
                 size="sm"
                 value={draft.newScenario?.private === false ? "public" : "private"}
@@ -901,8 +901,8 @@ function Step2Review({
                   })
                 }
                 options={[
-                  { v: "private", label: "自分だけ" },
-                  { v: "public", label: "ほかの人も選べる" },
+                  { v: "private", label: "セッションと同じ" },
+                  { v: "public", label: "全員" },
                 ]}
               />
             </Field>

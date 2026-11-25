@@ -1,6 +1,7 @@
 import type { Channel, Msg, MsgKind } from "../types";
 import { parseCcfoliaHtmlEntriesFallback } from "./html-xml-fallback";
 import { rollTone } from "./roll-tone";
+import { sceneHeadingIndexes } from "./scene-headings";
 import { inferSpeakerKinds } from "./speaker-kinds";
 import { sessionDay } from "./time";
 
@@ -115,7 +116,7 @@ export function parseCcfoliaLog(raw: string): ParsedLog | null {
     const sp = str(c.name) ?? str(c.speakerId) ?? str(c.cn) ?? "不明な発言者";
     const text = str(c.text) ?? str(c.message) ?? str(c.body) ?? "";
     const explicitType = str(c.type)?.toLowerCase();
-    const isNote = explicitType === "note" || text.startsWith("◆");
+    const isNote = explicitType === "note";
     const ts = toSeconds(c.createdAt) ?? toSeconds(c.t) ?? toSeconds(c.time) ?? 0;
     const roll = buildRoll(c);
     return {
@@ -180,6 +181,9 @@ export function assembleLogEntries(entries: LogEntry[]): ParsedLog | null {
   const explicit = new Set(entries.filter((e) => e.kindExplicit).map((e) => e.sp));
   const inferred = inferSpeakerKinds(msgs.filter((m) => !explicit.has(m.sp)));
   for (const m of msgs) m.kind = inferred.get(m.sp) ?? m.kind;
+
+  /* 場面の見出し。記号を決め打ちせず、形と中身から見分ける */
+  for (const i of sceneHeadingIndexes(msgs)) msgs[i]!.type = "note";
 
   /* チャンネルごとに集めた上で、チャンネル内だけ時系列ソートする(混線防止)。ts が同じなら文書順 */
   const groups = new Map<string, { id: string; name?: string; msgs: Msg[] }>();
@@ -375,7 +379,7 @@ export function parseCcfoliaLogHtml(html: string): ParsedLog | null {
         text: e.text,
         ts: epochOfDatetime(e.datetime),
         kind: e.system ? "SYSTEM" : mapKind(e.sp),
-        type: e.text.startsWith("◆") ? "note" : "text",
+        type: "text",
         channel: e.dataChannel !== undefined ? labels[i]! : e.tab,
         ...(roll ? { roll } : {}),
       };
@@ -404,7 +408,7 @@ export function parseCcfoliaLogHtml(html: string): ParsedLog | null {
       text,
       ts: epochOfDatetime(art.querySelector("time.timestamp")?.getAttribute("datetime")),
       kind: system ? "SYSTEM" : mapKind(sp),
-      type: text.startsWith("◆") ? "note" : "text",
+      type: "text",
       channel: "",
       ...(roll ? { roll } : {}),
     });
@@ -432,7 +436,7 @@ export function parseCcfoliaLogHtml(html: string): ParsedLog | null {
       text,
       ts: 0,
       kind: mapKind(sp),
-      type: text.startsWith("◆") ? "note" : "text",
+      type: "text",
       channel: tab || `ch${chIndex}`,
     });
   }
@@ -452,7 +456,7 @@ export function parseCcfoliaLogHtml(html: string): ParsedLog | null {
           text,
           ts: 0,
           kind: mapKind(sp),
-          type: text.startsWith("◆") ? "note" : "text",
+          type: "text",
           channel: title || `ch${chIndex}`,
         });
       }
@@ -473,7 +477,7 @@ export function parseCcfoliaLogHtml(html: string): ParsedLog | null {
           text,
           ts: 0,
           kind: mapKind(sp),
-          type: text.startsWith("◆") ? "note" : "text",
+          type: "text",
           channel: title || `ch${chIndex}`,
         });
       }

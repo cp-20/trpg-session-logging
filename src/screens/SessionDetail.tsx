@@ -12,7 +12,7 @@ import {
   Modal,
   NotFound,
   PageHead,
-  SCOPE_META,
+  ScopeLabel,
   ScopePicker,
   StatChange,
   SectionTitle,
@@ -151,7 +151,7 @@ export default function SessionDetail() {
     const rolls = log.hasLog && log.channels.some((c) => c.msgs.some((m) => m.type === "roll"));
     return { previewLog: nextPreviewLog, hasRolls: rolls };
   }, [log]);
-  // 共有の状態と操作は見出しの「共有」ボタン（範囲つき）と共有モーダルにまとめる。横の欄に共有だけの区画を作らない
+  // 共有範囲は見出しのメタ情報、操作は「共有」ボタンと共有モーダルにまとめる。横の欄に共有だけの区画を作らない
   const showOverviewAside = hasRolls;
 
   const openTimeline = () => {
@@ -193,6 +193,7 @@ export default function SessionDetail() {
                   {tb.name}
                 </Link>
               )}
+              <ScopeLabel scope={log.scope} />
             </div>
           </div>
         }
@@ -204,7 +205,6 @@ export default function SessionDetail() {
               </button>
               <button className="btn btn-primary" onClick={() => setShareOpen(true)}>
                 <IconShare width={16} height={16} /> 共有
-                <span className="font-medium opacity-80">· {SCOPE_META[log.scope].label}</span>
               </button>
               <Menu
                 label="その他の操作"
@@ -1110,13 +1110,13 @@ function RollSummarySection({ log }: { log: Log }) {
       <div className="surface">
         <div className="px-4 py-4 sm:px-5">
           <h3 className="eyebrow mb-3">結果</h3>
-          <ul className="space-y-2">
+          <ul className="grid grid-cols-[fit-content(10rem)_minmax(3rem,1fr)_auto] items-center gap-x-3 gap-y-2 text-sm">
             {Object.entries(dist)
               .sort((x, y) => y[1] - x[1])
               .map(([k, n]) => (
-                <li key={k} className="flex items-center gap-3 text-sm">
-                  <span className="w-24 shrink-0 truncate">{k}</span>
-                  <span className="h-2 flex-1 overflow-hidden rounded-full bg-base-200">
+                <li key={k} className="contents">
+                  <span className="break-words">{k}</span>
+                  <span className="h-2 overflow-hidden rounded-full bg-base-200">
                     <span
                       className={cx(
                         "block h-full rounded-full",
@@ -1129,45 +1129,44 @@ function RollSummarySection({ log }: { log: Log }) {
                       style={{ width: `${(n / maxDist) * 100}%` }}
                     />
                   </span>
-                  <span className="w-6 text-right tabular-nums text-ink2">{n}</span>
+                  <span className="text-right tabular-nums text-ink2">{n}</span>
                 </li>
               ))}
           </ul>
         </div>
-        <div className="overflow-x-auto border-t border-base-300 px-4 py-4 sm:px-5">
+        {/* 名前が長くても横にあふれないよう、列は成功・失敗だけにし、まれなクリティカル・ファンブルは名前の下に出す */}
+        <div className="border-t border-base-300 px-4 py-4 sm:px-5">
           <h3 className="eyebrow mb-2">発言者ごと</h3>
-          <table className="w-full text-sm tabular-nums">
+          <table className="w-full table-fixed text-sm tabular-nums">
             <thead>
               <tr className="whitespace-nowrap text-xs text-ink2">
-                <th className="py-1 pr-2 text-left font-medium">発言者</th>
-                <th className="px-1.5 py-1 text-right font-medium">成功</th>
-                <th className="px-1.5 py-1 text-right font-medium">失敗</th>
-                <th className="px-1.5 py-1 text-right font-medium">クリティカル</th>
-                <th className="py-1 pl-1.5 text-right font-medium">ファンブル</th>
+                <th scope="col" className="py-1 text-left font-medium">
+                  発言者
+                </th>
+                <th scope="col" className="w-9 py-1 text-right font-medium">
+                  成功
+                </th>
+                <th scope="col" className="w-9 py-1 text-right font-medium">
+                  失敗
+                </th>
               </tr>
             </thead>
             <tbody>
               {Object.entries(bySp).map(([sp, v]) => (
-                <tr key={sp} className="border-t border-base-200">
-                  <td className="max-w-24 truncate py-1.5 pr-2 font-semibold">{sp}</td>
-                  <td className="px-1.5 py-1.5 text-right">{v.ok + v.spec}</td>
-                  <td className="px-1.5 py-1.5 text-right text-ink2">{v.fail}</td>
-                  <td
-                    className={cx(
-                      "px-1.5 py-1.5 text-right",
-                      v.crit > 0 ? "font-bold text-success" : "text-ink3",
+                <tr key={sp} className="border-t border-base-200 align-baseline">
+                  <th scope="row" className="py-1.5 text-left font-normal">
+                    <span className="block font-semibold [overflow-wrap:anywhere]" data-user-content>
+                      {sp}
+                    </span>
+                    {(v.crit > 0 || v.fumble > 0) && (
+                      <span className="meta text-xs">
+                        {v.crit > 0 && <span className="font-bold text-success">クリティカル {v.crit}</span>}
+                        {v.fumble > 0 && <span className="font-bold text-error">ファンブル {v.fumble}</span>}
+                      </span>
                     )}
-                  >
-                    {v.crit}
-                  </td>
-                  <td
-                    className={cx(
-                      "py-1.5 pl-1.5 text-right",
-                      v.fumble > 0 ? "font-bold text-error" : "text-ink3",
-                    )}
-                  >
-                    {v.fumble}
-                  </td>
+                  </th>
+                  <td className="py-1.5 text-right">{v.ok + v.spec}</td>
+                  <td className="py-1.5 text-right text-ink2">{v.fail}</td>
                 </tr>
               ))}
             </tbody>
@@ -1258,7 +1257,6 @@ export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => voi
   const { state } = useStore();
   const [savingImage, setSavingImage] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
-  const [copiedLink, setCopiedLink] = useState(false);
   const sc = log.scenarioId ? state.scenarios[log.scenarioId] : null;
   const shareUrl = `${location.origin}/share/l/${log.slug}`;
   const cardData = useMemo(
@@ -1297,17 +1295,6 @@ export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => voi
           >
             {savingImage ? "画像を作成中…" : "画像を保存"}
           </button>
-          <button
-            className={cx("btn w-40", copiedLink && "text-success")}
-            onClick={() => {
-              navigator.clipboard?.writeText(`${location.origin}/share/l/${log.slug}`).catch(() => {});
-              setCopiedLink(true);
-              window.setTimeout(() => setCopiedLink(false), 2000);
-            }}
-          >
-            {copiedLink ? <IconCheck width={16} height={16} /> : <IconLink width={16} height={16} />}
-            {copiedLink ? "コピーしました" : "リンクをコピー"}
-          </button>
           <a className="btn btn-primary" href={xIntentUrl(cardData)} target="_blank" rel="noreferrer">
             <IconExternal width={14} height={14} /> Xで投稿
           </a>
@@ -1319,6 +1306,9 @@ export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => voi
         alt="卓報告カード"
         className="w-full rounded-xl border border-base-300"
       />
+      <div className="mt-3">
+        <CopyBox text={shareUrl} />
+      </div>
       {imageError && (
         <div className="mt-3">
           <InlineNotice text={imageError} tone="error" />

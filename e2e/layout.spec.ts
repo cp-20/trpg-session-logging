@@ -41,7 +41,7 @@ test("モバイルでは下部タブ、デスクトップではサイドバー�
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/sessions");
   const side = page.getByRole("navigation", { name: "メイン" });
-  await expect(side.getByRole("link")).toHaveText([
+  await expect(side.locator(":scope > div > a")).toHaveText([
     "ホーム",
     "セッション",
     "カレンダー",

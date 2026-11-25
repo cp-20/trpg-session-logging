@@ -175,6 +175,54 @@ export function IconUpload(props: IconProps) {
   );
 }
 
+export function IconCopy(props: IconProps) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="1.2em"
+      height="1.2em"
+      viewBox="0 0 24 24"
+      aria-hidden
+      strokeWidth={iconStroke(props.width)}
+      {...props}
+    >
+      <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+        <path
+          vectorEffect="non-scaling-stroke"
+          d="M7 9.667A2.667 2.667 0 0 1 9.667 7h8.666A2.667 2.667 0 0 1 21 9.667v8.666A2.667 2.667 0 0 1 18.333 21H9.667A2.667 2.667 0 0 1 7 18.333z"
+        />
+        <path
+          vectorEffect="non-scaling-stroke"
+          d="M4.012 16.737A2 2 0 0 1 3 15V5c0-1.1.9-2 2-2h10c.75 0 1.158.385 1.5 1"
+        />
+      </g>
+    </svg>
+  );
+}
+
+export function IconMaximize(props: IconProps) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="1.2em"
+      height="1.2em"
+      viewBox="0 0 24 24"
+      aria-hidden
+      strokeWidth={iconStroke(props.width)}
+      {...props}
+    >
+      <path
+        vectorEffect="non-scaling-stroke"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M16 4h4v4m-6 2l6-6M8 20H4v-4m0 4l6-6m6 6h4v-4m-6-2l6 6M8 4H4v4m0-4l6 6"
+      />
+    </svg>
+  );
+}
+
 export function IconFileText(props: IconProps) {
   return (
     <svg

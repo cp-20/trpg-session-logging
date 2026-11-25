@@ -8,6 +8,10 @@ import {
   applyPollAnswers,
   applyPollEdit,
   busyChecker,
+  confirmedOwnPlans,
+  planFinder,
+  planTimeText,
+  plansByDate,
   calendarSubscribeLinks,
   compactBusyRanges,
   hasBusySource,
@@ -489,5 +493,53 @@ describe("日程調整の編集と回答", () => {
     applyPollAnswers(s, "ev1", { c1: "maybe", c2: "ok" });
     expect(s.events.ev1!.candidates!.map((c) => c.responses.u1)).toEqual(["maybe", "ok"]);
     expect(s.events.ev1!.candidates![0]!.responses.u2).toBe("ng");
+  });
+});
+
+describe("自分の予定", () => {
+  const at = (iso: string) => Date.parse(`${iso}+09:00`);
+  const plan = (a: string, b: string, label?: string) => ({
+    start: at(a),
+    end: at(b),
+    ...(label ? { label } : {}),
+  });
+
+  it("卓譜で確定した自分の予定だけを数え、日程調整中・不可と返事したもの・ほかの人の予定は数えない", () => {
+    const base = { date: "2026-12-04", startTime: "21:00", endTime: "24:00", responses: {}, createdBy: "a" };
+    const plans = confirmedOwnPlans({
+      me: "a",
+      tables: {
+        t1: { id: "t1", name: "", ownerId: "b", memberIds: ["a", "b"], createdAt: "" },
+        t2: { id: "t2", name: "", ownerId: "b", memberIds: ["b"], createdAt: "" },
+      },
+      events: {
+        mine: { ...base, id: "mine", title: "卓", tableId: "t1" },
+        solo: { ...base, id: "solo", title: "個人", date: "2026-12-05" },
+        poll: { ...base, id: "poll", title: "調整中", tableId: "t1", status: "poll" },
+        ng: { ...base, id: "ng", title: "不可", tableId: "t1", responses: { a: "ng" } },
+        other: { ...base, id: "other", title: "他人", tableId: "t2", createdBy: "b" },
+      },
+    });
+    expect(plans.map((p) => p.label)).toEqual(["卓", "個人"]);
+    const find = planFinder(plans);
+    expect(find("2026-12-04", "23:00", 120).map((p) => p.label)).toEqual(["卓"]);
+    expect(find("2026-12-04", "18:00", 180)).toEqual([]);
+  });
+
+  it("時間帯は見る日を基準に書く", () => {
+    expect(planTimeText(plan("2026-12-04T20:00", "2026-12-04T22:00"), "2026-12-04")).toBe("20:00〜22:00");
+    expect(planTimeText(plan("2026-12-04T22:00", "2026-12-05T01:30"), "2026-12-04")).toBe("22:00〜25:30");
+    expect(planTimeText(plan("2026-12-04T22:00", "2026-12-05T00:00"), "2026-12-04")).toBe("22:00〜24:00");
+    expect(planTimeText(plan("2026-12-04T22:00", "2026-12-05T10:00"), "2026-12-05")).toBe("0:00〜10:00");
+    expect(planTimeText(plan("2026-12-04T00:00", "2026-12-05T00:00"), "2026-12-04")).toBe("終日");
+  });
+
+  it("日ごとに分ける。深夜までの続きは前日だけ、朝を越えるものは両方の日に", () => {
+    const days = plansByDate([
+      plan("2026-12-04T22:00", "2026-12-05T01:30"),
+      plan("2026-12-06T22:00", "2026-12-07T10:00"),
+      plan("2026-12-08T00:00", "2026-12-09T00:00"),
+    ]);
+    expect([...days.keys()]).toEqual(["2026-12-04", "2026-12-06", "2026-12-07", "2026-12-08"]);
   });
 });

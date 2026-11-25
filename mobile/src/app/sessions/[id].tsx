@@ -375,7 +375,7 @@ export default function SessionDetailScreen() {
                       <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
                         <Text style={{ fontSize: 13, fontWeight: "700", color: tokens.ink }}>{m.sp}</Text>
                         <Text style={{ fontSize: 11, color: tokens.ink3, fontVariant: ["tabular-nums"] }}>
-                          {jstTime(m.ts)}
+                          {m.ts > 0 ? jstTime(m.ts) : ""}
                         </Text>
                       </View>
                       <Text style={{ fontSize: 14, lineHeight: 20, color: tokens.ink2 }} numberOfLines={3}>

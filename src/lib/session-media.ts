@@ -463,6 +463,133 @@ export function normalizeMediaUrl(raw: string): string | null {
   return detectMediaLink(withScheme) ? withScheme : null;
 }
 
+/** 追加で最初に選ぶ「どこにあるもの」か。none は URL のないもの（手元の録画など） */
+export type MediaSourceId =
+  | "youtube"
+  | "streaming"
+  | "storage"
+  | "secret"
+  | "x"
+  | "gallery"
+  | "other"
+  | "none";
+
+export interface MediaSource {
+  id: MediaSourceId;
+  /** 選ぶときの名前（置き場所のサービス名） */
+  label: string;
+  /** そこに置かれるもの */
+  about: string;
+  /** この置き場所に当たるサービス */
+  services: readonly MediaService[];
+  /** URL を貼る前の種類の見当 */
+  kind: MediaKind;
+  urlLabel: string;
+  urlExample: string;
+}
+
+export const MEDIA_SOURCES: readonly MediaSource[] = [
+  {
+    id: "youtube",
+    label: "YouTube",
+    about: "録画・配信・リプレイ動画",
+    services: ["youtube"],
+    kind: "recording",
+    urlLabel: "動画の URL",
+    urlExample: "https://youtu.be/…",
+  },
+  {
+    id: "streaming",
+    label: "ニコニコ・Twitch・ツイキャス",
+    about: "配信・リプレイ動画",
+    services: ["niconico", "twitch", "twitcasting"],
+    kind: "stream",
+    urlLabel: "動画の URL",
+    urlExample: "https://www.twitch.tv/videos/…",
+  },
+  {
+    id: "storage",
+    label: "Google ドライブ・ギガファイル便",
+    about: "録画・録音などのファイル",
+    services: ["gdrive", "dropbox", "gigafile"],
+    kind: "recording",
+    urlLabel: "共有リンク",
+    urlExample: "https://drive.google.com/…",
+  },
+  {
+    id: "secret",
+    label: "ふせったー・Privatter",
+    about: "感想",
+    services: ["fusetter", "privatter"],
+    kind: "impression",
+    urlLabel: "感想の URL",
+    urlExample: "https://fusetter.com/tw/…",
+  },
+  {
+    id: "x",
+    label: "X",
+    about: "卓報告・感想",
+    services: ["x"],
+    kind: "report",
+    urlLabel: "ポストの URL",
+    urlExample: "https://x.com/…/status/…",
+  },
+  {
+    id: "gallery",
+    label: "pixiv・ポイピク・Skeb",
+    about: "イラスト・漫画・小説",
+    services: ["pixiv", "poipiku", "fanbox", "skeb"],
+    kind: "art",
+    urlLabel: "作品の URL",
+    urlExample: "https://www.pixiv.net/artworks/…",
+  },
+  {
+    id: "other",
+    label: "その他のリンク",
+    about: "CCFOLIA・Notion など",
+    services: ["ccfolia", "notion", "discord", "web"],
+    kind: "other",
+    urlLabel: "URL",
+    urlExample: "https://…",
+  },
+  {
+    id: "none",
+    label: "URL のないもの",
+    about: "手元にある録画など",
+    services: [],
+    kind: "recording",
+    urlLabel: "URL",
+    urlExample: "https://…",
+  },
+];
+
+export const MEDIA_SOURCE_MAP = Object.fromEntries(MEDIA_SOURCES.map((s) => [s.id, s])) as Record<
+  MediaSourceId,
+  MediaSource
+>;
+
+/** サービスの置き場所 */
+export function mediaSourceOf(service: MediaService): MediaSourceId {
+  return MEDIA_SOURCES.find((s) => s.services.includes(service))!.id;
+}
+
+/**
+ * 選んだ置き場所と貼られた URL から、合う置き場所と種類を決める（P2）。
+ * - 別のサービスの URL なら、そのサービスの置き場所と種類に寄せる
+ * - 知らないサイトなら「その他のリンク」に寄せ、種類は選んだものを残す（動画・感想などのつもりは変わらない）
+ * - URL がまだ読めなければ選んだまま
+ */
+export function resolveMediaSource(
+  picked: MediaSourceId,
+  link: DetectedLink | null,
+): { source: MediaSourceId; kind: MediaKind } {
+  if (!link) return { source: picked, kind: MEDIA_SOURCE_MAP[picked].kind };
+  return {
+    source: mediaSourceOf(link.service),
+    kind: link.service === "web" ? MEDIA_SOURCE_MAP[picked].kind : link.kindHint,
+  };
+}
+
 /** URL から題名を引ける問い合わせ先（oEmbed）。ブラウザから直接引けるのは YouTube だけ */
 export function mediaTitleLookupUrl(rawUrl: string): string | undefined {
   const d = detectMediaLink(rawUrl);

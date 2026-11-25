@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MEDIA_KINDS,
+  MEDIA_SOURCES,
   canViewMedia,
   detectMediaLink,
   expiryState,
@@ -8,6 +9,7 @@ import {
   mediaForSharedPage,
   mediaThumbnail,
   mediaEditorFields,
+  mediaSourceOf,
   mediaTitleLookupUrl,
   needsConsentCheck,
   normalizeMediaUrl,
@@ -18,6 +20,7 @@ import {
   parseChapters,
   parseClock,
   parseTimeParam,
+  resolveMediaSource,
   shouldHideSpoiler,
   urlAt,
   visibleMedia,
@@ -191,6 +194,42 @@ describe("追加の流れ", () => {
     expect(normalizeMediaUrl("")).toBeNull();
     expect(normalizeMediaUrl("録画は HDD にあります")).toBeNull();
     expect(normalizeMediaUrl("ftp://example.com/a")).toBeNull();
+  });
+
+  it("置き場所の例の URL は、その置き場所の URL と読める", () => {
+    for (const s of MEDIA_SOURCES) {
+      if (s.id === "other" || s.id === "none") continue;
+      const link = detectMediaLink(s.urlExample.replaceAll("…", "abcdefghijk"));
+      expect(link && mediaSourceOf(link.service), s.urlExample).toBe(s.id);
+    }
+    expect(MEDIA_SOURCES.flatMap((s) => s.services).length).toBe(
+      new Set(MEDIA_SOURCES.flatMap((s) => s.services)).size,
+    );
+  });
+
+  it("選んだ置き場所と違う URL を貼ったら、合う置き場所と種類に寄せる", () => {
+    const at = (raw: string) => detectMediaLink(raw);
+    expect(resolveMediaSource("youtube", null)).toEqual({ source: "youtube", kind: "recording" });
+    expect(resolveMediaSource("secret", null)).toEqual({ source: "secret", kind: "impression" });
+    expect(resolveMediaSource("youtube", at("https://youtu.be/abcdefghijk"))).toEqual({
+      source: "youtube",
+      kind: "recording",
+    });
+    expect(resolveMediaSource("youtube", at("https://www.youtube.com/live/abcdefghijk")).kind).toBe("stream");
+    expect(resolveMediaSource("youtube", at("https://fusetter.com/tw/abc"))).toEqual({
+      source: "secret",
+      kind: "impression",
+    });
+    expect(resolveMediaSource("other", at("https://www.pixiv.net/novel/show.php?id=1"))).toEqual({
+      source: "gallery",
+      kind: "story",
+    });
+    // 知らないサイトでも、選んだときのつもり（感想）は残す
+    expect(resolveMediaSource("secret", at("https://example.com/a"))).toEqual({
+      source: "other",
+      kind: "impression",
+    });
+    expect(resolveMediaSource("other", at("https://example.com/a")).kind).toBe("other");
   });
 
   it("題名は YouTube の動画だけ oEmbed で引く", () => {

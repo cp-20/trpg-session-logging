@@ -109,13 +109,15 @@ test("日程調整は閲覧が既定で、回答と編集は別の画面。自�
   await page.getByRole("button", { name: /継続探索者の間 定例卓/ }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("radiogroup")).toHaveCount(0);
-  await expect(dialog).toContainText("所要時間3時間");
+  await expect(dialog).toContainText("開始から3時間");
   await expect(dialog.getByText("21:30–24:30")).toHaveCount(0);
   // 重なるのは 11/29 21:30 開始の候補だけ（昼の予定・終日の予定では出さない）
   await expect(dialog.getByText("自分の予定あり")).toHaveCount(1);
 
   await dialog.getByRole("button", { name: /回答/ }).click();
   await expect(dialog.getByRole("radiogroup")).toHaveCount(3);
+  // 返事を決めるところでは、重なる予定の時間まで見せる
+  await expect(dialog.getByRole("list", { name: "自分の予定", exact: true })).toHaveCount(1);
   await dialog.getByRole("radiogroup").first().getByRole("radio", { name: "× 不可" }).click();
   await dialog.getByRole("button", { name: "回答を保存" }).click();
   await expect(dialog.getByRole("radiogroup")).toHaveCount(0);

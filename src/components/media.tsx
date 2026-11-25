@@ -13,6 +13,7 @@ import {
   IconBook,
   IconBooks,
   IconBroadcast,
+  IconDownload,
   IconEye,
   IconFileText,
   IconLayoutList,
@@ -29,6 +30,7 @@ import {
   IconPlus,
   IconTrash,
   IconTrophy,
+  IconUnlink,
   IconUsers,
   IconVideo,
   IconWorld,
@@ -39,6 +41,8 @@ import {
   MEDIA_KINDS,
   MEDIA_KIND_MAP,
   MEDIA_SCOPE_LABEL,
+  MEDIA_SOURCES,
+  MEDIA_SOURCE_MAP,
   detectMediaLink,
   embedAt,
   expiryState,
@@ -50,6 +54,7 @@ import {
   needsConsentCheck,
   normalizeMediaUrl,
   parseChapters,
+  resolveMediaSource,
   shouldHideSpoiler,
   titleFromOembed,
   urlAt,
@@ -57,6 +62,7 @@ import {
   type MediaField,
   type MediaKind,
   type MediaScope,
+  type MediaSourceId,
   type MediaViewer,
   type SessionMedia,
 } from "../lib/session-media";
@@ -80,6 +86,18 @@ const KIND_ICON: Record<MediaKind, Icon> = {
   comic: IconBooks,
   story: IconBook,
   other: IconLink,
+};
+
+/** 置き場所の印。サービスのロゴは使わず、そこに置かれるものの絵で示す（P17） */
+const SOURCE_ICON: Record<MediaSourceId, Icon> = {
+  youtube: IconVideo,
+  streaming: IconBroadcast,
+  storage: IconDownload,
+  secret: IconMessageCircle,
+  x: IconNotes,
+  gallery: IconPalette,
+  other: IconLink,
+  none: IconUnlink,
 };
 
 const SCOPE_ICON: Record<MediaScope, Icon> = {
@@ -380,7 +398,8 @@ function LinkRow({ m, state, viewer, canEdit, onEdit, onDelete }: ItemProps) {
 }
 
 /* ---------- 追加・編集 ----------
- * 流れ: URL を貼る → 置き場所と種類を URL から決め、題名も引ける所からは引く → 見られる人・ネタバレ（録画などは了承）を決めて追加。
+ * 流れ: どこにあるものかを選ぶ → その置き場所の URL を貼る → 種類を URL から決め、題名も引ける所からは引く
+ * → 見られる人・ネタバレ（録画などは了承）を決めて追加。選んだ置き場所と違う URL なら、合う置き場所に寄せる。
  * パート・目次・開始時刻・視点・メモなど、使う人の少ない欄は「詳しく」に畳む（値が入っていれば開いておく）。
  */
 interface Draft {
@@ -464,6 +483,43 @@ function parseParts(text: string): { url: string; label?: string }[] {
     .filter((p): p is { url: string; label?: string } => p !== null);
 }
 
+/** 追加の最初の段。どこにあるものかを選ぶ */
+function SourcePicker({
+  last,
+  onPick,
+}: {
+  /** 選び直しに戻ったとき、前に選んだもの（そこにフォーカスを戻す） */
+  last: MediaSourceId | null;
+  onPick: (id: MediaSourceId) => void;
+}) {
+  return (
+    <ul className="grid gap-2 sm:grid-cols-2" aria-label="どこにあるもの">
+      {MEDIA_SOURCES.map((s) => {
+        const SourceIcon = SOURCE_ICON[s.id];
+        return (
+          <li key={s.id} className="flex">
+            <button
+              type="button"
+              // oxlint-disable-next-line jsx-a11y/no-autofocus -- 選び直しに戻ったとき、選んでいた所から続けられるように
+              autoFocus={s.id === last}
+              onClick={() => onPick(s.id)}
+              className="flex w-full items-center gap-3 rounded-lg border border-base-300 px-3 py-2.5 text-left transition-colors hover:bg-base-200/60"
+            >
+              <span className="media-kind-mark" aria-hidden>
+                <SourceIcon width={18} height={18} />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-bold">{s.label}</span>
+                <span className="block text-xs text-ink2">{s.about}</span>
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function MediaEditor({
   log,
   state,
@@ -478,7 +534,8 @@ function MediaEditor({
   onClose: () => void;
 }) {
   const [d, setD] = useState<Draft>(() => toDraft(initial, log));
-  const [withoutUrl, setWithoutUrl] = useState(Boolean(initial && !initial.url));
+  const [picked, setPicked] = useState<MediaSourceId | null>(null);
+  const [lastPicked, setLastPicked] = useState<MediaSourceId | null>(null);
   const [urlBlurred, setUrlBlurred] = useState(Boolean(initial));
   const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((cur) => ({ ...cur, [k]: v }));
@@ -486,7 +543,13 @@ function MediaEditor({
   const detected = url ? detectMediaLink(url) : null;
   const def = MEDIA_KIND_MAP[d.kind];
   const people = participantIds(log).filter((id) => state.users[id]);
-  // URL が読めたら（または URL なしと決めたら）残りを出す。編集は最初から全部
+  // 置き場所は、選んだものを貼られた URL で正したもの。編集では選ばせず URL から決める
+  const choosing = !initial && !picked;
+  const sourceId = resolveMediaSource(picked ?? "other", detected).source;
+  const source = MEDIA_SOURCE_MAP[sourceId];
+  const SourceIcon = SOURCE_ICON[sourceId];
+  const withoutUrl = picked === "none";
+  // URL が読めたら（または URL のないものと決めたら）残りを出す。編集は最初から全部
   const ready = Boolean(initial) || Boolean(url) || withoutUrl;
   const filled = filledFields(d);
   const fields = mediaEditorFields(d.kind, detected?.service ?? null, filled);
@@ -508,13 +571,33 @@ function MediaEditor({
     return () => ac.abort();
   }, [lookup]);
 
+  function pick(id: MediaSourceId) {
+    setPicked(id);
+    setLastPicked(id);
+    setD((cur) => ({ ...cur, kind: MEDIA_SOURCE_MAP[id].kind, kindTouched: false }));
+  }
+
+  /** 選び直すときは、前の置き場所の URL とそこから引いた題名を持ち越さない */
+  function repick() {
+    setPicked(null);
+    setError(null);
+    setUrlBlurred(false);
+    setD((cur) => ({ ...cur, url: "", ...(cur.titleTouched ? {} : { title: "" }) }));
+  }
+
   function save() {
     if (d.url.trim() && !url) {
       setUrlBlurred(true);
       return setError(null);
     }
     if (!url && !d.title.trim())
-      return setError(ready ? "URL かタイトルを入れてください。" : "URL を入れてください。");
+      return setError(
+        withoutUrl
+          ? "タイトルを入れてください。"
+          : ready
+            ? "URL かタイトルを入れてください。"
+            : "URL を入れてください。",
+      );
     if (d.scope === "people" && d.audience.length === 0) return setError("共有する人を選んでください。");
     if (consentNeeded && !d.consent) return setError("共有するには同卓者全員の了承が要ります。");
     const startedAt = def.timed ? jstEpoch(d.startDate, d.startTime) : undefined;
@@ -649,43 +732,54 @@ function MediaEditor({
           <button type="button" className="btn btn-quiet" onClick={onClose}>
             キャンセル
           </button>
-          <button type="button" className="btn btn-primary" onClick={save}>
-            {initial ? "保存" : "追加"}
-          </button>
+          {!choosing && (
+            <button type="button" className="btn btn-primary" onClick={save}>
+              {initial ? "保存" : "追加"}
+            </button>
+          )}
         </>
       }
     >
-      <Field
-        label="URL"
-        noMargin
-        hint={detected && detected.service !== "web" ? `${detected.label} のリンク` : undefined}
-      >
-        <input
-          className="input input-bordered w-full"
-          inputMode="url"
-          placeholder="https://"
-          // oxlint-disable-next-line jsx-a11y/no-autofocus -- 追加を押した直後に貼れるように
-          autoFocus={!initial}
-          value={d.url}
-          onBlur={() => setUrlBlurred(true)}
-          onChange={(e) => {
-            const raw = e.target.value;
-            const hit = normalizeMediaUrl(raw);
-            const link = hit ? detectMediaLink(hit) : null;
-            setError(null);
-            setD((cur) => ({
-              ...cur,
-              url: raw,
-              ...(link && !cur.kindTouched ? { kind: link.kindHint } : {}),
-            }));
-          }}
-        />
-      </Field>
-      <FieldError text={urlBlurred && d.url.trim() && !url ? "URL として読めません。" : null} />
-      {!ready && (
-        <button type="button" className="btn btn-sm btn-quiet mt-3" onClick={() => setWithoutUrl(true)}>
-          URL なしで追加
-        </button>
+      {choosing && <SourcePicker last={lastPicked} onPick={pick} />}
+      {!initial && picked && (
+        <div className="mb-4 flex items-center gap-3">
+          <span className="media-kind-mark" aria-hidden>
+            <SourceIcon width={18} height={18} />
+          </span>
+          <p className="min-w-0 flex-1 text-sm font-bold" aria-live="polite">
+            {detected && detected.service !== "web" ? detected.label : source.label}
+          </p>
+          <button type="button" className="btn btn-sm btn-quiet" onClick={repick}>
+            選び直す
+          </button>
+        </div>
+      )}
+      {!choosing && !withoutUrl && (
+        <>
+          <Field label={source.urlLabel} noMargin>
+            <input
+              className="input input-bordered w-full"
+              inputMode="url"
+              placeholder={source.urlExample}
+              // oxlint-disable-next-line jsx-a11y/no-autofocus -- 置き場所を選んだ直後に貼れるように
+              autoFocus={!initial}
+              value={d.url}
+              onBlur={() => setUrlBlurred(true)}
+              onChange={(e) => {
+                const raw = e.target.value;
+                const hit = normalizeMediaUrl(raw);
+                const link = hit ? detectMediaLink(hit) : null;
+                setError(null);
+                setD((cur) => ({
+                  ...cur,
+                  url: raw,
+                  ...(cur.kindTouched ? {} : { kind: resolveMediaSource(picked ?? "other", link).kind }),
+                }));
+              }}
+            />
+          </Field>
+          <FieldError text={urlBlurred && d.url.trim() && !url ? "URL として読めません。" : null} />
+        </>
       )}
 
       {ready && (

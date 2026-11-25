@@ -1,50 +1,139 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { cx } from "./ui";
 import {
   groupSkills,
   isGrownSkill,
+  splitSkills,
   type CharacterSheet,
   type SheetEntry,
   type SheetSection,
 } from "../lib/sheet";
+import { INSANE_SKILLS, SHINOBIGAMI_SKILLS, type SkillTable } from "../lib/skill-tables";
+import {
+  coc6AbilityRoll,
+  coc7Levels,
+  cthulhuMythos,
+  isCoc,
+  isMythosSkill,
+  swBonusText,
+  withSanMax,
+} from "../lib/system-rules";
 
 /**
  * キャラシ（汎用形式）の見せ方。データはシステムに依存しない区分の並びで、
- * ここでシステムごとの並べ方（列数・技能の見せ方・最初に見せる範囲）だけを決める。
+ * ここでシステムごとの並べ方（主な値・能力値から決まる値・技能の形・最初に見せる範囲）だけを決める。
  */
 interface SheetLayout {
-  /** 能力値の列数（モバイル / sm 以上） */
+  /** 卓の最中に何度も見る値（HP・SAN など）。大きく先頭に出す */
+  vitals: string[];
+  /** 能力値の列数 */
   abilityCols: string;
+  /** 能力値から決まる、判定で使う値（キャラシに書かれていればそれ） */
+  abilityNote?: (e: SheetEntry, sheet: CharacterSheet) => string | undefined;
+  /** 能力値より判定で使う値（ボーナス）を先に読むシステム */
+  noteFirst?: boolean;
   /** 技能の見せ方: 百分率（バー付き）・段階（●●○）・素の値 */
   skillMode: "percent" | "rank" | "plain";
+  /** 能力値・技能の値に添える、成功の段階ごとの値 */
+  levels?: (value: number) => { label: string; value: number }[];
+  /** 技能を能力値の下に並べる（技能の分類 = 能力値の名前） */
+  skillsByAbility?: boolean;
+  /** 決まった特技表の上に、習得した特技を示す */
+  skillTable?: SkillTable;
   /** 区分の並び順（ここに無い区分は後ろに元の順で並ぶ） */
   order: string[];
+  /** 一覧・本文のうち、最初から見せる区分（ほかは開閉） */
+  open?: string[];
 }
 
 const COC: SheetLayout = {
-  abilityCols: "grid-cols-4",
+  vitals: ["HP", "MP", "SAN", "幸運"],
+  abilityCols: "grid-cols-4 [@container_(min-width:48rem)]:grid-cols-8",
   skillMode: "percent",
-  order: ["abilities", "resources", "skills"],
+  order: ["resources", "abilities", "skills"],
+};
+
+const SW: SheetLayout = {
+  vitals: ["HP", "MP"],
+  abilityCols: "grid-cols-3 [@container_(min-width:30rem)]:grid-cols-6",
+  abilityNote: (e) => (typeof e.value === "number" ? swBonusText(e.value) : undefined),
+  noteFirst: true,
+  skillMode: "plain",
+  order: ["resources", "levels", "abilities", "skills", "feats"],
+  open: ["feats"],
 };
 
 const SHEET_LAYOUTS: Record<string, SheetLayout> = {
-  coc6: COC,
-  coc7: COC,
-  emoklore: { abilityCols: "grid-cols-4", skillMode: "rank", order: ["abilities", "resources", "skills"] },
-  sw25: {
-    abilityCols: "grid-cols-3 sm:grid-cols-6",
+  coc6: {
+    ...COC,
+    vitals: ["HP", "MP", "SAN"],
+    abilityNote: (e, sheet) => {
+      const roll = coc6AbilityRoll(e, sheet);
+      return roll === undefined ? undefined : `×5 ${roll}`;
+    },
+  },
+  coc7: {
+    ...COC,
+    levels: (value) => {
+      const { hard, extreme } = coc7Levels(value);
+      return [
+        { label: "ハード", value: hard },
+        { label: "イクストリーム", value: extreme },
+      ];
+    },
+  },
+  emoklore: {
+    vitals: ["HP", "MP", "共鳴"],
+    abilityCols: "grid-cols-4 [@container_(min-width:48rem)]:grid-cols-8",
+    skillMode: "rank",
+    order: ["resources", "abilities", "skills", "emotions"],
+    open: ["emotions"],
+  },
+  sw25: SW,
+  "SwordWorld2.0": SW,
+  DoubleCross: {
+    vitals: ["HP", "侵蝕率基本値", "行動値"],
+    abilityCols: "grid-cols-2 [@container_(min-width:30rem)]:grid-cols-4",
     skillMode: "plain",
-    order: ["levels", "abilities", "resources", "feats"],
+    skillsByAbility: true,
+    order: ["resources", "abilities", "skills", "arts", "lois"],
+    open: ["lois"],
+  },
+  ShinobiGami: {
+    vitals: [],
+    abilityCols: "grid-cols-3",
+    skillMode: "plain",
+    skillTable: SHINOBIGAMI_SKILLS,
+    order: ["skills", "abilities-list"],
+    open: ["abilities-list"],
+  },
+  Insane: {
+    vitals: ["生命力", "正気度"],
+    abilityCols: "grid-cols-3",
+    skillMode: "plain",
+    skillTable: INSANE_SKILLS,
+    order: ["resources", "skills", "abilities-list"],
+    open: ["abilities-list"],
+  },
+  LogHorizon: {
+    vitals: ["HP"],
+    abilityCols: "grid-cols-4",
+    skillMode: "plain",
+    order: ["resources", "abilities", "skills"],
   },
 };
 const GENERIC: SheetLayout = {
-  abilityCols: "grid-cols-3 sm:grid-cols-4",
+  vitals: [],
+  abilityCols: "grid-cols-3 [@container_(min-width:30rem)]:grid-cols-4",
   skillMode: "plain",
   order: ["levels", "abilities", "resources", "skills"],
 };
 
-export function sheetLayoutFor(systemId: string): SheetLayout {
-  return SHEET_LAYOUTS[systemId] ?? GENERIC;
+/* 卓譜のシステムと結び付かない取り込み（systemId が汎用）は、キャラシの書いたシステム名で見せ方を選ぶ */
+const LAYOUT_BY_LABEL: Record<string, SheetLayout> = { "ソード・ワールド2.0": SW };
+
+function sheetLayoutFor(systemId: string, sheet: CharacterSheet): SheetLayout {
+  return SHEET_LAYOUTS[systemId] ?? LAYOUT_BY_LABEL[sheet.systemLabel ?? ""] ?? GENERIC;
 }
 
 function orderedSections(sheet: CharacterSheet, layout: SheetLayout): SheetSection[] {
@@ -58,9 +147,19 @@ function orderedSections(sheet: CharacterSheet, layout: SheetLayout): SheetSecti
     .map((x) => x.s);
 }
 
-/** キャラシ全体。面（.surface）1 枚の中に区分を区切り線で並べる */
+/** 技能を能力値の下に置けるか（どの技能の分類も能力値の名前） */
+function canNestSkills(sheet: CharacterSheet, layout: SheetLayout): boolean {
+  if (!layout.skillsByAbility) return false;
+  const abilities = new Set(
+    sheet.sections.filter((s) => s.kind === "abilities").flatMap((s) => s.entries.map((e) => e.label)),
+  );
+  const skills = sheet.sections.filter((s) => s.kind === "skills").flatMap((s) => s.entries);
+  return abilities.size > 0 && skills.every((e) => e.group && abilities.has(e.group));
+}
+
+/** キャラシ全体（閲覧専用）。面（.surface）1 枚の中に区分を区切り線で並べる */
 export function SheetView({
-  sheet,
+  sheet: raw,
   systemId,
   busy = false,
   compact = false,
@@ -72,12 +171,18 @@ export function SheetView({
   /** 取り込み前の確認用。能力値と伸ばした技能だけを見せる */
   compact?: boolean;
 }) {
-  const layout = sheetLayoutFor(systemId);
+  const sheet = withSanMax(raw, systemId);
+  const layout = sheetLayoutFor(systemId, sheet);
   const [more, setMore] = useState(false);
   const isCore = (s: SheetSection) =>
-    s.kind === "abilities" || s.kind === "resources" || s.kind === "levels" || s.kind === "skills";
-  const ordered = orderedSections(sheet, layout);
-  /* 所持品・経歴などは長くなるので、最初は能力値と技能だけを見せる */
+    s.kind === "abilities" ||
+    s.kind === "resources" ||
+    s.kind === "levels" ||
+    s.kind === "skills" ||
+    (!compact && Boolean(layout.open?.includes(s.id)));
+  const nested = canNestSkills(sheet, layout);
+  const ordered = orderedSections(sheet, layout).filter((s) => !(nested && s.kind === "skills"));
+  /* 所持品・経歴などは長くなるので、最初は卓で見るものだけを見せる */
   const extra = compact ? [] : ordered.filter((s) => !isCore(s));
   const sections = [...ordered.filter(isCore), ...(more ? extra : [])];
   const profile = sheet.profile.filter((e) => e.label !== "職業");
@@ -96,12 +201,25 @@ export function SheetView({
           ))}
         </div>
       )}
-      {sections.map((s) => (
-        <div key={s.id} className="px-4 py-4 sm:px-5">
-          <h3 className="eyebrow mb-3">{s.title}</h3>
-          <SectionBody section={s} layout={layout} compact={compact} />
-        </div>
-      ))}
+      {sections.map((s) => {
+        /* HP・SAN のように名前で分かる値だけの区分に、見出しは付けない */
+        const selfLabelled = s.kind === "resources" && s.entries.some((e) => layout.vitals.includes(e.label));
+        return (
+          <div key={s.id} className="px-4 py-4 sm:px-5">
+            {!selfLabelled && <h3 className="eyebrow mb-3">{s.title}</h3>}
+            <div className="[container-type:inline-size]">
+              <SectionBody
+                section={s}
+                sheet={sheet}
+                systemId={systemId}
+                layout={layout}
+                nested={nested}
+                compact={compact}
+              />
+            </div>
+          </div>
+        );
+      })}
       {extra.length > 0 && (
         <div className="px-4 py-2.5 sm:px-5">
           <button
@@ -120,22 +238,45 @@ export function SheetView({
 
 function SectionBody({
   section,
+  sheet,
+  systemId,
   layout,
+  nested,
   compact,
 }: {
   section: SheetSection;
+  sheet: CharacterSheet;
+  systemId: string;
   layout: SheetLayout;
+  nested: boolean;
   compact: boolean;
 }) {
   switch (section.kind) {
     case "abilities":
-      return <AbilityGrid entries={section.entries} cols={layout.abilityCols} />;
+      return <AbilityGrid entries={section.entries} sheet={sheet} layout={layout} nested={nested} />;
     case "resources":
-      return <ResourceRow entries={section.entries} />;
+      return <Resources entries={section.entries} sheet={sheet} systemId={systemId} layout={layout} />;
     case "levels":
-      return <LevelList entries={section.entries} />;
+      /* エフェクト・特技のように補足を持つものは、名前つきの行で補足まで見せる */
+      return section.entries.some((e) => e.note) ? (
+        <NamedList entries={section.entries} />
+      ) : (
+        <LevelList entries={section.entries} />
+      );
     case "skills":
-      return <SkillList entries={section.entries} mode={layout.skillMode} compact={compact} />;
+      return layout.skillTable ? (
+        <SkillTableView entries={section.entries} table={layout.skillTable} />
+      ) : (
+        <SkillList
+          entries={
+            mythosBesideSan(sheet, systemId) === undefined
+              ? section.entries
+              : section.entries.filter((e) => !isMythosSkill(e.label))
+          }
+          layout={layout}
+          compact={compact}
+        />
+      );
     case "list":
       return <NamedList entries={section.entries} />;
     case "text":
@@ -143,41 +284,145 @@ function SectionBody({
   }
 }
 
-function AbilityGrid({ entries, cols }: { entries: SheetEntry[]; cols: string }) {
+function AbilityGrid({
+  entries,
+  sheet,
+  layout,
+  nested,
+}: {
+  entries: SheetEntry[];
+  sheet: CharacterSheet;
+  layout: SheetLayout;
+  nested: boolean;
+}) {
+  const skills = nested ? sheet.sections.filter((s) => s.kind === "skills").flatMap((s) => s.entries) : [];
   return (
-    <dl className={cx("grid gap-x-4 gap-y-3", cols)}>
-      {entries.map((e) => (
-        <div key={e.label} className="min-w-0">
-          <dt className="truncate text-xs font-medium text-ink2">{e.label}</dt>
-          <dd className="text-xl font-bold leading-tight tabular-nums">
-            {e.value}
-            {e.note && <span className="ml-1 text-xs font-medium text-ink2">{e.note}</span>}
-          </dd>
-        </div>
-      ))}
+    <dl className={cx("grid gap-y-3", nested ? "gap-x-8" : "gap-x-4", layout.abilityCols)}>
+      {entries.map((e) => {
+        const note = e.note ?? layout.abilityNote?.(e, sheet);
+        const levels = typeof e.value === "number" ? layout.levels?.(e.value) : undefined;
+        const own = skills.filter((x) => x.group === e.label);
+        return (
+          <div key={e.label} className="min-w-0">
+            <dt className="truncate text-xs font-medium text-ink2">{e.label}</dt>
+            <dd className="tabular-nums">
+              {layout.noteFirst && note ? (
+                <span className="flex items-baseline gap-1.5">
+                  <span className="text-xl font-bold leading-tight">{note}</span>
+                  <span className="text-sm text-ink2">{e.value}</span>
+                </span>
+              ) : (
+                <>
+                  <span className="block text-xl font-bold leading-tight">{e.value}</span>
+                  {levels && <Levels levels={levels} />}
+                  {note && <span className="block whitespace-nowrap text-xs text-ink2">{note}</span>}
+                </>
+              )}
+              {own.length > 0 && (
+                <ul className="mt-1.5 space-y-0.5 text-sm" data-user-content>
+                  {own.map((x) => (
+                    <li key={x.label} className="flex items-baseline justify-between gap-2">
+                      <span className={cx("min-w-0 break-words", x.value === 0 && "text-ink2")}>
+                        {x.label}
+                      </span>
+                      <span className={cx(x.value === 0 ? "text-ink2" : "font-bold")}>{x.value}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </dd>
+          </div>
+        );
+      })}
     </dl>
   );
 }
 
-function ResourceRow({ entries }: { entries: SheetEntry[] }) {
+/** SAN の横に添えるクトゥルフ神話。添えたときは技能の一覧に重ねて出さない（P3） */
+function mythosBesideSan(sheet: CharacterSheet, systemId: string): number | undefined {
+  if (!isCoc(systemId)) return undefined;
+  const hasSan = sheet.sections.some(
+    (s) => s.kind === "resources" && s.entries.some((e) => e.label === "SAN"),
+  );
+  return hasSan ? cthulhuMythos(sheet) || undefined : undefined;
+}
+
+/** 副能力値。何度も見る値（HP・SAN など）を大きく、ほかを小さく下に並べる */
+function Resources({
+  entries,
+  sheet,
+  systemId,
+  layout,
+}: {
+  entries: SheetEntry[];
+  sheet: CharacterSheet;
+  systemId: string;
+  layout: SheetLayout;
+}) {
+  const vitals = layout.vitals.flatMap((l) => entries.find((e) => e.label === l) ?? []);
+  const others = entries.filter((e) => !vitals.includes(e));
+  const mythos = mythosBesideSan(sheet, systemId);
   return (
-    <dl className="flex flex-wrap gap-x-6 gap-y-3">
-      {entries.map((e) => (
-        <div key={e.label} className="min-w-0">
-          <dt className="text-xs font-medium text-ink2">{e.label}</dt>
-          <dd className="text-lg font-bold leading-tight tabular-nums">
-            {e.value}
-            {e.max != null && <span className="ml-1 text-xs font-medium text-ink2">/ {e.max}</span>}
-          </dd>
-        </div>
-      ))}
-    </dl>
+    <div className="space-y-4">
+      {vitals.length > 0 && (
+        <dl className="flex flex-wrap gap-x-6 gap-y-3 [@container_(min-width:30rem)]:gap-x-10">
+          {vitals.map((e) => (
+            <Vital key={e.label} e={e}>
+              {e.label === "SAN" && mythos !== undefined ? (
+                <span className="whitespace-nowrap">
+                  クトゥルフ神話 <b className="text-base-content">{mythos}</b>
+                </span>
+              ) : undefined}
+            </Vital>
+          ))}
+        </dl>
+      )}
+      {others.length > 0 && (
+        <dl className="flex flex-wrap gap-x-5 gap-y-2">
+          {others.map((e) => (
+            <div key={e.label} className="flex min-w-0 items-baseline gap-1.5">
+              <dt className="text-xs font-medium text-ink2">{e.label}</dt>
+              <dd className="text-base font-bold tabular-nums">
+                {e.value}
+                {e.max != null && <span className="ml-1 text-xs font-medium text-ink2">/ {e.max}</span>}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
+/** 主な値 1 つ。上限のあるものは残りの割合をバーで見せる */
+function Vital({ e, children }: { e: SheetEntry; children?: ReactNode }) {
+  const pct =
+    e.max && typeof e.value === "number" ? Math.max(0, Math.min(100, (e.value / e.max) * 100)) : null;
+  return (
+    <div className={cx("min-w-0", pct !== null && "w-28")}>
+      <dt className="text-xs font-medium text-ink2">{e.label}</dt>
+      <dd>
+        <span className="text-2xl font-bold leading-tight tabular-nums">{e.value}</span>
+        {e.max != null && (
+          <span className="ml-1.5 text-xs font-medium text-ink2 tabular-nums">/ {e.max}</span>
+        )}
+        {pct !== null && (
+          <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full bg-base-200" aria-hidden>
+            <span
+              className={cx("block h-full rounded-full", pct < 30 ? "bg-error/80" : "bg-primary/75")}
+              style={{ width: `${pct}%` }}
+            />
+          </span>
+        )}
+        {children && <span className="mt-1 block text-xs text-ink2 tabular-nums">{children}</span>}
+      </dd>
+    </div>
   );
 }
 
 function LevelList({ entries }: { entries: SheetEntry[] }) {
   return (
-    <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-2 [@container_(min-width:30rem)]:grid-cols-3">
       {entries.map((e) => (
         <div
           key={e.label}
@@ -205,68 +450,177 @@ function RankDots({ value, max }: { value: number; max: number }) {
   );
 }
 
-function SkillRow({ e, mode }: { e: SheetEntry; mode: SheetLayout["skillMode"] }) {
+/** 成功の段階ごとの値（7 版のハード・イクストリーム） */
+function Levels({
+  levels,
+  column = false,
+}: {
+  levels: { label: string; value: number }[];
+  /** 行をまたいで桁をそろえる（技能の一覧） */
+  column?: boolean;
+}) {
+  return (
+    <span className="flex gap-2 text-xs text-ink2">
+      {levels.map((l) => (
+        <span key={l.label} className={cx(column && "min-w-4 text-right")}>
+          <span className="sr-only">{l.label} </span>
+          {l.value}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function SkillRow({ e, layout }: { e: SheetEntry; layout: SheetLayout }) {
   const grown = isGrownSkill(e);
-  const pct = mode === "percent" && typeof e.value === "number" ? Math.max(0, Math.min(100, e.value)) : null;
+  const num = typeof e.value === "number" ? e.value : null;
+  /* 高い順に並ぶ、伸ばした技能だけバーで比べられるようにする */
+  const pct =
+    layout.skillMode === "percent" && grown && num !== null ? Math.max(0, Math.min(100, num)) : null;
+  const levels = num !== null ? layout.levels?.(num) : undefined;
   return (
     <li className="min-w-0 py-1.5">
       <div className="flex items-baseline justify-between gap-3">
-        <span className={cx("min-w-0 truncate text-sm", grown ? "font-medium" : "text-ink2")}>
+        <span className={cx("min-w-0 break-words text-sm", grown ? "font-medium" : "text-ink2")}>
           {e.label}
-          {e.note && <span className="ml-1.5 text-xs text-ink2">{e.note}</span>}
+          {e.note && <span className="ml-1.5 text-xs font-normal text-ink2">{e.note}</span>}
         </span>
-        <span className="flex shrink-0 items-center gap-2 tabular-nums">
-          {mode === "rank" && e.rank && <RankDots value={e.rank.value} max={e.rank.max} />}
-          <span className={cx(grown ? "text-base font-bold" : "text-sm text-ink2")}>{e.value}</span>
+        <span className="flex shrink-0 items-baseline gap-2 tabular-nums">
+          {layout.skillMode === "rank" && e.rank && <RankDots value={e.rank.value} max={e.rank.max} />}
+          <span className={cx("min-w-6 text-right", grown ? "text-base font-bold" : "text-sm text-ink2")}>
+            {e.value}
+          </span>
+          {levels && <Levels levels={levels} column />}
         </span>
       </div>
       {pct !== null && (
         <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-base-200" aria-hidden>
-          <div
-            className={cx("h-full rounded-full", grown ? "bg-base-content/70" : "bg-base-300")}
-            style={{ width: `${pct}%` }}
-          />
+          <div className="h-full rounded-full bg-base-content/70" style={{ width: `${pct}%` }} />
         </div>
       )}
     </li>
   );
 }
 
-/** 技能。最初は伸ばした技能だけを見せ、残りは「すべての技能」で開く */
+function SkillRows({ entries, layout }: { entries: SheetEntry[]; layout: SheetLayout }) {
+  return (
+    <ul
+      className="grid gap-x-8 [@container_(min-width:30rem)]:grid-cols-2 [@container_(min-width:48rem)]:grid-cols-3"
+      data-user-content
+    >
+      {entries.map((e) => (
+        <SkillRow key={e.label} e={e} layout={layout} />
+      ))}
+    </ul>
+  );
+}
+
+/** 技能。伸ばした技能を高い順に見せ、残りは分類ごとに開閉にしまう */
 function SkillList({
   entries,
-  mode,
+  layout,
   compact,
 }: {
   entries: SheetEntry[];
-  mode: SheetLayout["skillMode"];
+  layout: SheetLayout;
   compact: boolean;
 }) {
   const [all, setAll] = useState(false);
-  const grownCount = entries.filter(isGrownSkill).length;
-  /* 伸ばした印が 1 つも無いサイトでは、全部を見せる */
-  const filterable = grownCount > 0 && grownCount < entries.length;
-  const shown = filterable && !all ? entries.filter(isGrownSkill) : entries;
-  const groups = groupSkills(compact ? shown.slice(0, 12) : shown);
+  const { main, rest } = splitSkills(entries);
+  const groups = groupSkills(rest);
   return (
     <>
-      <div className="space-y-4" data-user-content>
-        {groups.map((g) => (
-          <div key={g.group || "_"}>
-            {g.group && groups.length > 1 && <h4 className="mb-1 text-xs text-ink2">{g.group}</h4>}
-            <ul className="grid gap-x-6 sm:grid-cols-2">
-              {g.entries.map((e) => (
-                <SkillRow key={e.label} e={e} mode={mode} />
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
-      {filterable && !compact && (
-        <button type="button" className="btn btn-quiet btn-sm mt-3" onClick={() => setAll((v) => !v)}>
-          {all ? "伸ばした技能だけを見る" : `すべての技能を見る（${entries.length}）`}
+      <SkillRows entries={compact ? main.slice(0, 12) : main} layout={layout} />
+      {all && (
+        <div className="mt-4 space-y-4">
+          {groups.map((g) => (
+            <div key={g.group || "_"}>
+              {g.group && <h4 className="mb-1 text-xs font-medium text-ink2">{g.group}</h4>}
+              <SkillRows entries={g.entries} layout={layout} />
+            </div>
+          ))}
+        </div>
+      )}
+      {rest.length > 0 && !compact && (
+        <button
+          type="button"
+          className="btn btn-quiet btn-sm mt-3"
+          aria-expanded={all}
+          onClick={() => setAll((v) => !v)}
+        >
+          {all ? "たたむ" : "ほかの技能を見る"}
         </button>
       )}
+    </>
+  );
+}
+
+/** 特技表（列 = 分野、行 = 2〜12）。判定は表の上の距離で決まるので、習得した特技を表の中で示す */
+function SkillTableView({ entries, table }: { entries: SheetEntry[]; table: SkillTable }) {
+  const learned = new Set(entries.map((e) => e.label));
+  const rows = table[0]?.[1].length ?? 0;
+  /* 分野ごとの習得（表が入らない幅） */
+  const byField = table
+    .map(([field, names]) => ({ field, names: names.filter((n) => learned.has(n)) }))
+    .filter((f) => f.names.length > 0);
+  return (
+    <>
+      <dl className="space-y-1.5 text-sm [@container_(min-width:30rem)]:hidden">
+        {byField.map((f) => (
+          <div key={f.field} className="flex gap-3">
+            <dt className="w-12 shrink-0 text-ink2">{f.field}</dt>
+            <dd className="flex min-w-0 flex-wrap gap-x-4 font-medium">
+              {f.names.map((n) => (
+                <span key={n}>{n}</span>
+              ))}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <table className="hidden w-full table-fixed border-separate border-spacing-x-0.5 border-spacing-y-0 text-xs [@container_(min-width:30rem)]:table">
+        <thead>
+          <tr>
+            <td className="w-7 !border-0 !p-0" />
+            {table.map(([field]) => (
+              <th
+                key={field}
+                scope="col"
+                className="!border-0 !px-0.5 !pb-1 !pt-0 !text-center !text-xs font-bold"
+              >
+                {field}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: rows }, (_, i) => (
+            <tr key={i}>
+              <th
+                scope="row"
+                className="!border-0 !py-1 !pl-0 !pr-1 !text-right !text-xs font-normal tabular-nums text-ink2"
+              >
+                {i + 2}
+              </th>
+              {table.map(([field, names]) => {
+                const name = names[i] ?? "";
+                const has = learned.has(name);
+                return (
+                  <td
+                    key={field}
+                    className={cx(
+                      "rounded !border-0 !px-0.5 !py-1 !text-center !text-xs",
+                      has ? "bg-base-300 font-bold text-base-content" : "text-ink2",
+                    )}
+                  >
+                    {name}
+                    {has && <span className="sr-only">（習得）</span>}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </>
   );
 }

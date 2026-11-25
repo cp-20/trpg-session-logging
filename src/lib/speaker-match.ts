@@ -5,6 +5,7 @@
 import { inferSystem } from "../data/systems";
 import { deriveSittings, type Sitting } from "./sittings";
 import type { Channel, Character, Log, MsgKind, Scope, SelfRole, State, User } from "../types";
+import type { NewScenarioInput } from "./new-scenario";
 
 export interface SpeakerLink {
   userId?: string;
@@ -25,7 +26,7 @@ export interface Draft {
   tableId: string;
   scenarioId: string;
   /** 共有シナリオ一覧に無いシナリオを足すとき。private なら共有シナリオ一覧に載せない */
-  newScenario: { title: string; author: string; private?: boolean } | null;
+  newScenario: NewScenarioInput | null;
   /** 記録する本人以外の参加者 */
   players: { userId: string; characterIds: string[] }[];
   /**

@@ -3,11 +3,12 @@ import type { ReactNode } from "react";
 import { Link, useParams } from "../lib/router";
 import { IconBooks, IconExternal, IconLock, IconTrendingUp } from "../components/icons";
 import { LogReaderBar, RecordingLinkContext, SessionTimeline, TimelineFilter } from "../components/timeline";
-import { EmptyState, LegalLinks, LogoMark, StatBar, StatChange, SysBadge, cx } from "../components/ui";
+import { EmptyState, LegalLinks, LogoMark, StatChange, SysBadge, cx } from "../components/ui";
 import { Avatar, CharAvatar, GoogleSignInButton } from "../components/identity";
 import { SessionMediaSection, recordingLinksAt } from "../components/media";
 import { SYSTEMS } from "../data/systems";
-import { carriedDeltas, carriedValues } from "../lib/character-growth";
+import { carriedDeltas } from "../lib/character-growth";
+import { statusSheet } from "../lib/character-status";
 import { SheetView } from "../components/sheet";
 import { SYSTEM_RIGHTS } from "../lib/rights";
 import { roleLabel } from "../lib/roles";
@@ -544,7 +545,8 @@ function ShareCharView({
   const sessions = [...sessionsAsc].reverse();
   const growth = [...c.growth].sort((a, b) => b.date.localeCompare(a.date));
   /* 卓をまたいで続く値（SAN など）だけを出す（P3） */
-  const carried = carriedValues(c);
+  // キャラシの値に、記録から分かる今の値を重ねたもの（キャラクターの画面と同じ）
+  const status = share.includeStats ? statusSheet(c) : undefined;
 
   return (
     <ShareFrame narrow systemIds={[c.systemId]}>
@@ -586,16 +588,9 @@ function ShareCharView({
         </div>
       )}
 
-      {share.includeStats && carried.length > 0 && (
-        <dl className="surface mt-6 grid gap-4 p-4 sm:grid-cols-2 sm:p-5">
-          {carried.map((st) => (
-            <StatBar key={st.key} label={st.label} value={st.value} max={st.max} />
-          ))}
-        </dl>
-      )}
-      {share.includeStats && c.sheet && (
+      {status && (
         <div className="mt-6">
-          <SheetView sheet={c.sheet} systemId={c.systemId} />
+          <SheetView sheet={status} systemId={c.systemId} />
         </div>
       )}
 
@@ -611,7 +606,7 @@ function ShareCharView({
               return (
                 <li key={s.logId} className="tlitem">
                   <div className="tlrow">
-                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
                       <b data-user-content className="text-sm sm:text-base">
                         {s.title}
                       </b>

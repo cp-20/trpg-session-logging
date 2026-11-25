@@ -282,31 +282,96 @@ export function isAllDayRange(start: number, end: number): boolean {
 
 export type BusyCheck = (date: string, startTime: string, durationMin: number) => boolean;
 
+/** 自分の予定。label は卓譜の予定の題（Google の時間帯は題を読まないので、ない） */
+export interface OwnPlan {
+  start: number;
+  end: number;
+  label?: string;
+  eventId?: string;
+}
+
 /**
- * 設定から「この候補の時間帯に自分の予定があるか」を返す関数を作る。
- * - Google の時間帯は、許可しているときだけ・オンにしたカレンダーの分だけ使う
- * - 終日の時間帯は countAllDay のときだけ数える（祝日・誕生日などの取りこぼしを避ける）
+ * Google の時間帯。許可しているときだけ・オンにしたカレンダーの分だけ使う。
+ * 終日の時間帯は countAllDay のときだけ数える（祝日・誕生日などの取りこぼしを避ける）
  */
-export function busyChecker(prefs: Pick<Prefs, "googleBusy">): BusyCheck {
-  const ranges: { start: number; end: number }[] = [];
+export function googleBusyPlans(prefs: Pick<Prefs, "googleBusy">): OwnPlan[] {
   const g = prefs.googleBusy;
-  if (g) {
-    const on = new Set(g.calendars.filter((c) => c.on).map((c) => c.id));
-    for (const r of g.ranges) {
-      if (!on.has(r.calendarId)) continue;
-      const start = Date.parse(r.start);
-      const end = Date.parse(r.end);
-      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
-      if (!g.countAllDay && isAllDayRange(start, end)) continue;
-      ranges.push({ start, end });
-    }
+  if (!g) return [];
+  const on = new Set(g.calendars.filter((c) => c.on).map((c) => c.id));
+  const out: OwnPlan[] = [];
+  for (const r of g.ranges) {
+    if (!on.has(r.calendarId)) continue;
+    const start = Date.parse(r.start);
+    const end = Date.parse(r.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    if (!g.countAllDay && isAllDayRange(start, end)) continue;
+    out.push({ start, end });
   }
-  if (ranges.length === 0) return () => false;
+  return out.sort((a, b) => a.start - b.start);
+}
+
+/** 設定から「この候補の時間帯に自分の予定があるか」を返す関数を作る */
+export function busyChecker(prefs: Pick<Prefs, "googleBusy">): BusyCheck {
+  const find = planFinder(googleBusyPlans(prefs));
+  return (date, startTime, durationMin) => find(date, startTime, durationMin).length > 0;
+}
+
+/** 卓譜で確定した、自分が出る予定（自分の卓・自分だけの予定。不可と返事したものは除く） */
+export function confirmedOwnPlans(state: Pick<State, "events" | "tables" | "me">): OwnPlan[] {
+  const out: OwnPlan[] = [];
+  for (const ev of Object.values(state.events ?? {})) {
+    if (ev.status === "poll" || ev.responses[state.me] === "ng") continue;
+    const table = ev.tableId ? state.tables[ev.tableId] : undefined;
+    const mine = table
+      ? table.memberIds.includes(state.me) || table.ownerId === state.me
+      : ev.createdBy === state.me;
+    if (!mine) continue;
+    const slot = slotRange(
+      ev.date,
+      ev.startTime,
+      eventDurationMinutes(ev.startTime, ev.endTime, ev.durationMin),
+    );
+    if (slot) out.push({ ...slot, label: ev.title, eventId: ev.id });
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+/** 候補の時間帯と重なる自分の予定を返す関数を作る */
+export function planFinder(
+  plans: readonly OwnPlan[],
+): (date: string, startTime: string, durationMin: number) => OwnPlan[] {
   return (date, startTime, durationMin) => {
     const slot = slotRange(date, startTime, durationMin);
-    if (!slot) return false;
-    return ranges.some((r) => r.start < slot.end && r.end > slot.start);
+    return slot ? plans.filter((p) => p.start < slot.end && p.end > slot.start) : [];
   };
+}
+
+const clockOf = (ms: number) => new Date(ms + JST_MS).toISOString().slice(11, 16);
+
+/** 自分の予定の時間帯。date の日から見て書き、日をまたぐ終わりは 24 を足す（22:00〜25:00）。前日から続くものは 0:00 から */
+export function planTimeText(p: OwnPlan, date: string): string {
+  const day = jstMidnightMs(date);
+  if (p.start <= day && p.end >= day + DAY_MS) return "終日";
+  const start = p.start < day ? "0:00" : clockOf(p.start);
+  const over = p.end - day;
+  if (over < DAY_MS) return `${start}〜${clockOf(p.end)}`;
+  const h = Math.floor(over / 3600_000);
+  if (h >= 48) return `${start}〜`;
+  return `${start}〜${h}:${clockOf(p.end).slice(3)}`;
+}
+
+/** 自分の予定を日ごとに（日をまたぐものは両方の日に。深夜 6 時までの続きは前日の分とみなして重ねない） */
+export function plansByDate(plans: readonly OwnPlan[]): Map<string, OwnPlan[]> {
+  const out = new Map<string, OwnPlan[]>();
+  for (const p of plans) {
+    let day = Math.floor((p.start + JST_MS) / DAY_MS) * DAY_MS - JST_MS;
+    for (let n = 0; n < 60 && day < p.end; n++, day += DAY_MS) {
+      if (n > 0 && p.end - day <= 6 * 3600_000) break;
+      const date = new Date(day + JST_MS).toISOString().slice(0, 10);
+      out.set(date, [...(out.get(date) ?? []), p]);
+    }
+  }
+  return out;
 }
 
 /** 照らし合わせに使える予定が 1 件でもあるか（「予定のない日をまとめて◯」の出し分け） */

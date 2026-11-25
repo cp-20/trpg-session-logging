@@ -53,7 +53,7 @@ import {
   type MobileIconProps,
 } from "./icons";
 
-/** 卓譜のブランドマーク（形は @shared/components/brand。地を主色で塗り、盤と駒を面の色で抜く） */
+/** 卓譜のブランドマーク（形は @shared/components/brand。地を主色で塗り、吹き出しのダイスを面の色で抜く） */
 export function LogoMark({ size = 22, color }: { size?: number; color?: string }) {
   const { tokens } = useTheme();
   const xml = markSvg({ tile: color ?? tokens.primary, on: tokens.surface });
@@ -253,7 +253,7 @@ export const SCOPE_META: Record<
 > = {
   members: { label: "メンバー限定", hint: "参加者と卓のメンバーだけが読めます", Icon: IconLock },
   passed: { label: "通過した人", hint: "このシナリオを通過した人も読めます", Icon: IconUsers },
-  public: { label: "公開", hint: "リンクを知っている人なら誰でも読めます", Icon: IconWorld },
+  public: { label: "公開", hint: "リンクを知っている人全員が読めます", Icon: IconWorld },
 };
 
 /** 共有範囲を選ぶ。共有範囲の選択はこれだけを使う（Web の ScopePicker と同じ） */

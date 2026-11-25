@@ -1,7 +1,9 @@
-import { createContext, memo, useContext, useDeferredValue, useEffect, useMemo } from "react";
+import { createContext, memo, useContext, useDeferredValue, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { identiconDataUri } from "../lib/identicon";
+import { logSpeakers, splitSpeakers } from "../lib/log-speakers";
 import { roleLabel } from "../lib/roles";
+import { rollSpeech } from "../lib/roll-text";
 import { rollTone } from "../lib/roll-tone";
 import { fmtDate, fmtDateShort, jstTime, sessionDay } from "../lib/time";
 import type { Character, Log, Msg, State, User } from "../types";
@@ -151,7 +153,12 @@ function RollResult({ result }: { result: string }) {
   if (tone === "crit" || tone === "special") return <Tag v="ok">{result}</Tag>;
   if (tone === "fumble") return <Tag v="danger">{result}</Tag>;
   return (
-    <span className={cx("text-sm font-semibold", tone === "fail" ? "text-ink2" : "text-base-content")}>
+    <span
+      className={cx(
+        "min-w-0 text-sm font-semibold [overflow-wrap:anywhere]",
+        tone === "fail" ? "text-ink2" : "text-base-content",
+      )}
+    >
       {result}
     </span>
   );
@@ -257,6 +264,8 @@ export const RecordingLinkContext = createContext<((ts: number) => string | unde
 
 function MsgTime({ ts, className }: { ts: number; className: string }) {
   const linkAt = useContext(RecordingLinkContext);
+  // 時刻のないログ（ts = 0）では何も出さない
+  if (!(ts > 0)) return null;
   const href = linkAt?.(ts);
   if (!href) return <span className={className}>{jstTime(ts)}</span>;
   return (
@@ -279,7 +288,7 @@ function RepeatOutcome({ n, dice, result }: { n: number; dice: string; result: s
   return (
     <li
       className={cx(
-        "min-w-7 rounded border px-1 text-center font-mono text-xs leading-5",
+        "min-w-7 max-w-full rounded border px-1 text-center font-mono text-xs leading-5 [overflow-wrap:anywhere]",
         tone === "crit" || tone === "special"
           ? "border-success text-success font-bold"
           : tone === "fumble"
@@ -296,6 +305,30 @@ function RepeatOutcome({ n, dice, result }: { n: number; dice: string; result: s
   );
 }
 
+/** これより長い出目は畳む（100D6 のような大きなロールが画面を埋めないように） */
+const DICE_PREVIEW_CHARS = 60;
+
+/** 出目。長いものは先頭だけ出して、押すと全部見せる */
+function DiceText({ dice }: { dice: string }) {
+  const [open, setOpen] = useState(false);
+  const long = dice.length > DICE_PREVIEW_CHARS;
+  return (
+    <span className="min-w-0 max-w-full font-mono text-xs text-ink2 [overflow-wrap:anywhere]">
+      {long && !open ? `${dice.slice(0, DICE_PREVIEW_CHARS)}…` : dice}
+      {long && (
+        <button
+          type="button"
+          className="ml-1.5 font-sans font-medium underline decoration-dotted underline-offset-2 hover:text-base-content"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {open ? "畳む" : "すべての出目"}
+        </button>
+      )}
+    </span>
+  );
+}
+
 function RollBody({ m }: { m: Msg }) {
   const r = m.roll!;
   if (r.repeats?.length) {
@@ -303,7 +336,7 @@ function RollBody({ m }: { m: Msg }) {
       <span className="inline-flex max-w-full flex-col gap-1.5 rounded-lg bg-base-200/75 px-2.5 py-1.5 tabular-nums">
         <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
           <IconDice width={15} height={15} className="opacity-65" aria-hidden />
-          <span className="font-semibold">{r.cmd}</span>
+          <span className="min-w-0 font-semibold [overflow-wrap:anywhere]">{r.cmd}</span>
           <span className="text-ink3" aria-hidden>
             →
           </span>
@@ -318,10 +351,10 @@ function RollBody({ m }: { m: Msg }) {
     );
   }
   return (
-    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-base-200/75 px-2.5 py-1 tabular-nums">
-      <IconDice width={15} height={15} className="opacity-65" aria-hidden />
-      <span className="font-semibold">{r.cmd}</span>
-      <span className="font-mono text-xs text-ink2">{r.dice}</span>
+    <span className="inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-base-200/75 px-2.5 py-1 tabular-nums">
+      <IconDice width={15} height={15} className="shrink-0 opacity-65" aria-hidden />
+      <span className="min-w-0 font-semibold [overflow-wrap:anywhere]">{r.cmd}</span>
+      <DiceText dice={r.dice} />
       <span className="text-ink3" aria-hidden>
         →
       </span>
@@ -330,6 +363,18 @@ function RollBody({ m }: { m: Msg }) {
   );
 }
 
+/** ダイスの行。添えられた言葉があれば上に出す */
+function RollMessage({ m }: { m: Msg }) {
+  const speech = rollSpeech(m);
+  return (
+    <>
+      {speech && <span className="block">{speech}</span>}
+      <RollBody m={m} />
+    </>
+  );
+}
+
+/** 場面の見出し（src/lib/scene-headings.ts）。推定なので、だれの発言かは残す */
 const NoteLine = memo(function NoteLine({ row }: { row: Row }) {
   const { m, chName, secret } = row;
   return (
@@ -340,12 +385,17 @@ const NoteLine = memo(function NoteLine({ row }: { row: Row }) {
         <span data-user-content className="break-words">
           {m.text}
         </span>
+        {m.kind !== "SYSTEM" && (
+          <span data-user-content className="text-xs text-ink3">
+            {m.sp}
+          </span>
+        )}
         {secret && chName ? (
           <SecretMark name={chName} />
         ) : (
           chName && <span className="text-ink3">#{chName}</span>
         )}
-        <span className="tabular-nums text-xs text-ink3">{jstTime(m.ts)}</span>
+        <MsgTime ts={m.ts} className="tabular-nums text-xs text-ink3" />
       </span>
       <span className="h-px min-w-4 flex-1 bg-base-300" aria-hidden />
     </div>
@@ -415,28 +465,27 @@ export function LogReaderBar({
     [log.channels],
   );
   const speakerIdx = useMemo(() => buildSpeakerNameIndex(state), [state]);
-  const speakers = useMemo(() => {
-    const seen = new Map<string, SpeakerMeta>();
-    for (const c of log.channels) {
-      for (const m of c.msgs) {
-        if (m.type === "note") continue;
-        if (!seen.has(m.sp)) {
-          seen.set(m.sp, resolveSpeakerMetaWithIndex(m.sp, m.kind, log, state, speakerIdx));
-        }
-      }
-    }
-    return [...seen.entries()].map(([sp, meta]) => ({ sp, meta }));
+  const { main, rest } = useMemo(() => {
+    const split = splitSpeakers(logSpeakers(log.channels));
+    return {
+      main: split.main.map(({ sp, kind }) => ({
+        sp,
+        meta: resolveSpeakerMetaWithIndex(sp, kind, log, state, speakerIdx),
+      })),
+      rest: split.rest,
+    };
   }, [log, state, speakerIdx]);
+  const restActive = rest.some((r) => r.sp === filter.speaker);
 
   const days = useMemo(() => {
     const set = new Set<string>();
     for (const c of log.channels) {
-      for (const m of c.msgs) set.add(sessionDay(m.ts));
+      for (const m of c.msgs) if (m.ts > 0) set.add(sessionDay(m.ts));
     }
     return [...set].sort();
   }, [log.channels]);
 
-  const showSecondRow = speakers.length >= 2 || days.length >= 2;
+  const showSecondRow = main.length + rest.length >= 2 || days.length >= 2;
 
   return (
     <div
@@ -506,13 +555,13 @@ export function LogReaderBar({
 
       {showSecondRow && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-          {speakers.length >= 2 && (
+          {main.length + rest.length >= 2 && (
             <div
               className="flex min-w-0 flex-wrap items-center gap-1"
               role="group"
               aria-label="発言者で絞り込み"
             >
-              {speakers.map(({ sp, meta }) => {
+              {main.map(({ sp, meta }) => {
                 const active = filter.speaker === sp;
                 return (
                   <button
@@ -538,6 +587,19 @@ export function LogReaderBar({
                   </button>
                 );
               })}
+              {rest.length > 0 && (
+                <Select
+                  size="sm"
+                  className="max-w-44 [&>button]:h-7 [&>button]:min-h-7 [&>button]:px-2 [&>button]:text-xs [&>button]:font-medium"
+                  ariaLabel="ほかの発言者で絞り込み"
+                  value={restActive ? filter.speaker! : ""}
+                  onChange={(sp) => onChange({ ...filter, speaker: sp || undefined })}
+                  options={[
+                    { value: "", label: "ほかの発言者" },
+                    ...rest.map((r) => ({ value: r.sp, label: r.sp })),
+                  ]}
+                />
+              )}
               {filter.speaker && (
                 <button
                   type="button"
@@ -665,7 +727,7 @@ export function SessionTimeline({
   let prev: Row | null = null;
   visibleRows.forEach((row) => {
     const { m } = row;
-    const d = sessionDay(m.ts);
+    const d = m.ts > 0 ? sessionDay(m.ts) : lastDay;
     if (d !== lastDay) {
       out.push(
         <div key={`d-${d}`} id={`day-${d}`} className="daysep scroll-mt-28">
@@ -697,7 +759,7 @@ export function SessionTimeline({
     const meta = speakerMap.get(`${m.kind}:${m.sp}`)!;
     out.push(
       <MessageRow key={m.id} row={row} meta={meta} grouped={grouped}>
-        {m.type === "roll" ? <RollBody m={m} /> : m.text}
+        {m.type === "roll" ? <RollMessage m={m} /> : m.text}
       </MessageRow>,
     );
     prev = row;

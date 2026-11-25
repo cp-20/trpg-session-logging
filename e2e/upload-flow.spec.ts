@@ -61,7 +61,7 @@ for (const mode of MODES) {
 test("卓を選ぶとメンバーから参加者を選べ、全員を 1 回で入れられる", async ({ page }) => {
   await enterDemo(page);
   await page.goto("/upload?manual=1");
-  const table = page.getByRole("combobox", { name: "卓" });
+  const table = page.getByRole("combobox", { name: "卓", exact: true });
   await table.click();
   await page.getByRole("option").nth(1).click();
   const list = page.getByRole("list", { name: "参加者" });
@@ -110,4 +110,33 @@ test("シナリオは共有シナリオ一覧からサーバーで探して選�
   await sc.fill("まだ誰も書いていないシナリオ名");
   await page.getByRole("option", { name: /追加/ }).click();
   await expect(page.getByLabel("シナリオのタイトル")).toHaveValue("まだ誰も書いていないシナリオ名");
+});
+
+test("記録の画面: 暦は欄のすぐそばに開き、参加のつけ外しで高さが変わらず、時刻のないログに時刻を出さない", async ({
+  page,
+}) => {
+  await enterDemo(page);
+  await page.goto("/upload?table=t_haikou");
+  await page.getByLabel("ログファイルを選ぶ").setInputFiles("src/lib/__fixtures__/ccfolia-old-tabs.html");
+  await expect(page.getByRole("heading", { name: "プレビュー" })).toBeVisible();
+  // 時刻のないログ（ts = 0）を 1970 年の日時として見せない
+  await expect(page.getByText("1月1日")).toHaveCount(0);
+  await expect(page.getByText("09:00", { exact: true })).toHaveCount(0);
+
+  const button = page.getByRole("button", { name: "カレンダーから選ぶ" }).first();
+  await button.click();
+  const field = (await button.locator("xpath=..").boundingBox())!;
+  const panel = (await page.getByRole("dialog", { name: "日付を選ぶ" }).boundingBox())!;
+  expect(Math.abs(panel.x - field.x)).toBeLessThan(8);
+  const gap = Math.min(
+    Math.abs(panel.y - (field.y + field.height)),
+    Math.abs(field.y - (panel.y + panel.height)),
+  );
+  expect(gap).toBeLessThan(16);
+  await page.keyboard.press("Escape");
+
+  const section = page.locator("section[aria-labelledby=players-head]");
+  const before = (await section.boundingBox())!.height;
+  await section.getByRole("checkbox").first().click();
+  expect((await section.boundingBox())!.height).toBe(before);
 });

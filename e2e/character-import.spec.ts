@@ -69,6 +69,11 @@ test("キャラシの URL からだけ取り込み、編集と成長の記録は
   await page.getByRole("button", { name: "登録する" }).click();
   await expect(page).toHaveURL(/\/characters\/ch_/);
   const id = page.url().split("/").pop()!;
+  // 書き込みはデバウンスされるので、残るのを待つ
+  await page.waitForFunction(
+    (cid) => JSON.parse(localStorage.getItem("takufu-state-v4") ?? "{}").characters?.[cid],
+    id,
+  );
   await page.evaluate((cid) => {
     const state = JSON.parse(localStorage.getItem("takufu-state-v4") ?? "{}");
     state.characters[cid].sessions.push({

@@ -16,7 +16,10 @@ const DETAILED_SYSTEMS: Record<string, SystemDef> = {
     bcdiceId: "Cthulhu7th",
     keywords: ["CoC", "新クトゥルフ神話TRPG"],
     roles: { GM: "KP" },
-    /* 卓をまたいで続くのは SAN だけ。幸運・HP・MP は今の値として見せない */
+    /*
+     * 卓をまたいで続くのは SAN だけ。幸運・HP・MP は今の値として見せない。
+     * SAN の max は入力できる上限。そのキャラの上限は 99 − クトゥルフ神話（src/lib/system-rules.ts の sanMax）
+     */
     stats: [
       { key: "san", label: "SAN", max: 99, carry: true },
       { key: "luck", label: "幸運", max: 99 },

@@ -16,9 +16,9 @@ import {
   Combobox,
   MultiCombobox,
   SplitLayout,
-  StatBar,
   StatChange,
   SysBadge,
+  Toggle,
   cx,
 } from "../components/ui";
 import { CharAvatar } from "../components/identity";
@@ -50,6 +50,7 @@ import {
   type ManualCharacterEdit,
 } from "../lib/character-edit";
 import { SHEET_PROVIDER_LABELS } from "../lib/sheet";
+import { statusSheet } from "../lib/character-status";
 import { tagOptions } from "../lib/tags";
 import type { Character, GrowthRecord, SessionStat } from "../types";
 import { requestExternalSheet } from "./Characters";
@@ -219,9 +220,8 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
   const sourceLabel = sheetSourceLabel(c);
   const growthLabel = sys?.growthLabel ?? "成長";
 
-  /* 卓をまたいで続く値（SAN など）だけ。続かない値は出さない（P3） */
-  const carried = carriedValues(c);
-  const hasAside = carried.length > 0 || coCharEntries.length > 0;
+  /* 続く値（SAN など）の今の値もこの中にある。画面のほかの場所に重ねて出さない（P3） */
+  const status = statusSheet(c);
   /* 成長を手で記録するのはキャラシのないキャラクターだけ。キャラシのあるものは同期で残る */
   const canAddGrowth = isMine && !linked && sessions.length > 0;
   const syncedGrowth = syncSummary ? c.growth.filter((g) => syncSummary.growthIds.includes(g.id)) : [];
@@ -263,56 +263,58 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
       </div>
     ) : null;
 
-  const sheetSection_ = linked ? (
-    <section aria-label="キャラシ">
-      <SectionTitle
-        sub={
-          <span className="meta">
-            <span>{sourceLabel}</span>
-            {updatedLabel(extSync?.lastSyncedAt ?? c.sheet?.fetchedAt) && (
-              <span>{updatedLabel(extSync?.lastSyncedAt ?? c.sheet?.fetchedAt)}</span>
-            )}
-          </span>
-        }
-        right={
-          <>
-            {sheetUrl && (
-              <a href={sheetUrl} target="_blank" rel="noreferrer" className="btn btn-sm">
-                <IconExternal width={16} height={16} aria-hidden /> キャラシで開く
-              </a>
-            )}
-            {isMine && fetchable && (
-              <button
-                type="button"
-                className="btn btn-sm"
-                disabled={syncing}
-                aria-busy={syncing || undefined}
-                onClick={syncExternal}
-              >
-                <IconRefresh
-                  width={16}
-                  height={16}
-                  aria-hidden
-                  className={cx(syncing && "animate-spin motion-reduce:animate-none")}
-                />
-                {syncing ? "更新中…" : "更新"}
-              </button>
-            )}
-          </>
-        }
-      >
-        キャラシ
-      </SectionTitle>
-      {syncStatus && <div className="mb-3">{syncStatus}</div>}
-      {c.sheet ? (
-        <SheetView sheet={c.sheet} systemId={c.systemId} busy={syncing} />
-      ) : (
-        <div className="surface">
-          <EmptyState kind="first" title="キャラシの内容はまだありません" />
-        </div>
-      )}
-    </section>
-  ) : null;
+  const updated = updatedLabel(extSync?.lastSyncedAt ?? c.sheet?.fetchedAt);
+  const statusSection =
+    linked || status ? (
+      <section aria-label="ステータス">
+        <SectionTitle
+          sub={
+            linked ? (
+              <span className="meta">
+                <span>{sourceLabel}</span>
+                {updated && <span>{updated}</span>}
+              </span>
+            ) : undefined
+          }
+          right={
+            <>
+              {sheetUrl && (
+                <a href={sheetUrl} target="_blank" rel="noreferrer" className="btn btn-sm">
+                  <IconExternal width={16} height={16} aria-hidden /> キャラシで開く
+                </a>
+              )}
+              {isMine && fetchable && (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={syncing}
+                  aria-busy={syncing || undefined}
+                  onClick={syncExternal}
+                >
+                  <IconRefresh
+                    width={16}
+                    height={16}
+                    aria-hidden
+                    className={cx(syncing && "animate-spin motion-reduce:animate-none")}
+                  />
+                  {syncing ? "更新中…" : "更新"}
+                </button>
+              )}
+            </>
+          }
+        >
+          ステータス
+        </SectionTitle>
+        {syncStatus && <div className="mb-3">{syncStatus}</div>}
+        {status ? (
+          <SheetView sheet={status} systemId={c.systemId} busy={syncing} />
+        ) : (
+          <div className="surface">
+            <EmptyState kind="first" title="キャラシの内容はまだありません" />
+          </div>
+        )}
+      </section>
+    ) : null;
 
   const mainCol = (
     <div className="space-y-8">
@@ -333,7 +335,7 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
         </div>
       )}
 
-      {sheetSection_}
+      {statusSection}
 
       <section aria-label="これまでのセッション">
         <SectionTitle
@@ -360,11 +362,15 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
                 const year = s.date.slice(0, 4);
                 const body = (
                   <>
-                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                      <h3 className="font-bold leading-snug transition-colors group-hover:text-primary">
+                    {/* 題名と日付は大きさが違うので、ベースラインではなく 1 行目の中央でそろえる */}
+                    <div className="flex items-start justify-between gap-x-3">
+                      <h3 className="min-w-0 text-base font-bold leading-[1.375rem] transition-colors group-hover:text-primary">
                         {s.title}
                       </h3>
-                      <time className="shrink-0 text-xs tabular-nums text-ink2" dateTime={s.date}>
+                      <time
+                        className="shrink-0 text-xs leading-[1.375rem] tabular-nums text-ink2"
+                        dateTime={s.date}
+                      >
                         {year !== String(new Date().getFullYear())
                           ? `${year}年${fmtDateShort(s.date)}`
                           : fmtDateShort(s.date)}
@@ -404,43 +410,32 @@ function CharacterDetailView({ id }: { id: string | undefined }) {
     </div>
   );
 
-  const asideCol = hasAside ? (
-    <div className="space-y-8">
-      {carried.length > 0 && (
-        <dl aria-label={carried.map((st) => st.label).join("・")} className="surface space-y-3.5 p-4 sm:p-5">
-          {carried.map((st) => (
-            <StatBar key={st.key} label={st.label} value={st.value} max={st.max} />
-          ))}
-        </dl>
-      )}
-
-      {coCharEntries.length > 0 && (
-        <section aria-label="一緒に遊んだキャラクター">
-          <SectionTitle>一緒に遊んだキャラクター</SectionTitle>
-          <div className="surface list">
-            {coCharEntries.map(([cid]) => {
-              const cc = state.characters[cid]!;
-              return (
-                <Link
-                  key={cid}
-                  to={`/characters/${cid}`}
-                  className="row-interactive flex items-center gap-3 px-4 py-3 sm:px-5"
-                >
-                  <CharAvatar c={cc} size={38} />
-                  <div className="min-w-0 flex-1">
-                    <b className="block truncate text-sm">{cc.name}</b>
-                    <span className="block truncate text-xs text-ink2">
-                      {state.users[cc.ownerId]?.name ?? cc.archetype}
-                    </span>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-      )}
-    </div>
-  ) : null;
+  const asideCol =
+    coCharEntries.length > 0 ? (
+      <section aria-label="一緒に遊んだキャラクター">
+        <SectionTitle>一緒に遊んだキャラクター</SectionTitle>
+        <div className="surface list">
+          {coCharEntries.map(([cid]) => {
+            const cc = state.characters[cid]!;
+            return (
+              <Link
+                key={cid}
+                to={`/characters/${cid}`}
+                className="row-interactive flex items-center gap-3 px-4 py-3 sm:px-5"
+              >
+                <CharAvatar c={cc} size={38} />
+                <div className="min-w-0 flex-1">
+                  <b className="block truncate text-sm">{cc.name}</b>
+                  <span className="block truncate text-xs text-ink2">
+                    {state.users[cc.ownerId]?.name ?? cc.archetype}
+                  </span>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      </section>
+    ) : null;
 
   return (
     <>
@@ -695,7 +690,12 @@ function EditLinkedCharModal({ c, onClose }: { c: Character; onClose: () => void
 /** キャラシのないキャラクターの編集。名前・職業・続く値（SAN など）も直せる */
 function EditManualCharModal({ c, onClose }: { c: Character; onClose: () => void }) {
   const { update } = useStore();
-  const carried = carriedStats(SYSTEMS[c.systemId]);
+  /* 入力できる上限は、そのキャラの上限（SAN は 99 − クトゥルフ神話）。分からなければシステムの上限 */
+  const maxOf = new Map(carriedValues(c).map((v) => [v.key, v.max]));
+  const carried = carriedStats(SYSTEMS[c.systemId]).map((st) => ({
+    ...st,
+    max: maxOf.get(st.key) ?? st.max,
+  }));
   const form = useForm<ManualCharacterEdit>({
     mode: "onChange",
     defaultValues: {
@@ -810,12 +810,7 @@ function ShareCharModal({ c, onClose }: { c: Character; onClose: () => void }) {
     >
       <label className="flex cursor-pointer items-center gap-4">
         <b className="min-w-0 flex-1 text-sm">リンクを知っている人に公開</b>
-        <input
-          type="checkbox"
-          className="toggle toggle-primary"
-          checked={c.share.enabled}
-          onChange={(e) => set("enabled", e.target.checked)}
-        />
+        <Toggle label="リンクを知っている人に公開" on={c.share.enabled} onChange={(v) => set("enabled", v)} />
       </label>
       {c.share.enabled && (
         <>
@@ -828,12 +823,7 @@ function ShareCharModal({ c, onClose }: { c: Character; onClose: () => void }) {
               {parts.map(([key, label]) => (
                 <label key={key} className="flex cursor-pointer items-center gap-3 py-2.5">
                   <span className="grow text-sm">{label}</span>
-                  <input
-                    type="checkbox"
-                    className="toggle toggle-primary toggle-sm"
-                    checked={c.share[key] as boolean}
-                    onChange={(e) => set(key, e.target.checked)}
-                  />
+                  <Toggle label={label} on={c.share[key] as boolean} onChange={(v) => set(key, v)} />
                 </label>
               ))}
             </div>

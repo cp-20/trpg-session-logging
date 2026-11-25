@@ -172,7 +172,7 @@ describe("Characters + ImportWizard + CharacterDetail 結合テスト", () => {
       params: { id: "ch_towa" },
       initialState: fresh,
     });
-    expect(await screen.findByRole("heading", { name: "キャラシ" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "ステータス" })).toBeInTheDocument();
     expect(screen.getAllByText("図書館").length).toBeGreaterThan(0);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -188,7 +188,7 @@ describe("Characters + ImportWizard + CharacterDetail 結合テスト", () => {
       params: { id: "ch_towa" },
       initialState: fresh,
     });
-    expect(await screen.findByRole("heading", { name: "キャラシ" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "ステータス" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /を記録/ })).toBeNull();
   });
 

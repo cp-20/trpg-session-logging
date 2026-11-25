@@ -120,6 +120,42 @@ function SyncStatus() {
   );
 }
 
+/** サイドバーの行。現在地は薄い主色の面と左端の短い印で示す */
+function SideLink({
+  to,
+  active,
+  className,
+  children,
+}: {
+  to: string;
+  active: boolean;
+  className: string;
+  children: ReactNode;
+}) {
+  return (
+    <Link
+      to={to}
+      aria-current={active ? "page" : undefined}
+      className={cx(
+        "relative flex items-center rounded-lg text-sm transition-colors",
+        className,
+        active
+          ? "bg-primary/10 text-primary font-bold"
+          : "text-base-content/75 font-medium hover:bg-base-200 hover:text-base-content",
+      )}
+    >
+      {active && (
+        <span
+          data-nav-current-mark
+          className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-primary"
+          aria-hidden
+        />
+      )}
+      {children}
+    </Link>
+  );
+}
+
 function Sidebar() {
   const { state, authUser } = useStoreState();
   const isActive = useActive();
@@ -158,6 +194,20 @@ function Sidebar() {
     return { quickTables: tables, quickChars: chars };
   }, [state.tables, state.characters, state.logs, state.me]);
 
+  // 参加中の卓・自分のキャラは、それぞれの一覧の行のすぐ下に出す（見出しを添えなくても何の並びか分かる）
+  const subNav: Record<string, { to: string; name: string; mark: ReactNode }[]> = {
+    "/tables": quickTables.map((t) => ({
+      to: `/tables/${t.id}`,
+      name: t.name,
+      mark: <TableMark table={t} size={20} />,
+    })),
+    "/characters": quickChars.map((c) => ({
+      to: `/characters/${c.id}`,
+      name: c.name,
+      mark: <CharAvatar c={c} size={20} />,
+    })),
+  };
+
   return (
     <aside className="hidden lg:flex sticky top-0 h-screen w-60 shrink-0 flex-col border-r border-base-300 bg-base-100 px-3 py-5">
       <div className="flex items-center gap-2 px-3 pb-5 shrink-0">
@@ -177,93 +227,33 @@ function Sidebar() {
       <div className="min-h-0 flex-1 overflow-y-auto pr-0.5">
         <nav aria-label="メイン" className="flex flex-col gap-0.5">
           {NAV.map(({ to, label, Icon }, idx) => {
-            const active = isActive(to);
+            const children = subNav[to] ?? [];
+            // 下に並べた卓・キャラを開いているときは、そちらだけを現在地にする（現在地は 1 つ）
+            const active = isActive(to) && !children.some((c) => isActive(c.to));
             return (
               <div key={to}>
                 {idx === 3 && <div className="my-2.5 border-t border-base-300/80" aria-hidden />}
-                <Link
-                  to={to}
-                  aria-current={active ? "page" : undefined}
-                  className={cx(
-                    "relative flex items-center gap-3 rounded-lg px-3 h-10 text-sm transition-colors",
-                    active
-                      ? "bg-primary/10 text-primary font-bold"
-                      : "text-base-content/75 font-medium hover:bg-base-200 hover:text-base-content",
-                  )}
-                >
-                  {active && (
-                    <span
-                      data-nav-current-mark
-                      className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-primary"
-                      aria-hidden
-                    />
-                  )}
+                <SideLink to={to} active={active} className="gap-3 px-3 h-10">
                   <Icon width={20} height={20} className="shrink-0" />
                   {label}
-                </Link>
+                </SideLink>
+                {children.length > 0 && (
+                  <ul aria-label={label} className="mb-1 mt-0.5 flex flex-col gap-0.5">
+                    {children.map((c) => (
+                      <li key={c.to}>
+                        {/* 印は上の行の文字（アイコン 20px + 間 12px）にそろえる */}
+                        <SideLink to={c.to} active={isActive(c.to)} className="gap-2 pl-11 pr-2 h-9">
+                          {c.mark}
+                          <span className="truncate">{c.name}</span>
+                        </SideLink>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             );
           })}
         </nav>
-
-        {(quickTables.length > 0 || quickChars.length > 0) && (
-          <nav aria-label="よく使う" className="mt-4 border-t border-base-300/80 pt-3 flex flex-col gap-3">
-            {quickTables.length > 0 && (
-              <div>
-                <div className="px-3 pb-1 text-xs font-medium text-ink3">参加中の卓</div>
-                <div className="flex flex-col gap-0.5">
-                  {quickTables.map((t) => {
-                    const to = `/tables/${t.id}`;
-                    const active = isActive(to);
-                    return (
-                      <Link
-                        key={t.id}
-                        to={to}
-                        aria-current={active ? "page" : undefined}
-                        className={cx(
-                          "flex items-center gap-2 rounded-lg px-3 h-9 text-sm transition-colors",
-                          active
-                            ? "bg-primary/10 text-primary font-bold"
-                            : "text-base-content/75 font-medium hover:bg-base-200 hover:text-base-content",
-                        )}
-                      >
-                        <TableMark table={t} size={20} />
-                        <span className="truncate">{t.name}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-            {quickChars.length > 0 && (
-              <div>
-                <div className="px-3 pb-1 text-xs font-medium text-ink3">マイキャラ</div>
-                <div className="flex flex-col gap-0.5">
-                  {quickChars.map((c) => {
-                    const to = `/characters/${c.id}`;
-                    const active = isActive(to);
-                    return (
-                      <Link
-                        key={c.id}
-                        to={to}
-                        aria-current={active ? "page" : undefined}
-                        className={cx(
-                          "flex items-center gap-2 rounded-lg px-3 h-9 text-sm transition-colors",
-                          active
-                            ? "bg-primary/10 text-primary font-bold"
-                            : "text-base-content/75 font-medium hover:bg-base-200 hover:text-base-content",
-                        )}
-                      >
-                        <CharAvatar c={c} size={20} />
-                        <span className="truncate">{c.name}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </nav>
-        )}
       </div>
 
       <div className="mt-3 shrink-0 border-t border-base-300 pt-3">

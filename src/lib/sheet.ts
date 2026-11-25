@@ -205,6 +205,23 @@ export function sheetSkillValue(sheet: CharacterSheet | undefined, name: string)
   return typeof hit?.value === "number" ? hit.value : undefined;
 }
 
+/** 最初に見せる技能の数（伸ばした印のないキャラシだけ） */
+const UNMARKED_SKILLS_SHOWN = 12;
+
+/**
+ * 技能を、最初に見せるものと開閉にしまうものに分ける。どちらも段階・値の高い順（同じなら元の順）。
+ * 見せるのは伸ばした技能。伸ばした印のないキャラシは、多ければ高いほうから
+ */
+export function splitSkills(entries: SheetEntry[]): { main: SheetEntry[]; rest: SheetEntry[] } {
+  const rankOf = (e: SheetEntry) => e.rank?.value ?? -1;
+  const valueOf = (e: SheetEntry) => (typeof e.value === "number" ? e.value : -1);
+  const sorted = [...entries].sort((a, b) => rankOf(b) - rankOf(a) || valueOf(b) - valueOf(a));
+  const grown = sorted.filter(isGrownSkill);
+  if (grown.length > 0) return { main: grown, rest: sorted.filter((e) => !isGrownSkill(e)) };
+  if (sorted.length <= UNMARKED_SKILLS_SHOWN + 4) return { main: sorted, rest: [] };
+  return { main: sorted.slice(0, UNMARKED_SKILLS_SHOWN), rest: sorted.slice(UNMARKED_SKILLS_SHOWN) };
+}
+
 /** 技能の分類の並び（クトゥルフの分類。ほかは元の順で後ろに並ぶ） */
 const GROUP_ORDER = ["戦闘技能", "探索技能", "行動技能", "交渉技能", "知識技能"];
 

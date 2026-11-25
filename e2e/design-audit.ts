@@ -512,6 +512,12 @@ export async function auditPage(
           break;
         }
       }
+      // 21. <label> でボタンを包まない（P13: 欄のどこにポインタを置いても中の最初のボタンがホバーされ、押すと押される）
+      for (const btn of document.querySelectorAll("label button")) {
+        if (!visible(btn)) continue;
+        out.push({ rule: "label-wraps-button", detail: describe(btn) });
+        break;
+      }
       return out;
     },
     { banned, dark: Boolean(opts.dark), explanationBudget: opts.explanationBudget ?? true },

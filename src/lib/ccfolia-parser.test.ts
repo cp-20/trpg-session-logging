@@ -40,7 +40,7 @@ describe("parseCcfoliaLog", () => {
     expect(roll?.roll).toMatchObject({ cmd: "CC<=70 目星", result: "成功" });
   });
 
-  it("◆ で始まる行はシナリオ本文(note)として分類する", () => {
+  it("場面の見出しを note として分類する", () => {
     const note = parsed.channels.flatMap((c) => c.msgs).find((m) => m.text?.startsWith("◆"));
     expect(note?.type).toBe("note");
   });
@@ -236,7 +236,7 @@ describe("parseCcfoliaLog", () => {
     });
 
     const secTabHtml = `<section class="tab">
-      <div class="player"><span class="speaker-text">system</span><div class="player-message">◆ 判定終了</div></div>
+      <div class="player"><span class="speaker-text">system</span><div class="player-message">◆ シーン終了</div></div>
     </section>`;
     const fromSec = parseCcfoliaLogHtml(secTabHtml)!;
     expect(fromSec.channels[0]?.id).toBe("ch1");

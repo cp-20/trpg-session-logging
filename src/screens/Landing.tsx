@@ -259,8 +259,6 @@ function LpFonts() {
 }
 
 export default function Landing() {
-  const entered = useEnteredHint();
-
   return (
     <PublicFrame poster>
       <LpFonts />
@@ -277,20 +275,12 @@ export default function Landing() {
             TRPG のセッション記録をひとつのページにまとめる無料アプリです。
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            {entered ? (
-              <Link prefetch={false} to="/home" className="pst-btn pst-btn-solid">
-                ホームを開く
-              </Link>
-            ) : (
-              <>
-                <Link prefetch={false} to="/signin" className="pst-btn pst-btn-solid">
-                  ログインして使う
-                </Link>
-                <Link prefetch={false} to="/demo" className="pst-btn pst-btn-line">
-                  サンプルデータをそのまま見る
-                </Link>
-              </>
-            )}
+            <Link prefetch={false} to="/home" className="pst-btn pst-btn-solid">
+              使ってみる
+            </Link>
+            <Link prefetch={false} to="/demo" className="pst-btn pst-btn-line">
+              サンプルデータをそのまま見る
+            </Link>
           </div>
         </div>
         <div
@@ -423,14 +413,12 @@ export default function Landing() {
             次の卓報告は、卓譜で。
           </h2>
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <Link prefetch={false} to={entered ? "/home" : "/signin"} className="pst-btn pst-btn-ink">
-              {entered ? "ホームを開く" : "ログインして使う"}
+            <Link prefetch={false} to="/home" className="pst-btn pst-btn-ink">
+              使ってみる
             </Link>
-            {!entered && (
-              <Link prefetch={false} to="/demo" className="pst-btn pst-btn-ink-line">
-                サンプルの卓を開く
-              </Link>
-            )}
+            <Link prefetch={false} to="/demo" className="pst-btn pst-btn-ink-line">
+              サンプルの卓を開く
+            </Link>
           </div>
           <p className="pst-fine mt-8">
             卓譜は、TRPG
@@ -784,7 +772,7 @@ export function Feedback() {
           hint={
             kind === "bug"
               ? "どの画面で、何をしたら、どうなったかを書いてください。ログの本文や他の人の個人情報は書かないでください。"
-              : `${FEEDBACK_LIMITS.body} 文字まで。`
+              : `${FEEDBACK_LIMITS.body} 文字まで`
           }
         >
           <textarea
@@ -802,7 +790,7 @@ export function Feedback() {
         <FieldError id="feedback-body-error" text={bodyError} />
         <Field
           label="連絡先（任意）"
-          hint="返事がほしいときだけ。X の ID、Discord のユーザー名、メールアドレスなど。"
+          hint="返事がほしいときだけ（X の ID、Discord のユーザー名、メールアドレスなど）"
         >
           <input
             className="input input-bordered w-full"
@@ -888,7 +876,7 @@ export function Licenses() {
           {OSS_LICENSES.map((o) => (
             <div
               key={o.name}
-              className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 py-2.5"
+              className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2.5"
             >
               <ExternalLink href={o.url}>{o.name}</ExternalLink>
               <span className="text-xs text-ink2">{o.license}</span>

@@ -6,10 +6,14 @@ import {
   type ComboboxOption,
   CompletionModal,
   FieldError,
+  Field,
   FormRow,
+  Modal,
+  MultiCombobox,
   NotFound,
   PageHead,
   ScopeLabel,
+  ScenarioVisibilityPicker,
   ScopePicker,
   ScoreInscription,
   Select,
@@ -17,15 +21,16 @@ import {
   SplitLayout,
   SysBadge,
   cx,
-  Seg,
 } from "../components/ui";
 import {
   Avatar,
   AvatarStack,
+  OtherSpeakers,
   PlayerPicker,
   characterAvatarSrc,
   readAvatarImageFile,
   resolveSpeakerAvatarSrc,
+  splitCharacterSpeakers,
   userAvatarSrc,
 } from "../components/identity";
 import { SessionTimeline, type TimelineFilter } from "../components/timeline";
@@ -37,6 +42,8 @@ import {
   type DirectoryScenario,
 } from "../lib/scenario-directory";
 import { useScenarioSearch } from "../lib/use-scenario-directory";
+import { fetchScenarioPage, newScenarioIsPrivate, type NewScenarioInput } from "../lib/new-scenario";
+import { cleanTags, tagOptions } from "../lib/tags";
 import { sessionTitle } from "../lib/session-scenario";
 import { scoreMarks } from "../lib/score-marks";
 import { roleLabel, speakerRoleOptions } from "../lib/roles";
@@ -67,6 +74,7 @@ import {
   IconCalendar,
   IconFileText,
   IconLink,
+  IconMaximize,
   IconPlus,
   IconUpload,
   IconX,
@@ -377,22 +385,32 @@ function PickLog({
   );
 }
 
-/** ログを足す（複数選べる）ファイル選択。見た目は低い段のボタン */
+/** ログファイルを足す（複数選べる）ファイル選択。row は一覧の最後の行としてファイルの行にそろえる */
 function AddLogButton({
   label,
   loading,
   onFiles,
+  row = false,
 }: {
   label: string;
   loading: boolean;
   onFiles: (files: FileList | null) => void;
+  row?: boolean;
 }) {
   return (
-    <label className={cx("btn btn-quiet btn-sm cursor-pointer", loading && "btn-disabled")}>
+    <label
+      className={cx(
+        "cursor-pointer",
+        row
+          ? "flex items-center gap-3 rounded-lg py-2.5 text-sm font-medium text-ink2 transition-colors hover:text-base-content has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary"
+          : "btn btn-quiet btn-sm",
+        loading && (row ? "pointer-events-none opacity-60" : "btn-disabled"),
+      )}
+    >
       {loading ? (
-        <span className="loading loading-spinner loading-xs" aria-hidden />
+        <span className={cx("loading loading-spinner", row ? "w-[18px]" : "loading-xs")} aria-hidden />
       ) : (
-        <IconPlus width={16} height={16} aria-hidden />
+        <IconPlus width={row ? 18 : 16} height={row ? 18 : 16} className="shrink-0" aria-hidden />
       )}
       {label}
       <input
@@ -463,21 +481,23 @@ function Review({
       }) as unknown as Log,
     [draft.channels, draft.kinds, draft.speakerIcons],
   );
+  const [previewOpen, setPreviewOpen] = useState(false);
   const previewFilter: TimelineFilter = { query: "", channel: "all" };
 
   const sourceSection = (
     <section className="surface px-4 py-3.5 sm:px-5" aria-labelledby="src-head">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <h2 id="src-head" className="text-base font-bold">
-          ログ
+          ログファイル
         </h2>
         {!hasLog && <span className="text-sm text-ink2">なし</span>}
-        <div className="ml-auto flex flex-wrap items-center gap-1">
-          <AddLogButton label={hasLog ? "ログを足す" : "ログを添付"} loading={loading} onFiles={onAddFiles} />
-          {hasLog && (
+        <div className="ml-auto">
+          {hasLog ? (
             <button type="button" className="btn btn-quiet btn-sm" onClick={onRepick}>
               選び直す
             </button>
+          ) : (
+            <AddLogButton label="ログファイルを添付" loading={loading} onFiles={onAddFiles} />
           )}
         </div>
       </div>
@@ -494,8 +514,8 @@ function Review({
                     {when.length > 0
                       ? fmtSessionWhen({ sittings: when })
                       : p.source === "CCFOLIA"
-                        ? "発言の時刻なし。CCFOLIA で書き出し直すと時刻も入ります"
-                        : "発言の時刻なし"}
+                        ? "時刻なし。CCFOLIA で書き出し直すと入ります"
+                        : "時刻なし。遊んだ日時は手入力になります"}
                   </span>
                 </span>
                 {parts.length > 1 && (
@@ -511,6 +531,9 @@ function Review({
               </li>
             );
           })}
+          <li>
+            <AddLogButton row label="ログファイルを足す" loading={loading} onFiles={onAddFiles} />
+          </li>
         </ul>
       )}
       {loadError && (
@@ -573,7 +596,7 @@ function Review({
       <ParticipantsSection draft={draft} setDraft={setDraft} />
       {hasLog && <SpeakersSection draft={draft} setDraft={setDraft} speakers={speakers} />}
       <section className="surface p-5 sm:p-6" aria-labelledby="scope-head">
-        <h2 id="scope-head" className="mb-3 text-base font-bold">
+        <h2 id="scope-head" className="mb-4 text-base font-bold">
           共有範囲
         </h2>
         <ScopePicker value={draft.scope} onChange={(scope) => setDraft({ ...draft, scope })} />
@@ -615,13 +638,30 @@ function Review({
         aside={
           <div className="space-y-4">
             <section className="surface overflow-hidden" aria-labelledby="preview-head">
-              <h2 id="preview-head" className="border-b border-base-300 px-5 py-3.5 text-base font-bold">
-                ログの表示
-              </h2>
-              <div className="max-h-[26rem] overflow-y-auto px-2 py-2 sm:px-3">
+              <div className="flex items-center justify-between gap-2 border-b border-base-300 py-2 pl-5 pr-3">
+                <h2 id="preview-head" className="text-base font-bold">
+                  プレビュー
+                </h2>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label="プレビューを大きく表示"
+                  onClick={() => setPreviewOpen(true)}
+                >
+                  <IconMaximize width={18} height={18} />
+                </button>
+              </div>
+              <div className="max-h-[26rem] overflow-y-auto px-2 py-2 sm:px-3 lg:max-h-[max(26rem,calc(100dvh-18rem))]">
                 <SessionTimeline log={previewLog} state={state} mode="own" filter={previewFilter} />
               </div>
             </section>
+            {previewOpen && (
+              <Modal title="プレビュー" wide onClose={() => setPreviewOpen(false)}>
+                <div className="-mx-3 sm:-mx-4">
+                  <SessionTimeline log={previewLog} state={state} mode="own" filter={previewFilter} />
+                </div>
+              </Modal>
+            )}
             <div className="hidden lg:block">
               {actionError}
               {actionButton}
@@ -714,51 +754,20 @@ function ScenarioField({
   }
 
   if (draft.newScenario) {
-    const set = (patch: Partial<NonNullable<Draft["newScenario"]>>) =>
-      setDraft({
-        ...draft,
-        newScenario: {
-          ...(draft.newScenario ?? { title: "", author: "" }),
-          ...patch,
-        },
-      });
+    const current = draft.newScenario;
     return (
-      <div className="space-y-2">
-        <input
-          id="upload-scenario"
-          aria-label="シナリオのタイトル"
-          aria-invalid={invalid || undefined}
-          placeholder="シナリオのタイトル"
-          className={cx("input input-bordered w-full", invalid && "input-error")}
-          value={draft.newScenario.title}
-          onChange={(e) => set({ title: e.target.value })}
-        />
-        <input
-          aria-label="作者・サークル"
-          placeholder="作者・サークル"
-          className="input input-bordered w-full"
-          value={draft.newScenario.author}
-          onChange={(e) => set({ author: e.target.value })}
-        />
-        {/* 自作のシナリオや事前相談のように、ほかの人が遊ばないものは自分だけにする（P14: 安全側を既定に） */}
-        <Seg<"private" | "public">
-          ariaLabel="このシナリオを選べる人"
-          size="sm"
-          value={draft.newScenario.private === false ? "public" : "private"}
-          onChange={(v) => set({ private: v === "private" })}
-          options={[
-            { v: "private", label: "自分だけ" },
-            { v: "public", label: "ほかの人も選べる" },
-          ]}
-        />
-        <button
-          type="button"
-          className="btn btn-quiet btn-sm"
-          onClick={() => setDraft({ ...draft, newScenario: null })}
-        >
-          登録済みから選ぶ
-        </button>
-      </div>
+      <NewScenarioFields
+        value={current}
+        invalid={invalid}
+        onChange={(patch, systemId) =>
+          setDraft({
+            ...draft,
+            newScenario: { ...current, ...patch },
+            ...(systemId ? { meta: { ...draft.meta, systemId }, guess: null } : {}),
+          })
+        }
+        onCancel={() => setDraft({ ...draft, newScenario: null })}
+      />
     );
   }
 
@@ -785,11 +794,150 @@ function ScenarioField({
                 setDraft({
                   ...draft,
                   scenarioId: "",
-                  newScenario: { title: text, author: "", private: true },
+                  newScenario: /^https?:\/\//i.test(text.trim())
+                    ? { title: "", author: "", sourceUrl: text.trim() }
+                    : { title: text, author: "" },
                 })
         }
         onQueryChange={setTyped}
       />
+    </div>
+  );
+}
+
+/** 記録の途中で足すシナリオ。シナリオの追加と同じ欄（配布ページ・作者・概要・キーワード・共有範囲） */
+function NewScenarioFields({
+  value,
+  invalid,
+  onChange,
+  onCancel,
+}: {
+  value: NewScenarioInput;
+  invalid?: boolean;
+  onChange: (patch: Partial<NewScenarioInput>, systemId?: string) => void;
+  onCancel: () => void;
+}) {
+  const { state } = useStore();
+  const keywords = useMemo(() => tagOptions(Object.values(state.scenarios)), [state.scenarios]);
+  const [busy, setBusy] = useState(false);
+  const [urlError, setUrlError] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const url = value.sourceUrl?.trim() ?? "";
+
+  async function load() {
+    if (!url || busy) return;
+    setBusy(true);
+    setUrlError(null);
+    const res = await fetchScenarioPage(url);
+    setBusy(false);
+    if (!res.ok) {
+      setUrlError(res.error);
+      return;
+    }
+    const sc = res.scenario;
+    if (sc.tags.length > 0 || sc.description) setDetailsOpen(true);
+    onChange(
+      {
+        title: sc.title,
+        sourceUrl: sc.sourceUrl,
+        externalSync: res.sync,
+        ...(sc.author ? { author: sc.author } : {}),
+        ...(sc.tags.length > 0 ? { tags: cleanTags(sc.tags) } : {}),
+        ...(sc.description ? { description: sc.description } : {}),
+      },
+      sc.systemId && SYSTEMS[sc.systemId] ? sc.systemId : undefined,
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex min-h-9 items-center justify-between gap-2">
+        <span className="text-sm font-bold">新しいシナリオ</span>
+        <button type="button" className="btn btn-quiet btn-sm" onClick={onCancel}>
+          登録済みから選ぶ
+        </button>
+      </div>
+      <Field label="タイトル" noMargin>
+        <input
+          id="upload-scenario"
+          aria-label="シナリオのタイトル"
+          aria-invalid={invalid || undefined}
+          className={cx("input w-full", invalid && "input-error")}
+          value={value.title}
+          onChange={(e) => onChange({ title: e.target.value })}
+        />
+      </Field>
+      <Field label="作者・サークル" noMargin>
+        <input
+          className="input w-full"
+          value={value.author}
+          onChange={(e) => onChange({ author: e.target.value })}
+        />
+      </Field>
+      <div>
+        <Field label="配布ページのURL（任意）" noMargin>
+          <div className="flex items-center gap-2">
+            <input
+              type="url"
+              inputMode="url"
+              className="input w-full min-w-0"
+              placeholder="https://booth.pm/ja/items/…"
+              value={value.sourceUrl ?? ""}
+              onChange={(e) => {
+                setUrlError(null);
+                // URL を打ち替えたら、前のページから引いた更新の手がかりは持ち越さない
+                onChange({ sourceUrl: e.target.value, externalSync: undefined });
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                void load();
+              }}
+            />
+            <button
+              type="button"
+              className="btn shrink-0"
+              disabled={busy || !url}
+              onClick={() => void load()}
+            >
+              {busy ? "読み込み中…" : "読み込む"}
+            </button>
+          </div>
+        </Field>
+        <FieldError text={urlError} />
+      </div>
+      <details open={detailsOpen} onToggle={(e) => setDetailsOpen(e.currentTarget.open)} className="group">
+        <summary className="cursor-pointer list-none text-sm font-semibold text-ink2 hover:text-base-content">
+          <span className="group-open:hidden">＋ 概要とキーワードを追加</span>
+          <span className="hidden group-open:inline">概要とキーワード</span>
+        </summary>
+        <div className="mt-3 space-y-4">
+          <Field label="概要" noMargin>
+            <textarea
+              className="textarea textarea-bordered w-full text-sm"
+              rows={3}
+              value={value.description ?? ""}
+              onChange={(e) => onChange({ description: e.target.value })}
+            />
+          </Field>
+          <Field label="キーワード" noMargin>
+            <MultiCombobox
+              ariaLabel="キーワード"
+              className="w-full"
+              values={value.tags ?? []}
+              onChange={(tags) => onChange({ tags })}
+              options={keywords}
+              placeholder="キーワードを探すか、新しく追加"
+            />
+          </Field>
+        </div>
+      </details>
+      <Field label="共有範囲" noMargin group>
+        <ScenarioVisibilityPicker
+          isPrivate={newScenarioIsPrivate(value)}
+          onChange={(isPrivate) => onChange({ private: isPrivate })}
+        />
+      </Field>
     </div>
   );
 }
@@ -825,14 +973,16 @@ function SelfRow({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) => vo
   }
   return (
     <li className="grid grid-cols-[auto_auto_1fr] items-center gap-x-3 gap-y-2 py-2 sm:grid-cols-[auto_auto_1fr_14rem]">
-      <button
-        type="button"
-        className="icon-btn -ml-1.5"
-        aria-label="遊んでいない（人の代わりに記録する）"
-        onClick={() => set({ played: false })}
-      >
-        <IconX width={16} height={16} />
-      </button>
+      <span className="flex w-5 justify-center">
+        <button
+          type="button"
+          className="icon-btn -mx-2 shrink-0"
+          aria-label="遊んでいない（人の代わりに記録する）"
+          onClick={() => set({ played: false })}
+        >
+          <IconX width={16} height={16} />
+        </button>
+      </span>
       <Avatar u={me} size={28} />
       <span className="flex min-w-0 items-center gap-2">
         <span className="truncate text-sm font-semibold">{me.name}</span>
@@ -848,22 +998,24 @@ function SelfRow({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) => vo
           ]}
         />
       </span>
-      {self.role === "PL" && (
-        <div className="col-span-3 pl-[4.25rem] sm:col-span-1 sm:pl-0">
-          <Combobox
-            size="sm"
-            ariaLabel="あなたのキャラクター"
-            className="w-full"
-            value={self.characterIds[0] ?? ""}
-            onChange={(v) => set({ characterIds: v ? [v] : [] })}
-            placeholder="キャラクター"
-            options={[
-              { value: "", label: "キャラクターなし" },
-              ...chars.map((c) => ({ value: c.id, label: c.name, hint: SYSTEMS[c.systemId]?.short })),
-            ]}
-          />
-        </div>
-      )}
+      {/* GM を選んでも行の高さを変えない（CLS） */}
+      <div
+        className={cx("col-span-3 pl-[4.25rem] sm:col-span-1 sm:pl-0", self.role !== "PL" && "invisible")}
+        inert={self.role !== "PL"}
+      >
+        <Combobox
+          size="sm"
+          ariaLabel="あなたのキャラクター"
+          className="w-full"
+          value={self.characterIds[0] ?? ""}
+          onChange={(v) => set({ characterIds: v ? [v] : [] })}
+          placeholder="キャラクター"
+          options={[
+            { value: "", label: "キャラクターなし" },
+            ...chars.map((c) => ({ value: c.id, label: c.name, hint: SYSTEMS[c.systemId]?.short })),
+          ]}
+        />
+      </div>
     </li>
   );
 }
@@ -927,17 +1079,19 @@ function ParticipantsSection({ draft, setDraft }: { draft: Draft; setDraft: (d: 
     return (
       <li
         key={userId}
-        className="grid grid-cols-[auto_auto_1fr] items-center gap-x-3 gap-y-2 py-2 sm:grid-cols-[auto_auto_1fr_14rem]"
+        className="grid grid-cols-[auto_auto_minmax(0,1fr)_10.5rem] items-center gap-x-3 py-2 sm:grid-cols-[auto_auto_1fr_14rem]"
       >
         {removable ? (
-          <button
-            type="button"
-            className="icon-btn -ml-1.5"
-            aria-label={`${u.name}を参加者から外す`}
-            onClick={() => toggle(userId, false)}
-          >
-            <IconX width={16} height={16} />
-          </button>
+          <span className="flex w-5 justify-center">
+            <button
+              type="button"
+              className="icon-btn -mx-2 shrink-0"
+              aria-label={`${u.name}を参加者から外す`}
+              onClick={() => toggle(userId, false)}
+            >
+              <IconX width={16} height={16} />
+            </button>
+          </span>
         ) : (
           <input
             type="checkbox"
@@ -949,22 +1103,21 @@ function ParticipantsSection({ draft, setDraft }: { draft: Draft; setDraft: (d: 
         )}
         <Avatar u={u} size={28} />
         <span className={cx("min-w-0 truncate text-sm font-semibold", !p && "text-ink2")}>{u.name}</span>
-        {p && (
-          <div className="col-span-3 pl-[4.25rem] sm:col-span-1 sm:pl-0">
-            <Combobox
-              size="sm"
-              ariaLabel={`${u.name}のキャラクター`}
-              className="w-full"
-              value={p.characterIds[0] ?? ""}
-              onChange={(v) => setChar(userId, v)}
-              placeholder="キャラクター"
-              options={[
-                { value: "", label: "キャラクターなし" },
-                ...chars.map((c) => ({ value: c.id, label: c.name, hint: SYSTEMS[c.systemId]?.short })),
-              ]}
-            />
-          </div>
-        )}
+        {/* 参加を外しても欄の場所を空けておき、つけ外しで行の高さを変えない（CLS） */}
+        <div className={cx(!p && "invisible")} inert={!p}>
+          <Combobox
+            size="sm"
+            ariaLabel={`${u.name}のキャラクター`}
+            className="w-full"
+            value={p?.characterIds[0] ?? ""}
+            onChange={(v) => setChar(userId, v)}
+            placeholder="キャラクター"
+            options={[
+              { value: "", label: "キャラクターなし" },
+              ...chars.map((c) => ({ value: c.id, label: c.name, hint: SYSTEMS[c.systemId]?.short })),
+            ]}
+          />
+        </div>
       </li>
     );
   };
@@ -1008,7 +1161,9 @@ function ParticipantsSection({ draft, setDraft }: { draft: Draft; setDraft: (d: 
               state={state}
               selected={[]}
               exclude={[state.me, ...memberIds, ...draft.players.map((p) => p.userId)]}
-              quickLabel={table ? "ほかの卓のメンバー" : "自分の卓のメンバー"}
+              tableId={draft.tableId || undefined}
+              quickIds={[]}
+              otherLabel={table ? "ほかの卓の人を追加" : "卓のメンバーから追加"}
               onChange={(ids) =>
                 setDraft({
                   ...draft,
@@ -1035,6 +1190,9 @@ function SpeakersSection({
 }) {
   const { state } = useStore();
   const systemId = draft.meta.systemId;
+  const { characters, others } = splitCharacterSpeakers(speakers);
+  const setKind = (sp: string, kind: MsgKind) =>
+    setDraft({ ...draft, kinds: { ...draft.kinds, [sp]: kind } });
   const participantIds = useMemo(
     () => new Set([state.me, ...draft.players.map((p) => p.userId)]),
     [state.me, draft.players],
@@ -1116,7 +1274,7 @@ function SpeakersSection({
 
   return (
     <section className="surface p-5 sm:p-6" aria-labelledby="speakers-head">
-      <h2 id="speakers-head" className="mb-3 text-base font-bold">
+      <h2 id="speakers-head" className="mb-5 text-base font-bold">
         ログの発言者
       </h2>
       <div
@@ -1129,7 +1287,7 @@ function SpeakersSection({
         <span>だれの発言か</span>
       </div>
       <ul className="list">
-        {speakers.map(({ sp, kind }) => {
+        {characters.map(({ sp, kind }) => {
           const l = draft.speakerLinks[sp];
           const value = l?.characterId ? `char:${l.characterId}` : l?.userId ? `user:${l.userId}` : "";
           const isPc = kind === "PC";
@@ -1197,7 +1355,7 @@ function SpeakersSection({
                 ariaLabel={`${sp}の役割`}
                 className="w-[6.5rem]"
                 value={kind}
-                onChange={(v) => setDraft({ ...draft, kinds: { ...draft.kinds, [sp]: v } })}
+                onChange={(v) => setKind(sp, v)}
                 options={speakerRoleOptions(systemId, kind)}
               />
               {second && <div className="col-span-3 pl-12 sm:col-span-1 sm:pl-0">{second}</div>}
@@ -1205,6 +1363,11 @@ function SpeakersSection({
           );
         })}
       </ul>
+      {others.length > 0 && (
+        <div className={cx(characters.length > 0 && "mt-3 border-t border-base-300 pt-3")}>
+          <OtherSpeakers systemId={systemId} speakers={others} onRoleChange={setKind} />
+        </div>
+      )}
     </section>
   );
 }

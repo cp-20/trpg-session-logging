@@ -17,6 +17,8 @@ const ICONS: Record<string, string> = {
   IconTrash: "tabler/trash",
   IconCheck: "tabler/check",
   IconUpload: "tabler/upload",
+  IconCopy: "tabler/copy",
+  IconMaximize: "tabler/arrows-maximize",
   IconFileText: "tabler/file-text",
   IconUserPlus: "tabler/user-plus",
   IconTable: "custom/table",

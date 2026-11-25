@@ -21,6 +21,8 @@ import {
   Seg,
   Combobox,
   MultiCombobox,
+  SCENARIO_VISIBILITY_META,
+  ScenarioVisibilityPicker,
   SysBadge,
   cx,
   useVisibleCount,
@@ -40,24 +42,10 @@ import { fmtDur, sessionPlayMinutes, uid, sessionStart } from "../lib/time";
 import { recentSystemIds, systemOptions } from "../lib/system-options";
 import { cleanTags, tagOptions } from "../lib/tags";
 import { useStore } from "../store";
-import type {
-  ExternalSyncConfig,
-  ExternalSyncProvider,
-  Scenario,
-  ScenarioEditChanges,
-  ScenarioEditRequest,
-} from "../types";
-import type { ImportedScenario } from "../lib/external-sync";
+import type { ExternalSyncConfig, Scenario, ScenarioEditChanges, ScenarioEditRequest } from "../types";
+import { fetchScenarioPage, newScenarioIsPrivate, sourceFromUrl } from "../lib/new-scenario";
+import { userScenario } from "../lib/session-scenario";
 import { SessionRow } from "./Sessions";
-
-/** 配布ページの URL から配布元を判定する */
-function sourceFromUrl(url: string): Scenario["source"] {
-  const u = url.trim();
-  if (!u) return "manual";
-  if (/booth\.pm/.test(u)) return "booth";
-  if (/talto\.cc/.test(u)) return "talto";
-  return "url";
-}
 
 function sourceLabel(sc: Scenario): string {
   return sc.source === "booth" ? "BOOTH" : sc.source === "talto" ? "TALTO" : "配布ページ";
@@ -233,7 +221,12 @@ export default function Scenarios() {
         <>
           <div className="surface list">
             {localHits.map(({ s, hasPlayed }) => (
-              <ScenarioListRow key={s.id} s={scenarioToDirectory(s)} played={hasPlayed} />
+              <ScenarioListRow
+                key={s.id}
+                s={scenarioToDirectory(s)}
+                played={hasPlayed}
+                isPrivate={s.private}
+              />
             ))}
             {remoteRows.map((d) => (
               <ScenarioListRow key={d.id} s={d} played={false} />
@@ -270,8 +263,27 @@ function ScenarioSystem({ s }: { s: Pick<DirectoryScenario, "systemId" | "system
   );
 }
 
+/** 検索に出していないシナリオの印（だれに見えるか） */
+function ScenarioPrivateLabel() {
+  const m = SCENARIO_VISIBILITY_META.restricted;
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap">
+      <m.Icon width={14} height={14} className="shrink-0 opacity-70" aria-hidden />
+      共有範囲: {m.label}
+    </span>
+  );
+}
+
 /** 一覧の 1 行。人数と時間は遊べるかを決める材料なので、分かれば出す */
-function ScenarioListRow({ s, played }: { s: DirectoryScenario; played: boolean }) {
+function ScenarioListRow({
+  s,
+  played,
+  isPrivate,
+}: {
+  s: DirectoryScenario;
+  played: boolean;
+  isPrivate?: boolean;
+}) {
   return (
     <Link
       to={`/scenarios/${s.id}`}
@@ -289,6 +301,7 @@ function ScenarioListRow({ s, played }: { s: DirectoryScenario; played: boolean 
               {f}
             </span>
           ))}
+          {isPrivate && <ScenarioPrivateLabel />}
         </div>
       </div>
       {played && (
@@ -416,6 +429,7 @@ export function ScenarioDetail() {
                 {sourceLabel(sc)} <IconExternal width={14} height={14} aria-hidden />
               </a>
             )}
+            {sc.private && <ScenarioPrivateLabel />}
             {medDur != null && <span>所要時間 約{fmtDur(medDur)}</span>}
             {hasParticipated && (
               <span className="inline-flex items-center gap-1 font-medium text-ink2">
@@ -632,6 +646,8 @@ function EditScenarioModal({
     },
   });
 
+  const [isPrivate, setIsPrivate] = useState(Boolean(sc.private));
+
   function onSubmit(values: EditScenarioFormValues) {
     update((s) => {
       const x = s.scenarios[sc.id]!;
@@ -639,6 +655,7 @@ function EditScenarioModal({
       x.author = values.author.trim() || x.author;
       x.tags = cleanTags(values.tags);
       x.description = values.description.trim() || undefined;
+      if (!isPrivate) delete x.private;
     });
     onClose();
   }
@@ -704,6 +721,12 @@ function EditScenarioModal({
             {...register("description")}
           />
         </Field>
+        {/* 全員に出したものは、ほかの人の記録が結ぶので引っ込められない。出すほうだけ選べる（P16） */}
+        {sc.private && (
+          <Field label="共有範囲" group>
+            <ScenarioVisibilityPicker isPrivate={isPrivate} onChange={setIsPrivate} />
+          </Field>
+        )}
       </form>
     </Modal>
   );
@@ -972,8 +995,6 @@ function EditRequestModal({
   );
 }
 
-const BG = ["#efe6d8", "#e8dfd5", "#ede4d7", "#f0e1dc", "#f0e6d2", "#e7eadc", "#e6e2da"];
-
 interface ScenarioNewFormValues {
   title: string;
   author: string;
@@ -996,9 +1017,12 @@ export function ScenarioNew() {
   const [urlBusy, setUrlBusy] = useState(false);
   const [urlError, setUrlError] = useState<string | null>(null);
   const [pendingSync, setPendingSync] = useState<ExternalSyncConfig | null>(null);
+  /** 共有範囲。選ぶまでは配布ページの有無で決まる */
+  const [visibility, setVisibility] = useState<boolean | undefined>(undefined);
   const {
     register,
     control,
+    watch,
     getValues,
     setValue,
     handleSubmit,
@@ -1015,55 +1039,31 @@ export function ScenarioNew() {
     },
   });
 
+  const isPrivate = newScenarioIsPrivate({ private: visibility, sourceUrl: watch("sourceUrl") });
+
   async function importFromScenarioUrl() {
     const rawUrl = getValues("sourceUrl").trim();
     if (!rawUrl || urlBusy) return;
     setUrlBusy(true);
     setUrlError(null);
-    try {
-      const res = await fetch("/api/import/external", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: rawUrl }),
-      });
-      const data = (await res.json()) as {
-        ok: boolean;
-        kind?: string;
-        provider?: ExternalSyncProvider;
-        url?: string;
-        contentHash?: string;
-        fetchedAt?: string;
-        scenario?: ImportedScenario;
-        error?: string;
-      };
-      if (!res.ok || !data.ok || data.kind !== "scenario" || !data.scenario || !data.provider) {
-        setUrlError(data.error ?? "シナリオページの情報を読み取れませんでした。");
-        return;
-      }
-      const sc = data.scenario;
-      setValue("title", sc.title, { shouldValidate: true, shouldDirty: true });
-      if (sc.author) setValue("author", sc.author, { shouldDirty: true });
-      if (sc.systemId && SYSTEMS[sc.systemId]) {
-        setValue("systemId", sc.systemId, { shouldDirty: true });
-      }
-      if (sc.sourceUrl) setValue("sourceUrl", sc.sourceUrl, { shouldDirty: true });
-      if (sc.tags.length > 0) setValue("tags", cleanTags(sc.tags), { shouldDirty: true });
-      if (sc.description) setValue("description", sc.description, { shouldDirty: true });
-      if (sc.tags.length > 0 || sc.description) setDetailsOpen(true);
-      setFormOpen(true);
-      setPendingSync({
-        provider: data.provider,
-        url: data.url ?? rawUrl,
-        lastSyncedAt: data.fetchedAt ?? new Date().toISOString(),
-        lastStatus: "ok",
-        contentHash: data.contentHash,
-        autoSync: false,
-      });
-    } catch {
-      setUrlError("配布ページの情報を読み込めませんでした。URL をお確かめください。");
-    } finally {
-      setUrlBusy(false);
+    const res = await fetchScenarioPage(rawUrl);
+    setUrlBusy(false);
+    if (!res.ok) {
+      setUrlError(res.error);
+      return;
     }
+    const sc = res.scenario;
+    setValue("title", sc.title, { shouldValidate: true, shouldDirty: true });
+    if (sc.author) setValue("author", sc.author, { shouldDirty: true });
+    if (sc.systemId && SYSTEMS[sc.systemId]) {
+      setValue("systemId", sc.systemId, { shouldDirty: true });
+    }
+    if (sc.sourceUrl) setValue("sourceUrl", sc.sourceUrl, { shouldDirty: true });
+    if (sc.tags.length > 0) setValue("tags", cleanTags(sc.tags), { shouldDirty: true });
+    if (sc.description) setValue("description", sc.description, { shouldDirty: true });
+    if (sc.tags.length > 0 || sc.description) setDetailsOpen(true);
+    setFormOpen(true);
+    setPendingSync(res.sync);
   }
 
   // 一覧の検索に URL を貼って見つからなかったときは、そのまま読み込む
@@ -1078,22 +1078,18 @@ export function ScenarioNew() {
   function onSubmit(values: ScenarioNewFormValues) {
     const id = `sc_${uid()}`;
     update((s) => {
-      s.scenarios[id] = {
+      s.scenarios[id] = userScenario({
         id,
-        title: values.title.trim(),
-        author: values.author.trim(),
+        title: values.title,
+        author: values.author,
         systemId: values.systemId,
-        source: sourceFromUrl(values.sourceUrl),
-        sourceUrl: values.sourceUrl.trim() || undefined,
-        emoji: SYSTEMS[values.systemId]?.short ?? "汎用",
-        bg: BG[Object.keys(s.scenarios).length % BG.length]!,
-        tags: cleanTags(values.tags),
-        description: values.description.trim() || undefined,
-        claimedBy: null,
-        addedBy: "user",
-        addedByUid: s.me,
-        ...(pendingSync && values.sourceUrl.trim() ? { externalSync: pendingSync } : {}),
-      };
+        uid: s.me,
+        sourceUrl: values.sourceUrl,
+        tags: values.tags,
+        description: values.description,
+        externalSync: pendingSync ?? undefined,
+        private: isPrivate,
+      });
     });
     nav({ to: `/scenarios/${id}` });
   }
@@ -1220,6 +1216,11 @@ export function ScenarioNew() {
                 />
               </Field>
             </details>
+            <div className="mt-5 border-t border-base-300 pt-4">
+              <Field label="共有範囲" noMargin group>
+                <ScenarioVisibilityPicker isPrivate={isPrivate} onChange={setVisibility} />
+              </Field>
+            </div>
           </div>
         )}
         <div className="mt-6 flex justify-end gap-2">

@@ -24,7 +24,7 @@ const TOWA_CHARAENO = {
   residence: "港町",
   birthplace: "長野県",
   characteristics: { str: 45, con: 60, pow: 55, dex: 65, app: 70, siz: 50, int: 80, edu: 85 },
-  attribute: { hp: 11, mp: 11, mov: 8, build: 0, db: "+0", san: { value: 42, max: 99 }, luck: 60 },
+  attribute: { hp: 11, mp: 11, mov: 8, build: 0, db: "+0", san: { value: 42, max: 96 }, luck: 60 },
   skills: [
     sk("威圧", 15),
     sk("言いくるめ", 45, true),

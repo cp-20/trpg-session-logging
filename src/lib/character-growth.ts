@@ -9,6 +9,7 @@
 import { SYSTEMS, carriedStats } from "../data/systems";
 import type { Character, GrowthRecord, SessionStat } from "../types";
 import { sheetSection, sheetSkillValue } from "./sheet";
+import { isCoc, knownMythos, sanMax } from "./system-rules";
 
 /** 新しい順のセッション */
 export function sessionsNewestFirst(c: Pick<Character, "sessions">): SessionStat[] {
@@ -128,15 +129,27 @@ export function currentCarriedValue(
   return latest.val;
 }
 
-/** 見せる「今の値」。続く値（`carry`）だけ。上限はキャラシにあればそれ */
+/**
+ * 続く値の上限。CoC の SAN はクトゥルフ神話から導き（system-rules）、分からなければ出さない。
+ * ほかはキャラシにあればそれ、なければシステムの定義
+ */
+function carriedMax(
+  c: Pick<Character, "systemId" | "sheet" | "growth">,
+  st: { key: string; label: string; max?: number },
+): number | undefined {
+  const written = sheetSection(c.sheet, "resources")?.entries.find((e) => e.label === st.label)?.max;
+  if (isCoc(c.systemId) && st.key === "san") return sanMax(knownMythos(c), written);
+  return written ?? st.max;
+}
+
+/** 見せる「今の値」。続く値（`carry`）だけ */
 export function carriedValues(
-  c: Pick<Character, "systemId" | "sessions" | "stats" | "externalSync" | "sheet">,
+  c: Pick<Character, "systemId" | "sessions" | "stats" | "externalSync" | "sheet" | "growth">,
 ): { key: string; label: string; value: number; max?: number }[] {
-  const resources = sheetSection(c.sheet, "resources")?.entries ?? [];
   return carriedStats(SYSTEMS[c.systemId]).flatMap((st) => {
     const value = currentCarriedValue(c, st.key);
     if (value == null) return [];
-    const max = resources.find((e) => e.label === st.label)?.max ?? st.max;
+    const max = carriedMax(c, st);
     return [{ key: st.key, label: st.label, value, ...(max != null ? { max } : {}) }];
   });
 }

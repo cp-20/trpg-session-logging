@@ -263,7 +263,7 @@ function parseUdonariumChatXml(raw: string): ParsedLog | null {
         ts,
         kind,
         kindExplicit: isExplicitKind(chat.type),
-        type: chat.text.startsWith("◆") ? "note" : "text",
+        type: "text",
         channel: tab,
       });
     }
@@ -295,7 +295,7 @@ function parseUdonariumChatXml(raw: string): ParsedLog | null {
       ts,
       kind,
       kindExplicit: isExplicitKind(typeAttr),
-      type: text.startsWith("◆") ? "note" : "text",
+      type: "text",
       channel: tab,
     });
   }

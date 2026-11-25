@@ -2,11 +2,11 @@ import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "reac
 import { Link, useNavigate } from "../lib/router";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import {
+  IconCalendar,
   IconCalendarTime,
   IconCheck,
   IconChevronLeft,
   IconChevronRight,
-  IconClock,
   IconPencil,
   IconPlus,
   IconX,
@@ -39,7 +39,11 @@ import {
   applyConfirmCandidate,
   applyPollAnswers,
   applyPollEdit,
-  busyChecker,
+  confirmedOwnPlans,
+  googleBusyPlans,
+  planFinder,
+  planTimeText,
+  plansByDate,
   calendarSubscribeLinks,
   canConfirmPoll,
   canEditPoll,
@@ -52,7 +56,7 @@ import {
   pollDurationMinutes,
   pollMemberIds,
   quickWeekendDates,
-  type BusyCheck,
+  type OwnPlan,
   relativeDayLabel,
   shiftYearMonth,
   unansweredCount,
@@ -523,14 +527,26 @@ export default function Calendar() {
  *   候補は開始だけが違い、長さは日程調整に 1 つだけ持つ。
  * ============================================================ */
 
-/** 自分の予定と照らし合わせる関数（設定での許可・カレンダーの選択・終日の扱いを反映） */
-export function useBusyCheck(): { check: BusyCheck; hasSource: boolean } {
+/** 自分の予定（Google の時間帯と、卓譜で確定した予定）と照らし合わせる関数 */
+export function useOwnPlans(): {
+  find: (date: string, startTime: string, durationMin: number) => OwnPlan[];
+  hasSource: boolean;
+} {
   const { state } = useStore();
   const { googleBusy } = state.prefs;
-  return useMemo(
-    () => ({ check: busyChecker({ googleBusy }), hasSource: hasBusySource({ googleBusy }) }),
-    [googleBusy],
-  );
+  const { events, tables, me } = state;
+  return useMemo(() => {
+    const confirmed = confirmedOwnPlans({ events, tables, me });
+    return {
+      find: planFinder([...googleBusyPlans({ googleBusy }), ...confirmed].sort((a, b) => a.start - b.start)),
+      hasSource: hasBusySource({ googleBusy }) || confirmed.length > 0,
+    };
+  }, [googleBusy, events, tables, me]);
+}
+
+/** 自分の予定の 1 行（時間と題）。題のないもの（Google の時間帯）は時間だけ */
+function ownPlanText(p: OwnPlan, date: string): string {
+  return p.label ? `${planTimeText(p, date)} ${p.label}` : planTimeText(p, date);
 }
 
 type PollMode = "view" | "answer" | "edit";
@@ -548,19 +564,27 @@ function candidateLabel(cand: Pick<TableEventCandidate, "date" | "startTime">): 
   return `${fmtDate(cand.date)} ${cand.startTime}〜`;
 }
 
-/** 候補日の一覧（閲覧用）。押して返事はしない。返事は「回答する」から */
+/** 日時の列の見出し。候補は開始だけを書くので、長さはここで 1 度だけ示す */
+function pollDurationHead(durMin: number): string {
+  return durMin > 0 ? `開始から${fmtDur(durMin)}` : "候補日";
+}
+
+/**
+ * 候補日の表（閲覧用）。行が候補日、列がメンバー。だれがいつ来られるかを縦にも横にも見比べられるようにそろえる。
+ * 自分の列は先頭に置いて薄い地で示す。押して返事はしない（返事は「回答する」から）
+ */
 function PollCandidateView({
   ev,
   state,
-  isBusy,
+  ownPlans,
   compact = false,
   canConfirm = false,
   onConfirm,
 }: {
   ev: ExtendedTableEvent;
   state: State;
-  isBusy: (cand: TableEventCandidate) => boolean;
-  /** カレンダーの返事待ちカード用。回答の内訳と確定を省く */
+  ownPlans: (cand: TableEventCandidate) => OwnPlan[];
+  /** カレンダーの返事待ちカード用。確定を省く */
   compact?: boolean;
   canConfirm?: boolean;
   onConfirm?: (cand: TableEventCandidate) => void;
@@ -568,99 +592,169 @@ function PollCandidateView({
   const [confirming, setConfirming] = useState<string | null>(null);
   const candidates = pollCandidates(ev);
   const memberIds = pollMemberIds(ev, state);
+  const ordered = memberIds.includes(state.me)
+    ? [state.me, ...memberIds.filter((id) => id !== state.me)]
+    : memberIds;
   const tallies = candidates.map((c) => candidateTally(c, memberIds));
   const bestOk = Math.max(0, ...tallies.map((t) => t.ok));
+  const withConfirm = !compact && canConfirm && Boolean(onConfirm);
+  const cell = "px-1 py-2.5 text-center align-middle";
+  const mine = (id: string) => id === state.me && "bg-primary/5";
 
   return (
-    <ul className="list border-t border-base-300" aria-label="候補日">
-      {candidates.map((cand, i) => {
-        const t = tallies[i]!;
-        const my = cand.responses[state.me];
-        const label = candidateLabel(cand);
-        const isBest = t.ok === bestOk && t.ok > 0;
-        return (
-          <li
-            key={cand.id}
-            className={cx(
-              "flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-5",
-              isBest && "bg-base-200/55",
-            )}
-          >
-            <div className="min-w-0 flex-1 basis-44">
-              <div className="font-semibold tabular-nums">{label}</div>
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-ink2 tabular-nums">
-                <span className={cx(isBest && "font-bold text-base-content")}>
-                  ◯ {t.ok}/{memberIds.length}人
-                </span>
-                {t.maybe > 0 && <span>△ {t.maybe}</span>}
-                {t.ng > 0 && <span>× {t.ng}</span>}
-                {t.pending > 0 && <span>未回答 {t.pending}</span>}
-                {isBusy(cand) && <span className="font-medium">自分の予定あり</span>}
-              </div>
-            </div>
-            <span className="shrink-0 text-sm text-ink2">
-              自分{" "}
-              <span className={cx("font-semibold", my ? "text-base-content" : "text-ink2")}>
-                {my ? RSVP_SYMBOL[my] : "未回答"}
-              </span>
-            </span>
-            {!compact &&
-              canConfirm &&
-              onConfirm &&
-              (confirming === cand.id ? (
-                <span className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => {
-                      setConfirming(null);
-                      onConfirm(cand);
-                    }}
-                  >
-                    確定する
-                  </button>
-                  <button type="button" className="btn btn-quiet btn-sm" onClick={() => setConfirming(null)}>
-                    やめる
-                  </button>
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-quiet btn-sm"
-                  aria-label={`${label} で確定`}
-                  onClick={() => setConfirming(cand.id)}
+    // 人数が多いと横に送れる。欄そのものにフォーカスできるようにし、開いたとき右端のボタンへ送られて自分の列が隠れるのを防ぐ
+    <div
+      role="region"
+      aria-label="候補日と回答"
+      tabIndex={0}
+      className="overflow-x-auto rounded-b-box border-t border-base-300"
+    >
+      <table className="w-full border-collapse text-sm tabular-nums" aria-label="候補日">
+        <thead>
+          <tr className="border-b border-base-300 text-xs text-ink2">
+            <th
+              scope="col"
+              className="sticky left-0 z-10 bg-base-100 py-2 pl-4 pr-3 text-left font-medium sm:pl-5"
+            >
+              {pollDurationHead(pollDurationMinutes(ev))}
+            </th>
+            <th
+              scope="col"
+              className={cx(cell, "hidden min-w-12 whitespace-nowrap font-medium sm:table-cell")}
+            >
+              <span aria-hidden>◯</span>
+              <span className="sr-only">参加できる人数</span>
+            </th>
+            {ordered.map((id) => {
+              const u = state.users[id]!;
+              return (
+                <th key={id} scope="col" className={cx(cell, "px-0 font-medium", mine(id))}>
+                  <span className="mx-auto flex w-10 flex-col items-center gap-1 sm:w-14">
+                    <Avatar u={u} size={22} />
+                    <span className={cx("w-full truncate", id === state.me && "font-bold text-base-content")}>
+                      {u.name}
+                    </span>
+                  </span>
+                </th>
+              );
+            })}
+            {/* 余った幅はここに寄せ、日時と回答を離さない */}
+            <th scope="col" className="w-full pr-4 sm:pr-5">
+              {withConfirm && <span className="sr-only">確定</span>}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {candidates.map((cand, i) => {
+            const t = tallies[i]!;
+            const label = candidateLabel(cand);
+            const isBest = t.ok === bestOk && t.ok > 0;
+            return (
+              <tr key={cand.id} className="border-b border-base-300 last:border-b-0">
+                <th
+                  scope="row"
+                  className="sticky left-0 z-10 whitespace-nowrap bg-base-100 py-2.5 pl-4 pr-3 text-left sm:pl-5"
                 >
-                  この日で確定
-                </button>
-              ))}
-            {!compact && (
-              <ul
-                className="flex basis-full flex-wrap gap-x-4 gap-y-1.5 text-xs"
-                aria-label={`${label} の回答`}
-              >
-                {memberIds.map((id) => {
-                  const u = state.users[id]!;
+                  <span className={cx("block sm:inline", isBest ? "font-bold" : "font-medium")}>
+                    {fmtDate(cand.date)}
+                  </span>{" "}
+                  <span className={cx("block sm:inline", isBest ? "font-bold" : "font-medium")}>
+                    {cand.startTime}〜
+                  </span>
+                </th>
+                <td
+                  className={cx(
+                    cell,
+                    "hidden whitespace-nowrap sm:table-cell",
+                    isBest ? "font-bold" : "text-ink2",
+                  )}
+                >
+                  {t.ok}
+                  <span className="text-xs font-normal text-ink2">/{memberIds.length}</span>
+                </td>
+                {ordered.map((id) => {
                   const r = cand.responses[id];
                   return (
-                    <li key={id} className="inline-flex items-center gap-1.5">
-                      <Avatar u={u} size={18} />
-                      <span className={cx(id === state.me && "font-bold")}>{u.name}</span>
-                      <span
-                        className={cx(
-                          "font-semibold",
-                          r === "ok" ? "text-base-content" : r === "ng" ? "text-error" : "text-ink2",
-                        )}
-                      >
-                        {r ? RSVP_SYMBOL[r] : "–"}
-                      </span>
-                    </li>
+                    <td
+                      key={id}
+                      className={cx(
+                        cell,
+                        mine(id),
+                        r === "ok"
+                          ? "font-bold text-base-content"
+                          : r === "ng"
+                            ? "font-semibold text-error"
+                            : "text-ink2",
+                      )}
+                    >
+                      {r ? RSVP_SYMBOL[r] : "–"}
+                      {!r && <span className="sr-only">未回答</span>}
+                      {/* 自分の列の中に出すので、だれの予定かを書かなくても分かる */}
+                      {id === state.me && ownPlans(cand).length > 0 && (
+                        <span className="mt-0.5 flex items-center justify-center gap-0.5 whitespace-nowrap text-xs font-medium text-ink2">
+                          <IconCalendar width={12} height={12} aria-hidden />
+                          <span aria-hidden>予定</span>
+                          <span className="sr-only">自分の予定あり</span>
+                        </span>
+                      )}
+                    </td>
                   );
                 })}
-              </ul>
-            )}
-          </li>
-        );
-      })}
+                <td className="whitespace-nowrap py-1.5 pl-2 pr-4 text-right sm:pr-5">
+                  {withConfirm &&
+                    (confirming === cand.id ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => {
+                            setConfirming(null);
+                            onConfirm?.(cand);
+                          }}
+                        >
+                          確定する
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-quiet btn-sm"
+                          onClick={() => setConfirming(null)}
+                        >
+                          やめる
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-quiet btn-sm"
+                        aria-label={`${label} で確定`}
+                        onClick={() => setConfirming(cand.id)}
+                      >
+                        確定
+                      </button>
+                    ))}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** 候補と重なる自分の予定。返事を決める材料なので、時間と題まで出す */
+function OwnPlanLines({ plans, date }: { plans: readonly OwnPlan[]; date: string }) {
+  if (plans.length === 0) return null;
+  return (
+    <ul aria-label="自分の予定" className="mt-1 space-y-0.5 text-xs text-ink2">
+      {plans.slice(0, 2).map((p, i) => (
+        <li key={i} className="flex items-center gap-1">
+          <IconCalendar width={13} height={13} className="shrink-0" aria-hidden />
+          <span className="shrink-0 font-medium">自分の予定</span>
+          <span className="min-w-0 truncate tabular-nums">{ownPlanText(p, date)}</span>
+        </li>
+      ))}
+      {plans.length > 2 && <li>ほか{plans.length - 2}件</li>}
     </ul>
   );
 }
@@ -669,20 +763,25 @@ function PollCandidateView({
 function PollAnswerList({
   ev,
   answers,
-  isBusy,
+  ownPlans,
   hasBusySource: hasSource,
   onChange,
 }: {
   ev: ExtendedTableEvent;
   answers: Record<string, Availability>;
-  isBusy: (cand: TableEventCandidate) => boolean;
+  ownPlans: (cand: TableEventCandidate) => OwnPlan[];
   hasBusySource: boolean;
   onChange: (next: Record<string, Availability>) => void;
 }) {
   const candidates = pollCandidates(ev);
-  const fillable = candidates.filter((c) => !answers[c.id] && !isBusy(c)).map((c) => c.id);
+  const fillable = candidates.filter((c) => !answers[c.id] && ownPlans(c).length === 0).map((c) => c.id);
   return (
     <>
+      {pollDurationMinutes(ev) > 0 && (
+        <div className="border-t border-base-300 px-4 py-2 text-xs font-medium text-ink2 sm:px-5">
+          {pollDurationHead(pollDurationMinutes(ev))}
+        </div>
+      )}
       <ul className="list border-t border-base-300" aria-label="自分の回答">
         {candidates.map((cand) => {
           const label = candidateLabel(cand);
@@ -690,7 +789,7 @@ function PollAnswerList({
             <li key={cand.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-5">
               <div className="min-w-0 flex-1 basis-40">
                 <div className="font-semibold tabular-nums">{label}</div>
-                {isBusy(cand) && <div className="mt-0.5 text-xs font-medium text-ink2">自分の予定あり</div>}
+                <OwnPlanLines plans={ownPlans(cand)} date={cand.date} />
               </div>
               <Seg<Availability>
                 size="sm"
@@ -720,24 +819,23 @@ function PollAnswerList({
 }
 
 /**
- * 日程調整の「どこで・何を・どれくらい」。卓の画面では卓名を省く。作った人は判断に使わないので出さない（P5）。
- * 長さは「長さ」の見出しではなく時計の印で示す
+ * 日程調整の「どこで・何を」。卓の画面では卓名を省く。作った人は判断に使わないので出さない（P5）。
+ * 長さは候補日の列の見出し（pollDurationHead）に出す。1 つだけ離して置かない
  */
 function PollMeta({
   event,
   state,
-  durMin,
   inTable,
   onNavigate,
 }: {
   event: ExtendedTableEvent;
   state: State;
-  durMin: number;
   inTable?: boolean;
   onNavigate?: () => void;
 }) {
   const tb = event.tableId ? state.tables[event.tableId] : undefined;
   const sc = event.scenarioId ? state.scenarios[event.scenarioId] : undefined;
+  if (inTable && !sc) return null;
   return (
     <div className="meta text-xs sm:text-sm">
       {inTable ? null : tb ? (
@@ -760,13 +858,6 @@ function PollMeta({
           {sc.title}
         </Link>
       )}
-      {durMin > 0 && (
-        <span className="inline-flex items-center gap-1 tabular-nums">
-          <IconClock width={14} height={14} aria-hidden />
-          <span className="sr-only">所要時間</span>
-          {fmtDur(durMin)}
-        </span>
-      )}
     </div>
   );
 }
@@ -781,7 +872,7 @@ function PollCard({
   state: State;
   onOpen: (mode: Exclude<PollMode, "edit">) => void;
 }) {
-  const { check } = useBusyCheck();
+  const { find } = useOwnPlans();
   const durMin = pollDurationMinutes(ev);
   return (
     <article className="surface" aria-label={ev.title}>
@@ -789,7 +880,7 @@ function PollCard({
         <div className="min-w-0 flex-1">
           <h3 className="font-bold leading-snug">{ev.title}</h3>
           <div className="mt-0.5">
-            <PollMeta event={ev} state={state} durMin={durMin} />
+            <PollMeta event={ev} state={state} />
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -801,7 +892,7 @@ function PollCard({
           </button>
         </div>
       </header>
-      <PollCandidateView ev={ev} state={state} compact isBusy={(c) => check(c.date, c.startTime, durMin)} />
+      <PollCandidateView ev={ev} state={state} compact ownPlans={(c) => find(c.date, c.startTime, durMin)} />
     </article>
   );
 }
@@ -825,10 +916,10 @@ export function PollDetailModal({
   onConfirmed?: (cand: TableEventCandidate) => void;
 }) {
   const { update } = useStore();
-  const { check, hasSource } = useBusyCheck();
+  const { find, hasSource } = useOwnPlans();
   const [mode, setMode] = useState<PollMode>(initialMode);
   const durMin = pollDurationMinutes(event);
-  const isBusy = (c: TableEventCandidate) => check(c.date, c.startTime, durMin);
+  const ownPlans = (c: TableEventCandidate) => find(c.date, c.startTime, durMin);
   const canManage = canConfirmPoll(event, state);
   const canEdit = canEditPoll(event, state);
   const myAnswers = () =>
@@ -905,18 +996,23 @@ export function PollDetailModal({
         <PollEditForm formId={editFormId} event={event} onSaved={() => setMode("view")} />
       ) : (
         <>
-          <PollMeta event={event} state={state} durMin={durMin} inTable={inTable} onNavigate={onClose} />
+          <PollMeta event={event} state={state} inTable={inTable} onNavigate={onClose} />
           {mode === "view" && event.note && (
             <p data-user-content className="mt-2 text-sm leading-relaxed text-ink2">
               {event.note}
             </p>
           )}
-          <div className="-mx-5 mt-4 sm:-mx-6">
+          <div
+            className={cx(
+              "-mx-5 -mb-5 sm:-mx-6",
+              inTable && !event.scenarioId && !(mode === "view" && event.note) ? "-mt-5" : "mt-4",
+            )}
+          >
             {mode === "view" ? (
               <PollCandidateView
                 ev={event}
                 state={state}
-                isBusy={isBusy}
+                ownPlans={ownPlans}
                 canConfirm={canManage}
                 onConfirm={confirm}
               />
@@ -924,7 +1020,7 @@ export function PollDetailModal({
               <PollAnswerList
                 ev={event}
                 answers={answers}
-                isBusy={isBusy}
+                ownPlans={ownPlans}
                 hasBusySource={hasSource}
                 onChange={setAnswers}
               />
@@ -1020,15 +1116,17 @@ function PollEditForm({
 type GridEntry =
   | { kind: "event"; key: string; ev: ExtendedTableEvent }
   | { kind: "poll"; key: string; ev: ExtendedTableEvent; cand: TableEventCandidate }
-  | { kind: "log"; key: string; log: Log };
+  | { kind: "log"; key: string; log: Log }
+  | { kind: "own"; key: string; date: string; plans: OwnPlan[] };
 
 /** 種類を示す語。凡例を置かず、印の横にこの語を出して分からせる（確定した予定は時刻が付くので語なし） */
 function entryKindWord(e: GridEntry): string | null {
-  return e.kind === "poll" ? "候補" : e.kind === "log" ? "記録" : null;
+  return e.kind === "poll" ? "候補" : e.kind === "log" ? "記録" : e.kind === "own" ? "自分" : null;
 }
 
 function entryTitle(e: GridEntry, scenarios: State["scenarios"]): string {
   if (e.kind === "event") return `${e.ev.startTime} ${e.ev.title}`;
+  if (e.kind === "own") return e.plans.map((p) => planTimeText(p, e.date)).join("、");
   return e.kind === "poll" ? e.ev.title : sessionTitle(e.log, scenarios);
 }
 
@@ -1038,6 +1136,18 @@ function entryLabel(e: GridEntry, scenarios: State["scenarios"]): string {
 }
 
 function EntryCard({ entry, state }: { entry: GridEntry; state: State }) {
+  if (entry.kind === "own") {
+    return (
+      <span className="block">
+        <span className="block font-bold leading-snug">自分の予定</span>
+        {entry.plans.map((p, i) => (
+          <span key={i} className="block text-xs tabular-nums text-ink2">
+            {planTimeText(p, entry.date)}
+          </span>
+        ))}
+      </span>
+    );
+  }
   if (entry.kind === "log") {
     const l = entry.log;
     const tb = l.tableId ? state.tables[l.tableId] : undefined;
@@ -1125,6 +1235,7 @@ const MonthCalendar = memo(function MonthCalendar({
   const [year, month] = ym.split("-").map(Number);
   const cells = useMemo(() => monthCells(ym), [ym]);
   const selectedInMonth = selectedDay.startsWith(`${ym}-`);
+  const { googleBusy } = state.prefs;
   const entriesByDate = useMemo(() => {
     const inFilter = (tableId?: string) => tableFilter === "all" || tableId === tableFilter;
     const map = new Map<string, GridEntry[]>();
@@ -1148,8 +1259,11 @@ const MonthCalendar = memo(function MonthCalendar({
       (l) => sessionDays(l),
     );
     for (const [d, ls] of byDate) for (const l of ls) push(d, { kind: "log", key: l.id, log: l });
+    // 自分の Google カレンダーの時間帯（題は読まない）。卓の予定の後ろに 1 日 1 行で添える
+    for (const [d, plans] of plansByDate(googleBusyPlans({ googleBusy })))
+      push(d, { kind: "own", key: `own-${d}`, date: d, plans });
     return map;
-  }, [events, polls, logs, tableFilter]);
+  }, [events, polls, logs, tableFilter, googleBusy]);
 
   const openEntry = (e: GridEntry) => {
     if (e.kind === "event") onOpenEvent(e.ev);
@@ -1315,6 +1429,7 @@ const MonthCalendar = memo(function MonthCalendar({
                       {has("event") && <span className="size-1.5 rounded-full bg-primary" />}
                       {has("poll") && <span className="size-1.5 rounded-full bg-warning" />}
                       {has("log") && <span className="size-1.5 rounded-full bg-base-content/40" />}
+                      {has("own") && <span className="size-1.5 rounded-full border border-base-content/50" />}
                     </span>
                   )}
                   <span className="hidden min-w-0 flex-col gap-0.5 sm:flex">
@@ -1330,7 +1445,7 @@ const MonthCalendar = memo(function MonthCalendar({
                           type="button"
                           tabIndex={-1}
                           aria-label={entryLabel(e, state.scenarios)}
-                          onClick={() => openEntry(e)}
+                          onClick={() => (e.kind === "own" ? onSelectDay(dayStr) : openEntry(e))}
                           className={cx(
                             "block w-full truncate rounded px-1.5 py-0.5 text-left text-xs leading-tight",
                             e.kind === "event" &&
@@ -1338,12 +1453,16 @@ const MonthCalendar = memo(function MonthCalendar({
                             e.kind === "poll" &&
                               "border border-dashed border-warning/60 text-base-content/80 hover:bg-base-200",
                             e.kind === "log" && "bg-base-200 text-ink2 hover:bg-base-300/60",
+                            e.kind === "own" && "text-ink2 hover:bg-base-200",
                           )}
                         >
                           {entryKindWord(e) && (
                             <span className="mr-1 font-semibold text-ink2">{entryKindWord(e)}</span>
                           )}
-                          {entryTitle(e, state.scenarios)}
+                          {/* 狭いマスでは始まりだけ。終わりまでは選んだ日の一覧で */}
+                          {e.kind === "own"
+                            ? `${planTimeText(e.plans[0]!, e.date).split("〜")[0]}${e.plans.length > 1 ? " ほか" : ""}`
+                            : entryTitle(e, state.scenarios)}
                         </button>
                       </HoverCard>
                     ))}
@@ -1391,6 +1510,20 @@ const MonthCalendar = memo(function MonthCalendar({
         ) : (
           <ul className="list border-t border-base-300 text-sm">
             {dayEntries.map((e) => {
+              if (e.kind === "own")
+                return (
+                  <li key={e.key} className="flex items-center gap-3 px-4 py-2.5 sm:px-5">
+                    <span
+                      className="size-2 shrink-0 rounded-full border border-base-content/50"
+                      aria-hidden
+                    />
+                    <span className="min-w-0 flex-1 tabular-nums text-ink2">
+                      <span className="mr-2 font-semibold">自分の予定</span>
+                      {entryTitle(e, state.scenarios)}
+                    </span>
+                    <span className="hidden shrink-0 text-xs text-ink2 sm:inline">Google カレンダー</span>
+                  </li>
+                );
               const dot =
                 e.kind === "event" ? "bg-primary" : e.kind === "poll" ? "bg-warning" : "bg-base-content/40";
               const when =

@@ -95,7 +95,6 @@ const RESERVED_PRIMITIVES = [
   "PageHead",
   "SectionTitle",
   "SplitLayout",
-  "StatBar",
   "Modal",
   "Select",
   "Seg",
@@ -1148,7 +1147,7 @@ function checkGoogleButton(violations: Violation[]): void {
  * 文面を 1 つずつ禁じるのではなく、用語集の「避ける表現」をここに写して機械で守る（2026-11-23「目録とかいう謎ワードやめて」）
  */
 const GLOSSARY_AVOID: readonly { re: RegExp; use: string }[] = [
-  { re: /目録/, use: "画面には一覧の名前を出さない（シナリオを選べる人: 自分だけ / ほかの人も選べる）" },
+  { re: /目録/, use: "画面には一覧の名前を出さない（シナリオの共有範囲: セッションと同じ / 全員）" },
   { re: /カルテ/, use: "キャラクター / 共有ページ" },
   { re: /実施日/, use: "遊んだ日時 / 遊んだ日" },
   { re: /公開範囲|読める人|見られる人/, use: "共有範囲" },
@@ -1496,7 +1495,29 @@ function checkServerCatalog(violations: Violation[]): void {
   }
 }
 
+/**
+ * lint:motion-fill
+ * 現れる動き（.motion-*）の animation-fill-mode に both・forwards を使わない。終わった後も transform が効き続け、
+ * その要素が中の position: fixed（暦・候補）の基準になって、あり得ない位置に開く（2026-11-24）
+ */
+function checkMotionFill(violations: Violation[]): void {
+  const file = "src/styles.css";
+  const lines = fs.readFileSync(path.join(ROOT_DIR, file), "utf8").split(/\r?\n/);
+  let selector = "";
+  lines.forEach((line, i) => {
+    if (/\{\s*$/.test(line)) selector = line;
+    if (/^\s*\.motion-/.test(selector) && /animation:.*\b(?:both|forwards)\b/.test(line))
+      violations.push({
+        file,
+        line: i + 1,
+        message:
+          "motion-fill: use animation-fill-mode backwards on .motion-* (both/forwards keeps a transform and breaks position: fixed popovers inside).",
+      });
+  });
+}
+
 const violations: Violation[] = [];
+checkMotionFill(violations);
 checkNoJsFiles(violations);
 checkNoRawSelect(violations);
 checkSrcRules(violations);

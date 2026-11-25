@@ -126,9 +126,9 @@ describe("Calendar + schedule + ics 結合テスト", () => {
 
     await user.click(screen.getByRole("button", { name: /^編集テスト/ }));
     const dialog = await screen.findByRole("dialog");
-    // 閲覧: 返事の選択肢は出さず、候補は開始だけ・長さは 1 つだけ
+    // 閲覧: 返事の選択肢は出さず、候補は開始だけ・長さは日時の列の見出しに 1 つだけ
     expect(dialog.querySelector('[role="radiogroup"]')).toBeNull();
-    expect(dialog.textContent).toContain("所要時間3時間");
+    expect(dialog.textContent).toContain("開始から3時間");
     expect(dialog.textContent).not.toContain("21:00–24:00");
 
     await user.click(screen.getByRole("button", { name: "編集" }));

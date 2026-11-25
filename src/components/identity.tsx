@@ -1,7 +1,7 @@
 /**
  * 人・キャラクター・発言者の表示（顔アイコン、顔の重なり、ブランドアイコン、参加者の選択）。
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 const boothIconUrl = "/booth-icon.png";
 const taltoIconUrl = "/talto-icon.png";
@@ -9,7 +9,15 @@ import { identiconDataUri } from "../lib/identicon";
 import { memberCandidates } from "../lib/people";
 import { speakerRoleOptions } from "../lib/roles";
 import type { Character, MsgKind, Provider, State, User } from "../types";
-import { IconBrandX, IconDiscord, IconGoogle, IconUpload, IconUserPlus, IconX } from "./icons";
+import {
+  IconBrandX,
+  IconChevronDown,
+  IconDiscord,
+  IconGoogle,
+  IconUpload,
+  IconUserPlus,
+  IconX,
+} from "./icons";
 import { Combobox, Select, cx } from "./ui";
 import type { ComboboxOption } from "./ui";
 import { userFacingError } from "../lib/user-error";
@@ -214,6 +222,7 @@ export function PlayerPicker({
   onChange,
   quickIds,
   quickLabel = "卓のメンバー",
+  otherLabel = "ほかの卓の人を追加",
   fixedIds,
   fixedLabel = "自分",
   exclude,
@@ -222,9 +231,11 @@ export function PlayerPicker({
   state: State;
   selected: string[];
   onChange: (ids: string[]) => void;
-  /** 候補（省略時は自分の卓のメンバー。tableId の卓のメンバーが先） */
+  /** ボタンで並べる候補（省略時は tableId の卓のメンバー） */
   quickIds?: string[];
   quickLabel?: string;
+  /** 卓にいない人（自分のほかの卓のメンバー）を足す欄の名前 */
+  otherLabel?: string;
   /** 外せない固定メンバー（卓作成者本人など）をリスト先頭に表示する */
   fixedIds?: string[];
   fixedLabel?: string;
@@ -242,9 +253,26 @@ export function PlayerPicker({
 
   const quick = useMemo(
     () =>
-      (quickIds ?? memberCandidates(state, tableId)).filter((id) => state.users[id] && !blockedIds.has(id)),
+      (quickIds ?? (tableId ? (state.tables[tableId]?.memberIds ?? []) : [])).filter(
+        (id) => state.users[id] && !blockedIds.has(id),
+      ),
     [quickIds, state, tableId, blockedIds],
   );
+  /* この卓にいない人は、どの卓の人かを見出しにして選ぶ。だれの並びか分からないボタンを並べない（P5） */
+  const others = useMemo<ComboboxOption[]>(() => {
+    const listed = new Set([...quick, ...blockedIds, state.me]);
+    return memberCandidates(state, tableId)
+      .filter((id) => state.users[id] && !listed.has(id))
+      .map((id) => ({
+        value: id,
+        label: state.users[id]!.name,
+        hint: state.users[id]!.handle ? `@${state.users[id]!.handle}` : undefined,
+        group: Object.values(state.tables).find(
+          (t) => t.id !== tableId && t.memberIds.includes(id) && t.memberIds.includes(state.me),
+        )?.name,
+      }))
+      .sort((a, b) => (a.group ?? "").localeCompare(b.group ?? "", "ja"));
+  }, [state, tableId, quick, blockedIds]);
   const fixedUsers = useMemo(
     () => (fixedIds ?? []).map((id) => state.users[id]).filter((u): u is User => Boolean(u)),
     [fixedIds, state.users],
@@ -284,8 +312,25 @@ export function PlayerPicker({
         </div>
       )}
 
+      {others.length > 0 && (
+        <Combobox
+          size="sm"
+          ariaLabel={otherLabel}
+          className={cx("w-full sm:max-w-sm", quick.length > 0 && "mt-3")}
+          value=""
+          onChange={(id) => id && onChange([...selected, id])}
+          options={others}
+          placeholder={otherLabel}
+        />
+      )}
+
       {(fixedUsers.length > 0 || selectedUsers.length > 0) && (
-        <ul className={cx("list rounded-box border border-base-300", quick.length > 0 && "mt-3")}>
+        <ul
+          className={cx(
+            "list rounded-box border border-base-300",
+            quick.length + others.length > 0 && "mt-3",
+          )}
+        >
           {fixedUsers.map((u) => (
             <li key={u.id} className="flex items-center gap-3 py-2 pl-3 pr-3">
               <Avatar u={u} size={26} />
@@ -324,8 +369,8 @@ export function UserName({ u, className }: { u: User; className?: string }) {
 }
 
 /**
- * 画像を選ぶ欄（人・卓の画像）。並べた見本から選ぶ: 生成した画像（既定）・ほかの候補（Google の画像など）・
- * 上げた画像・「画像を上げる」。上げた画像は正方形に切り抜いて縮める。value が空なら生成画像
+ * 画像の欄（人・卓の画像）。いまの画像を 1 つだけ見せ、選ぶとその場で置き換える（前の画像に戻す手順は持たない）。
+ * 画像そのものを押しても選べる。上げた画像は正方形に切り抜いて縮める。value が空なら生成画像
  */
 export function ImageUploadField({
   value,
@@ -342,96 +387,63 @@ export function ImageUploadField({
   /** 欄の名前（読み上げ用）。例: 「アイコン」 */
   label: string;
   maxChars?: number;
-  /** 生成画像のほかに選べる画像（Google の画像など） */
+  /** 上げる代わりに使える画像（Google の画像など） */
   choices?: readonly { value: string; label: string }[];
 }) {
   const [error, setError] = useState<string | null>(null);
-  // 上げた画像は、別の見本を選んでもこの欄を開いている間は残す（選び直せるように）
-  const preset = new Set(["", ...choices.map((c) => c.value)]);
-  const [uploaded, setUploaded] = useState(() => (preset.has(value) ? "" : value));
-  const tiles = [
-    { value: "", label: "生成" },
-    ...choices,
-    ...(uploaded ? [{ value: uploaded, label: "上げた画像" }] : []),
-  ];
-  const pick = (next: string) => {
-    setError(null);
-    onChange(next);
-  };
-  const tileClass = (on: boolean) =>
-    cx(
-      "flex w-24 flex-col items-center gap-2 whitespace-nowrap rounded-box border px-2 pb-2.5 pt-3 text-xs transition-colors",
-      on
-        ? "border-primary bg-primary/10 font-bold text-primary"
-        : "border-base-300 text-ink2 hover:border-base-content/30 hover:text-base-content",
-    );
+  const inputRef = useRef<HTMLInputElement>(null);
+  const others = choices.filter((c) => c.value !== value);
   return (
     <div>
-      <div
-        role="radiogroup"
-        aria-label={label}
-        className="flex flex-wrap gap-2"
-        onKeyDown={(e) => {
-          if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
-          e.preventDefault();
-          const i = Math.max(
-            0,
-            tiles.findIndex((t) => t.value === value),
-          );
-          const step = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1;
-          const next = tiles[(i + step + tiles.length) % tiles.length]!;
-          pick(next.value);
-          requestAnimationFrame(() =>
-            (
-              e.currentTarget.querySelector('[role="radio"][aria-checked="true"]') as HTMLElement | null
-            )?.focus(),
-          );
-        }}
-      >
-        {tiles.map((t) => {
-          const on = t.value === value;
-          return (
+      <div role="group" aria-label={label} className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-hidden
+          className="relative shrink-0 rounded-2xl transition-opacity hover:opacity-80"
+          onClick={() => inputRef.current?.click()}
+        >
+          {render(value)}
+        </button>
+        <div className="flex flex-wrap gap-2">
+          <label className="btn btn-sm cursor-pointer">
+            <IconUpload width={16} height={16} aria-hidden />
+            画像を変更
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              aria-label={`${label}の画像を変更`}
+              onChange={async (e) => {
+                const input = e.currentTarget;
+                const file = input.files?.[0];
+                if (!file) return;
+                setError(null);
+                try {
+                  onChange(await readAvatarImageFile(file, { maxSize: 128, maxChars }));
+                } catch (err) {
+                  setError(userFacingError(err, "画像を読み込めませんでした。"));
+                } finally {
+                  input.value = "";
+                }
+              }}
+            />
+          </label>
+          {others.map((c) => (
             <button
-              key={t.label}
+              key={c.value}
               type="button"
-              role="radio"
-              aria-checked={on}
-              tabIndex={on ? 0 : -1}
-              className={tileClass(on)}
-              onClick={() => pick(t.value)}
+              className="btn btn-quiet btn-sm"
+              onClick={() => {
+                setError(null);
+                onChange(c.value);
+              }}
             >
-              {render(t.value)}
-              {t.label}
+              {c.label}の画像を使う
             </button>
-          );
-        })}
-        <label className={cx(tileClass(false), "cursor-pointer border-dashed")}>
-          <span className="flex size-14 items-center justify-center">
-            <IconUpload width={22} height={22} aria-hidden />
-          </span>
-          画像を選ぶ
-          <input
-            type="file"
-            accept="image/*"
-            className="sr-only"
-            aria-label={`${label}の画像を上げる`}
-            onChange={async (e) => {
-              const input = e.currentTarget;
-              const file = input.files?.[0];
-              if (!file) return;
-              setError(null);
-              try {
-                const data = await readAvatarImageFile(file, { maxSize: 128, maxChars });
-                setUploaded(data);
-                onChange(data);
-              } catch (err) {
-                setError(userFacingError(err, "画像を読み込めませんでした。"));
-              } finally {
-                input.value = "";
-              }
-            }}
-          />
-        </label>
+          ))}
+        </div>
       </div>
       {error && (
         <p className="mt-2 text-sm text-error" role="alert">
@@ -518,6 +530,58 @@ export function readAvatarImageFile(
   });
 }
 
+/** 登場人物でない発言者（場面の描写・ツールのシステムメッセージ）を分ける。顔もキャラクターも割り当てない */
+export function splitCharacterSpeakers<T extends { kind: MsgKind }>(
+  speakers: readonly T[],
+): { characters: T[]; others: T[] } {
+  const other = (k: MsgKind) => k === "NARRATION" || k === "SYSTEM";
+  return {
+    characters: speakers.filter((s) => !other(s.kind)),
+    others: speakers.filter((s) => other(s.kind)),
+  };
+}
+
+/** 描写・システムの発言者。自明なので畳んでおき、推定が外れたときだけ開いて役割を直す */
+export function OtherSpeakers({
+  systemId,
+  speakers,
+  onRoleChange,
+}: {
+  systemId: string | undefined;
+  speakers: readonly { sp: string; kind: MsgKind }[];
+  onRoleChange: (sp: string, kind: MsgKind) => void;
+}) {
+  if (speakers.length === 0) return null;
+  return (
+    <details className="group">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-sm font-medium text-ink2 hover:text-base-content">
+        <IconChevronDown
+          width={16}
+          height={16}
+          className="-rotate-90 transition-transform group-open:rotate-0"
+          aria-hidden
+        />
+        描写・システム
+      </summary>
+      <ul className="list mt-1">
+        {speakers.map(({ sp, kind }) => (
+          <li key={sp} className="flex items-center gap-3 py-2">
+            <span className="min-w-0 flex-1 truncate text-sm">{sp}</span>
+            <Select
+              size="sm"
+              ariaLabel={`${sp}の役割`}
+              className="w-[6.5rem]"
+              value={kind}
+              onChange={(v) => onRoleChange(sp, v)}
+              options={speakerRoleOptions(systemId, kind)}
+            />
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export function SpeakerConfigGrid({
   systemId,
   speakers,
@@ -564,11 +628,12 @@ export function SpeakerConfigGrid({
     ];
   }, [state.characters, state.users]);
 
+  const { characters, others } = splitCharacterSpeakers(speakers);
   const knownValues = useMemo(() => new Set(baseIconOptions.map((o) => o.value)), [baseIconOptions]);
 
   return (
     <div className="grid sm:grid-cols-2 gap-3">
-      {speakers.map(({ sp, kind }) => {
+      {characters.map(({ sp, kind }) => {
         const currentExplicit = speakerIcons[sp] ?? "";
         const previewSrc = resolveSpeakerAvatarSrc(sp, kind, speakerIcons, state, indexes);
         const options =
@@ -637,6 +702,11 @@ export function SpeakerConfigGrid({
           </div>
         );
       })}
+      {others.length > 0 && (
+        <div className="sm:col-span-2">
+          <OtherSpeakers systemId={systemId} speakers={others} onRoleChange={onRoleChange} />
+        </div>
+      )}
     </div>
   );
 }

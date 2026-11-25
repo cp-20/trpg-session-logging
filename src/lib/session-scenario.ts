@@ -4,6 +4,7 @@
  */
 import { SYSTEMS } from "../data/systems";
 import type { Log, Scenario } from "../types";
+import { newScenarioExtras, type NewScenarioInput } from "./new-scenario";
 
 /** シナリオが見つからないとき（共有ページで読めない・壊れたデータ）の呼び名 */
 export const UNKNOWN_SCENARIO_TITLE = "シナリオ不明";
@@ -17,27 +18,20 @@ export function sessionTitle(
 }
 
 /** 利用者が足すシナリオ。private なら共有シナリオ一覧に出さない（自作・事前相談など） */
-export function userScenario(input: {
-  id: string;
-  title: string;
-  author?: string;
-  systemId: string;
-  uid: string;
-  private?: boolean;
-}): Scenario {
+export function userScenario(
+  input: Omit<NewScenarioInput, "author"> & { id: string; author?: string; systemId: string; uid: string },
+): Scenario {
   return {
     id: input.id,
     title: input.title.trim(),
     author: input.author?.trim() ?? "",
     systemId: input.systemId,
-    source: "manual",
     emoji: SYSTEMS[input.systemId]?.emoji ?? "🎲",
     bg: "#e6e6f0",
-    tags: [],
     claimedBy: null,
     addedBy: "user",
     addedByUid: input.uid,
-    ...(input.private ? { private: true } : {}),
+    ...newScenarioExtras({ ...input, author: input.author ?? "" }),
   };
 }
 

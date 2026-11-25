@@ -78,7 +78,8 @@ describe("HTML / XML fallback parsers without DOMParser (Hermes compatibility)",
     expect(res?.log.channels.map((c) => c.name)).toContain("チャット");
     const secret = res?.log.channels.find((c) => c.name === "秘匿HO1");
     expect(secret?.secret).toBe(true);
-    expect(secret?.msgs[0]?.type).toBe("note");
+    // 個別の資料は場面の見出しではない
+    expect(secret?.msgs[0]?.type).toBe("text");
   });
 
   it("無効な HTML / XML は DOMParser なしでも null を返す", () => {

@@ -34,7 +34,8 @@ describe("importLogFromText", () => {
     expect(res?.log.channels.map((c) => c.name)).toContain("チャット");
     const secret = res?.log.channels.find((c) => c.name === "秘匿HO1");
     expect(secret?.secret).toBe(true);
-    expect(secret?.msgs[0]?.type).toBe("note");
+    // 個別の資料は場面の見出しではない
+    expect(secret?.msgs[0]?.type).toBe("text");
   });
 
   it("自由形式のテキストログ (Tekey 形式・名前「本文」) は取り込まない", () => {
@@ -322,7 +323,7 @@ KP佐々 \u2014 2026/11/10 21:02
     (globalThis as { DOMParser?: typeof DOMParser }).DOMParser = undefined;
     try {
       const noDomUdo = importLogFromText(
-        `<chat-log><chat type="system" time="1794831600">◆ システムノート</chat><chat></chat></chat-log>`,
+        `<chat-log><chat type="system" time="1794831600">◆ システムの場面転換</chat><chat></chat></chat-log>`,
       )!;
       expect(noDomUdo.sourceLabel).toBe("Udonarium");
       expect(noDomUdo.log.channels[0]?.msgs[0]).toMatchObject({

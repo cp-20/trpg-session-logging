@@ -16,14 +16,7 @@ import {
 import { createPortal } from "react-dom";
 import type { ComponentPropsWithRef, CSSProperties, ReactNode, Ref } from "react";
 import { Link } from "../lib/router";
-import {
-  MARK_BOARD,
-  MARK_BOARD_OPACITY,
-  MARK_BOARD_WIDTH,
-  MARK_RADIUS,
-  MARK_STONE,
-  MARK_VIEWBOX,
-} from "./brand";
+import { MARK_RADIUS, MARK_SHAPE, MARK_VIEWBOX } from "./brand";
 import { getJapaneseHolidayName } from "../lib/holidays";
 import { fmtDelta, todayStr } from "../lib/format";
 import { fmtDateText, parseDateText, weekdaySuffix } from "../lib/date-text";
@@ -44,12 +37,12 @@ import {
   IconBooks,
   IconCalendar,
   IconCheck,
+  IconCopy,
   IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
   IconDots,
   IconFilter,
-  IconLink,
   IconLock,
   IconMinus,
   IconPlus,
@@ -122,8 +115,8 @@ export const SCOPE_META: Record<Scope, { label: string; hint: string; who: strin
     },
     public: {
       label: "公開",
-      hint: "リンクを知っている人なら誰でも読めます",
-      who: "リンクを知っている人",
+      hint: "リンクを知っている人全員が読めます",
+      who: "リンクを知っている人全員",
       Icon: IconWorld,
     },
   };
@@ -143,19 +136,44 @@ export function ScopePicker({
 }) {
   const name = useId();
   return (
-    <div role="radiogroup" aria-label={ariaLabel} className="grid gap-2 sm:grid-cols-3">
-      {(["members", "passed", "public"] as const).map((v) => {
-        const M = SCOPE_META[v];
-        const on = value === v;
-        const descId = `${name}-${v}`;
+    <ChoiceCards
+      name={name}
+      ariaLabel={ariaLabel}
+      className="sm:grid-cols-3"
+      value={value}
+      onChange={onChange}
+      options={(["members", "passed", "public"] as const).map((v) => ({ v, ...SCOPE_META[v] }))}
+    />
+  );
+}
+
+/** 見比べて選ぶ少数の選択肢。名前の下に「だれが」を添える（ScopePicker・ScenarioVisibilityPicker の中身） */
+function ChoiceCards<T extends string>({
+  name,
+  ariaLabel,
+  className,
+  value,
+  onChange,
+  options,
+}: {
+  name: string;
+  ariaLabel: string;
+  className?: string;
+  value: T;
+  onChange: (v: T) => void;
+  options: readonly { v: T; label: string; who: string; Icon: typeof IconLock }[];
+}) {
+  return (
+    <div role="radiogroup" aria-label={ariaLabel} className={cx("grid gap-2", className)}>
+      {options.map((o) => {
+        const on = value === o.v;
+        const descId = `${name}-${o.v}`;
         return (
           <label
-            key={v}
+            key={o.v}
             className={cx(
-              "flex items-start gap-2.5 rounded-lg border px-3 py-2.5 transition-colors",
-              on
-                ? "cursor-pointer border-primary bg-primary/5"
-                : "cursor-pointer border-base-300 hover:bg-base-200/60",
+              "flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 transition-colors",
+              on ? "border-primary bg-primary/5" : "border-base-300 hover:bg-base-200/60",
             )}
           >
             <input
@@ -165,21 +183,54 @@ export function ScopePicker({
               checked={on}
               aria-labelledby={`${descId}-label`}
               aria-describedby={descId}
-              onChange={() => onChange(v)}
+              onChange={() => onChange(o.v)}
             />
             <span className="min-w-0">
               <span id={`${descId}-label`} className="flex items-center gap-1.5 text-sm font-bold">
-                <M.Icon width={15} height={15} className="shrink-0 text-ink2" aria-hidden />
-                {M.label}
+                <o.Icon width={15} height={15} className="shrink-0 text-ink2" aria-hidden />
+                {o.label}
               </span>
               <span id={descId} className="mt-0.5 block text-xs text-ink2">
-                {M.who}
+                {o.who}
               </span>
             </span>
           </label>
         );
       })}
     </div>
+  );
+}
+
+/**
+ * 足したシナリオの共有範囲。restricted（Scenario.private）は「自分だけ」ではない: そのシナリオのセッションを
+ * 読める人（卓のメンバーなど）には題名が見えるので、セッションの共有範囲に従うと示す
+ */
+export const SCENARIO_VISIBILITY_META = {
+  restricted: {
+    label: "セッションと同じ",
+    who: "ほかの人の検索には出ません",
+    Icon: IconLock,
+  },
+  everyone: { label: "全員", who: "だれでも探して選べます", Icon: IconWorld },
+} as const;
+
+export function ScenarioVisibilityPicker({
+  isPrivate,
+  onChange,
+}: {
+  isPrivate: boolean;
+  onChange: (isPrivate: boolean) => void;
+}) {
+  const name = useId();
+  return (
+    <ChoiceCards
+      name={name}
+      ariaLabel="シナリオの共有範囲"
+      className="sm:grid-cols-2"
+      value={isPrivate ? "restricted" : "everyone"}
+      onChange={(v) => onChange(v === "restricted")}
+      options={(["restricted", "everyone"] as const).map((v) => ({ v, ...SCENARIO_VISIBILITY_META[v] }))}
+    />
   );
 }
 
@@ -1202,15 +1253,9 @@ export function DoneMark({ size = 64 }: { size?: number }) {
       aria-hidden
       fill="none"
     >
-      <circle
-        cx="32"
-        cy="32"
-        r="28"
-        pathLength={1}
-        stroke="currentColor"
-        strokeWidth="3"
-        className="done-ring"
-      />
+      <Burst cx={32} cy={32} from={31} to={42} />
+      <circle cx="32" cy="32" r="29.5" fill="currentColor" className="done-disc" />
+      <circle cx="32" cy="32" r="26.5" className="done-paper fill-base-100" />
       <path
         d="M20 33 L28.5 41 L45 24"
         pathLength={1}
@@ -1224,38 +1269,90 @@ export function DoneMark({ size = 64 }: { size?: number }) {
   );
 }
 
+/** 完了の演出の最後に、短い線が外へはじける（一度だけ。reduced-motion では出ない） */
+function Burst({
+  cx: x,
+  cy: y,
+  from,
+  to,
+  at,
+}: {
+  cx: number;
+  cy: number;
+  from: number;
+  to: number;
+  at?: string;
+}) {
+  return (
+    <g stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+      {Array.from({ length: 10 }, (_, i) => {
+        const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+        const r1 = i % 2 ? from + (to - from) * 0.65 : to;
+        const p = (r: number) => `${(x + Math.cos(a) * r).toFixed(2)} ${(y + Math.sin(a) * r).toFixed(2)}`;
+        return (
+          <path
+            key={i}
+            d={`M${p(from)} L${p(r1)}`}
+            pathLength={1}
+            className="tk-burst"
+            style={at ? ({ "--burst-at": at } as CSSProperties) : undefined}
+          />
+        );
+      })}
+    </g>
+  );
+}
+
 /**
- * 記録の完了の演出: その回が 1 枚の譜になる。3 本の段が左から引かれ、ダイスの点が時間の順に置かれ、
- * 最後に終止線が入る（朱はクリティカル、白抜きはファンブル）。点は scoreMarks（src/lib/score-marks.ts）で作る
+ * 記録の完了の演出: その回が 1 枚の譜になる。幕が引かれて 3 本の段が現れ、ダイスの点が時間の順に落ちて弾み、
+ * 最後に終止線が立ち上がってはじける（朱はクリティカル、白抜きはファンブル）。点は scoreMarks（src/lib/score-marks.ts）で作る
  */
 export function ScoreInscription({ marks, width = 240 }: { marks: readonly ScoreMark[]; width?: number }) {
   const lanes = [20, 38, 56] as const;
   const [x0, x1] = [12, 212];
+  const at = (m: ScoreMark) => ({ cx: x0 + 6 + m.x * (x1 - x0 - 6), cy: lanes[m.lane] });
   return (
     <svg
       viewBox="0 0 240 76"
       width={width}
       height={(width * 76) / 240}
       aria-hidden
-      className="score-inscription"
+      className="score-inscription text-primary"
     >
-      {lanes.map((y) => (
-        <path key={y} d={`M${x0} ${y} H226`} pathLength={1} className="score-line" />
-      ))}
-      {marks.map((m, i) => (
-        <circle
-          key={i}
-          cx={x0 + 6 + m.x * (x1 - x0 - 6)}
-          cy={lanes[m.lane]}
-          r={m.tone === "plain" ? 3.4 : 4.8}
-          className={cx("score-mark", m.tone === "crit" && "is-crit", m.tone === "fumble" && "is-fumble")}
-          style={{ "--x": m.x } as CSSProperties}
+      {lanes.map((y, i) => (
+        <path
+          key={y}
+          d={`M${x0} ${y} H226`}
+          pathLength={1}
+          className="score-line"
+          style={{ "--i": i } as CSSProperties}
         />
       ))}
-      <g className="score-end">
-        <path d="M222 12 V64" strokeWidth="1.5" />
-        <path d="M229 12 V64" strokeWidth="4.5" />
-      </g>
+      {marks.map((m, i) => (
+        <g key={i} style={{ "--x": m.x } as CSSProperties}>
+          {m.tone === "crit" && <circle {...at(m)} r={5.5} className="score-ripple" />}
+          <circle
+            {...at(m)}
+            r={m.tone === "plain" ? 3.4 : 4.8}
+            className={cx("score-mark", m.tone === "crit" && "is-crit", m.tone === "fumble" && "is-fumble")}
+          />
+        </g>
+      ))}
+      <path d="M222 12 V64" strokeWidth="1.5" className="score-bar" style={{ "--i": 0 } as CSSProperties} />
+      <path d="M229 12 V64" strokeWidth="4.5" className="score-bar" style={{ "--i": 1 } as CSSProperties} />
+      <Burst cx={227} cy={38} from={31} to={42} at="1620ms" />
+      {/* 幕: 薄い主色、主色の順に左から右へ通り過ぎる */}
+      <rect
+        x="4"
+        y="8"
+        width="232"
+        height="60"
+        rx="4"
+        fill="currentColor"
+        opacity="0.22"
+        className="score-curtain"
+      />
+      <rect x="4" y="8" width="232" height="60" rx="4" fill="currentColor" className="score-curtain" />
     </svg>
   );
 }
@@ -1359,8 +1456,9 @@ export function CompletionModal({
         >
           {renderAction(primary, "btn btn-primary w-full", -1)}
           {secondary.length > 0 && (
-            <div className="flex flex-wrap justify-center gap-2">
-              {secondary.map((a, i) => renderAction(a, "btn btn-quiet", i))}
+            // 主と同じ幅の中に等分で並べる。3 つなら縦に積む（大きさがばらつかないように。P13）
+            <div className={cx("grid gap-2", secondary.length === 2 && "sm:grid-cols-2")}>
+              {secondary.map((a, i) => renderAction(a, "btn btn-quiet w-full", i))}
             </div>
           )}
         </div>
@@ -1387,7 +1485,7 @@ export function Toggle({
   const input = (
     <input
       type="checkbox"
-      className="toggle toggle-primary"
+      className="toggle toggle-sm switch"
       aria-label={showLabel ? undefined : label}
       checked={on}
       disabled={disabled}
@@ -1486,17 +1584,19 @@ export function CopyBox({ text, note }: { text: string; note?: string }) {
   }
 
   return (
-    <div className="flex gap-2 items-center bg-base-200/70 border border-base-300 rounded-lg pl-3.5 pr-1.5 py-1.5 text-sm">
+    <div className="flex gap-2 items-center bg-base-200/70 border border-base-300 rounded-lg pl-3.5 pr-1 py-1 text-sm">
       <code className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-ink2">{text}</code>
       <button
         type="button"
-        className={cx("btn btn-sm shrink-0 w-36", copied && "text-success")}
+        className={cx("icon-btn shrink-0", copied && "text-success")}
         onClick={handleCopy}
-        aria-live="polite"
+        aria-label={copied ? "コピーしました" : "コピー"}
       >
-        {copied ? <IconCheck width={16} height={16} /> : <IconLink width={16} height={16} />}
-        {copied ? "コピーしました" : "コピー"}
+        {copied ? <IconCheck width={18} height={18} /> : <IconCopy width={18} height={18} />}
       </button>
+      <span role="status" className="sr-only">
+        {copied ? "コピーしました" : ""}
+      </span>
       {note && <span className="text-xs text-ink2">{note}</span>}
     </div>
   );
@@ -1551,21 +1651,27 @@ export function Field({
   children: ReactNode;
   noMargin?: boolean;
   /**
-   * 中身がボタンの並び（Seg など）のとき。<label> で包むと最初のボタンがラベル全体の文字を名前に取ってしまうので、
-   * <div> で包み、ラベルは aria-labelledby だけで結ぶ
+   * 中身がボタンの並び（Seg など）のとき。見出しを押しても最初のボタンを押さないよう、<label for> で結ばない
    */
   group?: boolean;
 }) {
   const labelId = useId();
   const hintId = useId();
-  const ref = useRef<HTMLElement>(null);
-  // <label> で包むと Chrome は入力値までラベル名に含める（「表示名 みかん」と読まれる）。
+  const ref = useRef<HTMLDivElement>(null);
+  const labelRef = useRef<HTMLLabelElement>(null);
+  // 欄全体を <label> で包まない。包むと、欄のどこにポインタを置いても中の最初のボタン（札の × など）が
+  // ホバーされて見え、押すとそれが押される。見出しだけを <label for> にして、中の最初の入力要素に結ぶ。
+  // また <label> で包むと Chrome は入力値までラベル名に含める（「表示名 みかん」と読まれる）。
   // 中の最初の入力要素にラベル文言だけを名前として、ヒントを説明として結び付ける
   useEffect(() => {
     const control = ref.current?.querySelector<HTMLElement>(
       "input:not([type=hidden]), textarea, select, button[aria-haspopup], [role=combobox], [role=radiogroup], [role=listbox]",
     );
     if (!control) return;
+    if (!group) {
+      if (!control.id) control.id = `${labelId}-control`;
+      labelRef.current?.setAttribute("for", control.id);
+    }
     if (!control.hasAttribute("aria-labelledby") && !control.hasAttribute("aria-label")) {
       if (control.tagName === "BUTTON") {
         // 選択式のボタンは見えている選択値も名前に残す（ラベル + 自身の内容）
@@ -1581,24 +1687,33 @@ export function Field({
         control.setAttribute("aria-describedby", [...described, hintId].join(" ").trim());
       }
     }
-  }, [labelId, hintId, hint]);
-  const Wrapper = group ? "div" : "label";
+  }, [labelId, hintId, hint, group]);
   return (
-    <Wrapper
-      ref={ref as Ref<HTMLLabelElement & HTMLDivElement>}
+    <div
+      ref={ref}
       className={cx("form-control w-full flex-col gap-1.5", !noMargin && "mt-4")}
       style={{ display: "flex" }}
     >
-      <span id={labelId} className="label-text text-sm font-semibold text-base-content/90">
-        {label}
-      </span>
+      {group ? (
+        <span id={labelId} className="label-text text-sm font-semibold text-base-content/90">
+          {label}
+        </span>
+      ) : (
+        <label
+          ref={labelRef}
+          id={labelId}
+          className="label-text self-start text-sm font-semibold text-base-content/90"
+        >
+          {label}
+        </label>
+      )}
       {children}
       {hint && (
         <span id={hintId} className="text-xs text-ink2 leading-5">
           {hint}
         </span>
       )}
-    </Wrapper>
+    </div>
   );
 }
 
@@ -1864,7 +1979,7 @@ export function LegalLinks({ className }: { className?: string }) {
 }
 
 /**
- * 卓譜のブランドマーク（盤と一手。形は brand.ts）。地は文字色（currentColor）で塗り、盤と駒は `on` の色で抜く。
+ * 卓譜のブランドマーク（喋るダイス。形は brand.ts）。地は文字色（currentColor）で塗り、吹き出しのダイスは `on` の色で抜く。
  * 既定の `on` は面の色なので、テーマが変わっても穴が開いて見える。UI のアイコンではないので `data-brand` を付ける
  */
 export function LogoMark({
@@ -1886,15 +2001,7 @@ export function LogoMark({
       aria-hidden
     >
       <rect width={MARK_VIEWBOX} height={MARK_VIEWBOX} rx={MARK_RADIUS} fill="currentColor" />
-      <path
-        d={MARK_BOARD}
-        fill="none"
-        stroke={on}
-        strokeOpacity={MARK_BOARD_OPACITY}
-        strokeWidth={MARK_BOARD_WIDTH}
-        strokeLinejoin="round"
-      />
-      <circle cx={MARK_STONE.cx} cy={MARK_STONE.cy} r={MARK_STONE.r} fill={on} />
+      <path d={MARK_SHAPE} fill={on} fillRule="evenodd" />
     </svg>
   );
 }
@@ -2032,7 +2139,7 @@ export function SittingsInput({
             <li key={i} className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
               <DateInput
                 aria-label={`${label}日付`}
-                className="w-40"
+                className="w-56"
                 size={size}
                 invalid={bad}
                 value={r.date}
@@ -2899,31 +3006,6 @@ export function SplitLayout({
     <div className={cx("grid grid-cols-1 items-start gap-6 lg:gap-8", cols, className)}>
       <div className="min-w-0">{main}</div>
       <aside className={cx("min-w-0", stickyAside && "lg:sticky lg:top-6")}>{aside}</aside>
-    </div>
-  );
-}
-
-/** キャラクターの現在能力値を、上限があれば静かな横ゲージ付きで表示する */
-export function StatBar({ label, value, max }: { label: string; value: number | undefined; max?: number }) {
-  const pct = max && value != null ? Math.max(0, Math.min(100, (value / max) * 100)) : null;
-  const low = pct !== null && pct < 30;
-  return (
-    <div>
-      <div className="flex items-baseline justify-between gap-2 tabular-nums">
-        <dt className="eyebrow">{label}</dt>
-        <dd className="text-lg font-bold leading-none">
-          {value ?? "-"}
-          {max != null && <span className="ml-1 text-xs font-medium text-ink3">/ {max}</span>}
-        </dd>
-      </div>
-      {pct !== null && (
-        <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-base-200" aria-hidden>
-          <div
-            className={cx("h-full rounded-full transition-all", low ? "bg-error/80" : "bg-primary/75")}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      )}
     </div>
   );
 }

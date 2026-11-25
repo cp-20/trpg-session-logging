@@ -210,7 +210,7 @@ export function LogReader({
     let prev: Row | null = null;
     for (const row of rows) {
       const { m } = row;
-      const d = sessionDay(m.ts);
+      const d = m.ts > 0 ? sessionDay(m.ts) : lastDay;
       if (d !== lastDay) {
         out.push({ kind: "day", key: `day-${d}-${out.length}`, date: d });
         lastDay = d;
@@ -458,13 +458,16 @@ export function LogReader({
                   <Text style={{ fontSize: 13, color: tokens.ink2, textAlign: "center" }}>
                     {masked ? "シークレット記述（タップで表示）" : m.text}
                   </Text>
+                  {m.kind !== "SYSTEM" && !masked && (
+                    <Text style={{ fontSize: 12, color: tokens.ink3 }}>{m.sp}</Text>
+                  )}
                   {secret && chName ? (
                     <SecretMark name={chName} />
                   ) : (
                     chName && <Text style={{ fontSize: 12, color: tokens.ink3 }}>#{chName}</Text>
                   )}
                   <Text style={{ fontSize: 11, color: tokens.ink3, fontVariant: ["tabular-nums"] }}>
-                    {jstTime(m.ts)}
+                    {m.ts > 0 ? jstTime(m.ts) : ""}
                   </Text>
                 </View>
                 <View style={[styles.dayLine, { backgroundColor: tokens.border }]} />
@@ -514,7 +517,7 @@ export function LogReader({
                         fontVariant: ["tabular-nums"],
                       }}
                     >
-                      {jstTime(m.ts)}
+                      {m.ts > 0 ? jstTime(m.ts) : ""}
                     </Text>
                   </View>
                 )}
@@ -557,7 +560,8 @@ export function LogReader({
               onPress={() => {
                 const next = saveReadingProgress(log.id, {
                   manualMsgId: actionMsg.m.id,
-                  manualLabel: `${actionMsg.m.sp} (${jstTime(actionMsg.m.ts)})`,
+                  manualLabel:
+                    actionMsg.m.ts > 0 ? `${actionMsg.m.sp} (${jstTime(actionMsg.m.ts)})` : actionMsg.m.sp,
                 });
                 setProgress(next);
                 setActionMsg(null);
