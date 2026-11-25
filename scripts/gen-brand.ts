@@ -15,7 +15,14 @@ import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium, type Page } from "@playwright/test";
-import { BRAND_COLORS, MARK_BOARD, MARK_STONE, markContent, markSvg } from "../src/components/brand.ts";
+import {
+  BRAND_COLORS,
+  MARK_BODY,
+  MARK_PIP_R,
+  MARK_PIPS,
+  markContent,
+  markSvg,
+} from "../src/components/brand.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const out = (p: string) => {
@@ -60,21 +67,17 @@ function ico(images: { size: number; png: Buffer }[]): Buffer {
 
 // --- ブラウザのアイコン ---
 writeFileSync(out("src/app/icon.svg"), markSvg() + "\n");
-writeFileSync(
-  out("src/app/favicon.ico"),
-  ico(
-    await Promise.all(
-      [16, 32, 48].map(async (size) => ({ size, png: await rasterSvg(page, markSvg(), size) })),
-    ),
-  ),
-);
+// 同じページに描くので 1 つずつ。並行すると後の大きさが前の絵を上書きし、小さいアイコンが切れる
+const faviconImages: { size: number; png: Buffer }[] = [];
+for (const size of [16, 32, 48]) faviconImages.push({ size, png: await rasterSvg(page, markSvg(), size) });
+writeFileSync(out("src/app/favicon.ico"), ico(faviconImages));
 writeFileSync(out("src/app/apple-icon.png"), await rasterSvg(page, markSvg({ radius: 0 }), 180, false));
 writeFileSync(out("public/icon-192.png"), await rasterSvg(page, markSvg(), 192));
 writeFileSync(out("public/icon-512.png"), await rasterSvg(page, markSvg(), 512));
-// マスカブル: OS が円や角丸で切るので、盤と駒を中央 80% の安全域に収める
+// マスカブル: OS が円や角丸で切るので、中身を中央の安全域（直径 80% の円）に収める
 writeFileSync(
   out("public/icon-maskable-512.png"),
-  await rasterSvg(page, markSvg({ radius: 0, contentScale: 0.8 }), 512, false),
+  await rasterSvg(page, markSvg({ radius: 0, contentScale: 0.9 }), 512, false),
 );
 
 // --- モバイルアプリ ---
@@ -97,13 +100,13 @@ const ogHtml = `<!doctype html><html><head><meta charset="utf-8">
 html, body { margin: 0; }
 .og { box-sizing: border-box; width: 1200px; height: 630px; padding: 72px 88px; background: ${POSTER.field}; color: ${POSTER.paper};
   font-family: "Noto Sans JP Variable", sans-serif; display: flex; flex-direction: column; position: relative; overflow: hidden; }
-.board { position: absolute; right: -150px; top: -40px; width: 640px; height: 640px; }
-.og > :not(.board) { position: relative; }
+.watermark { position: absolute; right: -150px; top: -40px; width: 640px; height: 640px; }
+.og > :not(.watermark) { position: relative; }
 .brand { display: flex; align-items: center; gap: 20px; font-size: 44px; font-weight: 800; letter-spacing: 0.02em; }
 h1 { margin: auto 0 0; font-family: "LP Display", sans-serif; font-weight: 400; font-size: 104px; line-height: 1.22; letter-spacing: 0.01em; }
 p { margin: 36px 0 0; font-size: 34px; font-weight: 700; color: ${POSTER.tint}; }
 </style></head><body><div class="og">
-<svg class="board" viewBox="0 0 32 32" aria-hidden="true"><path d="${MARK_BOARD}" fill="none" stroke="${POSTER.paper}" stroke-opacity="0.16" stroke-width="0.5"/><circle cx="${MARK_STONE.cx}" cy="${MARK_STONE.cy}" r="${MARK_STONE.r * 0.7}" fill="${POSTER.yellow}"/></svg>
+<svg class="watermark" viewBox="0 0 32 32" aria-hidden="true"><path d="${MARK_BODY}" fill="none" stroke="${POSTER.paper}" stroke-opacity="0.16" stroke-width="0.5"/>${MARK_PIPS.map((p, i) => `<circle cx="${p.cx}" cy="${p.cy}" r="${MARK_PIP_R}" ${i === 1 ? `fill="${POSTER.yellow}"` : `fill="${POSTER.paper}" fill-opacity="0.16"`}/>`).join("")}</svg>
 <div class="brand">${ogMark}<span>卓譜</span></div>
 <h1>卓が終わったら、<br>ぜんぶここ。</h1>
 <p>TRPG のセッション記録をひとつのページに</p>

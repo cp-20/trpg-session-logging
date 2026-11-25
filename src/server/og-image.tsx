@@ -4,13 +4,7 @@
  */
 import { ImageResponse } from "next/og";
 import type { CSSProperties, ReactNode } from "react";
-import {
-  BRAND_COLORS,
-  MARK_BOARD,
-  MARK_BOARD_OPACITY,
-  MARK_BOARD_WIDTH,
-  MARK_STONE,
-} from "../components/brand";
+import { BRAND_COLORS, MARK_BODY, MARK_PIP_R, MARK_PIPS, MARK_SHAPE } from "../components/brand";
 import { identiconDataUri } from "../lib/identicon";
 import { phraseText, titleSize, type OgCard, type OgPerson, type OgSystem } from "../lib/og-card";
 
@@ -65,21 +59,13 @@ function Mark({ size, tile, on }: { size: number; tile: string; on: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32">
       <rect width="32" height="32" rx="7" fill={tile} />
-      <path
-        d={MARK_BOARD}
-        fill="none"
-        stroke={on}
-        strokeOpacity={MARK_BOARD_OPACITY}
-        strokeWidth={MARK_BOARD_WIDTH}
-        strokeLinejoin="round"
-      />
-      <circle cx={MARK_STONE.cx} cy={MARK_STONE.cy} r={MARK_STONE.r} fill={on} />
+      <path d={MARK_SHAPE} fill={on} fillRule="evenodd" />
     </svg>
   );
 }
 
-/** 盤の大きな透かし（LP の OG 画像と同じ盤と一手） */
-function Board({
+/** マークの大きな透かし（LP の OG 画像と同じ喋るダイス） */
+function Watermark({
   size,
   color,
   opacity,
@@ -92,8 +78,17 @@ function Board({
 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" style={{ position: "absolute", ...style }}>
-      <path d={MARK_BOARD} fill="none" stroke={color} strokeOpacity={opacity} strokeWidth={0.5} />
-      <circle cx={MARK_STONE.cx} cy={MARK_STONE.cy} r={MARK_STONE.r * 0.7} fill={C.yellow} />
+      <path d={MARK_BODY} fill="none" stroke={color} strokeOpacity={opacity} strokeWidth={0.5} />
+      {MARK_PIPS.map((p, i) => (
+        <circle
+          key={p.cx}
+          cx={p.cx}
+          cy={p.cy}
+          r={MARK_PIP_R}
+          fill={i === 1 ? C.yellow : color}
+          fillOpacity={i === 1 ? 1 : opacity}
+        />
+      ))}
     </svg>
   );
 }
@@ -332,7 +327,7 @@ function GenericCard({ card }: { card: Extract<OgCard, { kind: "generic" }> }) {
         fontFamily: "Noto Sans JP",
       }}
     >
-      <Board size={640} color={C.paper} opacity={0.16} style={{ right: -150, top: -40 }} />
+      <Watermark size={640} color={C.paper} opacity={0.16} style={{ right: -150, top: -40 }} />
       <div style={row({ gap: 20, fontSize: 44, fontWeight: 800 })}>
         <Mark size={64} tile={C.paper} on={C.field} />
         卓譜

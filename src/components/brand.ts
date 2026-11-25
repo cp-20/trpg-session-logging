@@ -1,7 +1,6 @@
 /**
- * 卓譜のブランドマーク（盤と一手）。
- * 「譜」は棋譜の譜: 盤の上の一手を書き留めたもの。卓譜は卓の上の一回一回を書き留める道具なので、
- * 3×3 の盤（卓・マップ）と、その交点に置いた一つの駒で表す。
+ * 卓譜のブランドマーク（喋るダイス）。
+ * 吹き出しがそのままダイスの三の目になっている。卓で交わした言葉（ログ）と振ったダイスを、1 つの形で残す。
  *
  * ここが唯一の出所。アプリ内のロゴ（`LogoMark`）、卓報告カード、favicon・アプリアイコン・OG 画像
  * （`scripts/gen-brand.ts` が書き出す）はすべてこの形を使う。形を変えたら `pnpm run gen:brand` を実行する。
@@ -19,15 +18,26 @@ export const BRAND_COLORS = {
   ink: "#221c17",
 } as const;
 
-/** マークの座標系は 32 四方。16px で描くと 1 単位 = 0.5px なので、線（2 単位）は 1px で画素にそろう */
+/** マークの座標系は 32 四方。16px で描くと 1 単位 = 0.5px なので、本体の辺（偶数の座標）は画素にそろう */
 export const MARK_VIEWBOX = 32;
 export const MARK_RADIUS = 7;
-/** 盤: 外枠と内側の線（3×3 のます） */
-export const MARK_BOARD = "M7 7h18v18H7zM13 7v18M19 7v18M7 13h18M7 19h18";
-export const MARK_BOARD_WIDTH = 2;
-export const MARK_BOARD_OPACITY = 0.5;
-/** 一手（右上寄りの交点に置いた駒） */
-export const MARK_STONE = { cx: 19, cy: 13, r: 4.75 } as const;
+/** 本体: 20 四方のダイスの面に、左下のしっぽ（吹き出し） */
+export const MARK_BODY =
+  "M11 4H21A5 5 0 0 1 26 9V19A5 5 0 0 1 21 24H16.4L11.2 28.1A0.8 0.8 0 0 1 9.9 27.5V23.9A5 5 0 0 1 6 19V9A5 5 0 0 1 11 4Z";
+/** 三の目 */
+export const MARK_PIPS = [
+  { cx: 11, cy: 9 },
+  { cx: 16, cy: 14 },
+  { cx: 21, cy: 19 },
+] as const;
+export const MARK_PIP_R = 2.4;
+/** 目を抜いた本体（fill-rule: evenodd で塗る）。地の色を渡さなくても、目に地が透ける */
+export const MARK_SHAPE =
+  MARK_BODY +
+  MARK_PIPS.map(
+    ({ cx, cy }) =>
+      `M${cx - MARK_PIP_R} ${cy}a${MARK_PIP_R} ${MARK_PIP_R} 0 1 0 ${MARK_PIP_R * 2} 0a${MARK_PIP_R} ${MARK_PIP_R} 0 1 0 ${-MARK_PIP_R * 2} 0Z`,
+  ).join("");
 
 export interface MarkSvgOptions {
   /** 出力の幅・高さ（px）。省略すると viewBox のまま */
@@ -36,23 +46,18 @@ export interface MarkSvgOptions {
   on?: string;
   /** 角の丸み（viewBox 単位）。iOS・マスカブルのように OS が角を切るものは 0 */
   radius?: number;
-  /** 盤と駒を縮める割合（マスカブルアイコンの安全域に収めるとき 0.8 など） */
+  /** 中身を縮める割合（マスカブルアイコンの安全域に収めるとき 0.9 など） */
   contentScale?: number;
 }
 
-/** マークの中身（盤と駒）だけ。ほかの SVG に埋め込むとき使う */
+/** マークの中身（吹き出しのダイス）だけ。ほかの SVG に埋め込むとき使う */
 export function markContent(on: string, contentScale = 1): string {
   const c = MARK_VIEWBOX / 2;
   const t =
     contentScale === 1
       ? ""
       : ` transform="translate(${c} ${c}) scale(${contentScale}) translate(${-c} ${-c})"`;
-  return (
-    `<g${t}>` +
-    `<path d="${MARK_BOARD}" fill="none" stroke="${on}" stroke-opacity="${MARK_BOARD_OPACITY}" stroke-width="${MARK_BOARD_WIDTH}" stroke-linejoin="round"/>` +
-    `<circle cx="${MARK_STONE.cx}" cy="${MARK_STONE.cy}" r="${MARK_STONE.r}" fill="${on}"/>` +
-    `</g>`
-  );
+  return `<g${t}><path d="${MARK_SHAPE}" fill="${on}" fill-rule="evenodd"/></g>`;
 }
 
 /** 単独の SVG 文書としてのマーク（favicon・アイコンの原稿） */
