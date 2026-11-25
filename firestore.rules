@@ -14,13 +14,14 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read, write: if ownUser(userId);
-      match /workspace/{document} {
+      // 記録の見出し。部品（基本・セッション・キャラクター）ごとの在りかを持つ（src/lib/workspace-parts.ts）
+      match /workspace/manifest {
         allow read, delete: if ownUser(userId);
         allow create, update: if ownUser(userId)
-          && request.resource.data.keys().hasOnly(['revision', 'chunkCount', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['revision', 'parts', 'updatedAt'])
           && request.resource.data.revision is string
-          && request.resource.data.chunkCount is int
-          && request.resource.data.chunkCount > 0 && request.resource.data.chunkCount <= 200;
+          && request.resource.data.parts is map
+          && request.resource.data.parts.size() > 0 && request.resource.data.parts.size() <= 8000;
       }
       match /revisions/{revision}/chunks/{chunkId} {
         allow read, delete: if ownUser(userId);

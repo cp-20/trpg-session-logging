@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { seedState } from "../data/seed";
 import {
-  cloudStateProjection,
   publicLogProjection,
   sharedLogProjection,
   sharedCharacterProjection,
@@ -42,7 +41,7 @@ describe("cloud boundaries", () => {
     expect(state.logs[source.id]).toEqual(source);
   });
 
-  it("publishes public scope regardless of scenario and preserves private cloud copies without changing local logs", () => {
+  it("publishes public scope regardless of scenario", () => {
     const state = seedState();
     const log = Object.values(state.logs)[0];
     log.scope = "public";
@@ -50,33 +49,6 @@ describe("cloud boundaries", () => {
     expect(publicLogProjection(log, state)).not.toBeNull();
     log.scope = "members";
     expect(publicLogProjection(log, state)).toBeNull();
-    Object.values(state.characters)[0].sessions[0].rolls.push({
-      cmd: "secret",
-      skill: "secret",
-      dice: "1D100",
-      result: "hidden",
-      secret: true,
-    });
-    const original = JSON.stringify(state);
-    const projected = cloudStateProjection(state);
-    expect(
-      Object.values(projected.logs)
-        .flatMap((entry) => entry.channels)
-        .some((channel) => channel.secret),
-    ).toBe(true);
-    expect(
-      Object.values(projected.logs)
-        .flatMap((entry) => entry.channels)
-        .flatMap((channel) => channel.msgs)
-        .some((message) => message.type === "note"),
-    ).toBe(true);
-    expect(
-      Object.values(projected.characters)
-        .flatMap((character) => character.sessions)
-        .flatMap((session) => session.rolls)
-        .some((roll) => roll.secret),
-    ).toBe(true);
-    expect(JSON.stringify(state)).toBe(original);
   });
 
   it("physically removes character fields excluded from sharing", () => {

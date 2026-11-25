@@ -135,7 +135,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           if (cacheMatchesCloud && localSnap.state) {
             state = localSnap.state;
           } else {
-            const cloud = manifest ? await cloudMod.loadCloudState(user.uid) : null;
+            const cloud = manifest ? await cloudMod.loadCloudState(user.uid, localSnap.state) : null;
             if (!alive || run !== generation) return;
             effectiveRevision = cloud?.revision;
             const restored = cloud ? validateSavedState(cloud.state) : null;

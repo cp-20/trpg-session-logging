@@ -211,12 +211,12 @@ describe.skipIf(!enabled)("createFirestoreStore（ボットの利用者・エミ
       lite.getDoc(lite.doc(bot.db, `sharedLogs/mem${run}/revisions/r/chunks/0000`)),
     ).rejects.toMatchObject(denied);
     await expect(lite.getDocs(lite.collection(bot.db, "sharedLogs"))).rejects.toMatchObject(denied);
-    await setDoc(doc(db(), `users/${a.uid}/workspace/current`), {
+    await setDoc(doc(db(), `users/${a.uid}/workspace/manifest`), {
       revision: "r1",
-      chunkCount: 1,
+      parts: { core: "r1.1.t" },
       updatedAt: "x",
     });
-    await expect(lite.getDoc(lite.doc(bot.db, `users/${a.uid}/workspace/current`))).rejects.toMatchObject(
+    await expect(lite.getDoc(lite.doc(bot.db, `users/${a.uid}/workspace/manifest`))).rejects.toMatchObject(
       denied,
     );
     await expect(

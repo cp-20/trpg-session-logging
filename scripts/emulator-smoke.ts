@@ -97,7 +97,11 @@ const B = await signUp("b");
 const own = `users/${A.uid}`;
 await check(
   "anonymous cannot write a workspace",
-  await fs("PATCH", `${own}/workspace/current`, null, { revision: "r1", chunkCount: 1, updatedAt: "now" }),
+  await fs("PATCH", `${own}/workspace/manifest`, null, {
+    revision: "r1",
+    parts: { core: "r1.1.t" },
+    updatedAt: "now",
+  }),
   403,
 );
 await check(
@@ -107,7 +111,11 @@ await check(
 );
 await check(
   "owner can commit a private manifest",
-  await fs("PATCH", `${own}/workspace/current`, A.token, { revision: "r1", chunkCount: 1, updatedAt: "now" }),
+  await fs("PATCH", `${own}/workspace/manifest`, A.token, {
+    revision: "r1",
+    parts: { core: "r1.1.t" },
+    updatedAt: "now",
+  }),
   200,
 );
 await check(
@@ -123,14 +131,36 @@ await check(
 await check("owner can read private data", await fs("GET", `${own}/revisions/r1/chunks/0000`, A.token), 200);
 await check(
   "another account cannot replace a private manifest",
-  await fs("PATCH", `${own}/workspace/current`, B.token, { revision: "r2", chunkCount: 1, updatedAt: "now" }),
+  await fs("PATCH", `${own}/workspace/manifest`, B.token, {
+    revision: "r2",
+    parts: { core: "r2.1.t" },
+    updatedAt: "now",
+  }),
   403,
 );
 await check(
   "invalid private manifests are rejected",
+  await fs("PATCH", `${own}/workspace/manifest`, A.token, {
+    revision: "r2",
+    parts: {},
+    updatedAt: "now",
+  }),
+  403,
+);
+await check(
+  "manifests without parts are rejected",
+  await fs("PATCH", `${own}/workspace/manifest`, A.token, {
+    revision: "r2",
+    chunkCount: 1,
+    updatedAt: "now",
+  }),
+  403,
+);
+await check(
+  "only the manifest lives under workspace",
   await fs("PATCH", `${own}/workspace/current`, A.token, {
     revision: "r2",
-    chunkCount: 201,
+    parts: { core: "r2.1.t" },
     updatedAt: "now",
   }),
   403,
@@ -732,7 +762,7 @@ await check(
   403,
 );
 await check("bot cannot delete the poll", await fs("DELETE", pollPath, BOT), 403);
-await check("bot cannot read a private workspace", await fs("GET", `${own}/workspace/current`, BOT), 403);
+await check("bot cannot read a private workspace", await fs("GET", `${own}/workspace/manifest`, BOT), 403);
 await check(
   "bot cannot read a members-only share payload",
   await fs("GET", `${root}/revisions/r1/chunks/0000`, BOT),

@@ -3,6 +3,7 @@ import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } f
 import { getTakufuAuth } from "./auth";
 import { seedState } from "../data/seed";
 import {
+  fetchCloudWorkspaceManifest,
   fetchSharedLog,
   getSharedLogAccess,
   loadCloudState,
@@ -31,14 +32,30 @@ it.skipIf(process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATORS !== "true")(
     state.me = first.uid;
     state.users = { [first.uid]: { ...profile, id: first.uid } };
     state.users[first.uid].bio = "あ😀".repeat(400_000);
-    state.logs = {};
     expect(await loadCloudState(first.uid)).toBeNull();
     const revision = await saveCloudState(first.uid, state, null);
     const loaded = await loadCloudState(first.uid);
     expect(loaded?.revision).toBe(revision);
     expect(loaded?.state.users[first.uid].bio).toBe(state.users[first.uid].bio);
+    expect(loaded?.state).toEqual(JSON.parse(JSON.stringify(state)));
+    // 1 件だけ変えた保存では、その部品だけを置き換える
+    const before = await fetchCloudWorkspaceManifest(first.uid);
+    const changed = structuredClone(state);
+    const changedId = Object.keys(changed.logs)[0]!;
+    changed.logs[changedId]!.importedFrom = "変更";
+    const next = await saveCloudState(first.uid, changed, revision);
+    const after = await fetchCloudWorkspaceManifest(first.uid);
+    expect(
+      [...after!.parts].filter(([key, part]) => part.revision !== before!.parts.get(key)?.revision),
+    ).toEqual([[`log:${changedId}`, after!.parts.get(`log:${changedId}`)]]);
+    expect((await loadCloudState(first.uid, state))?.state).toEqual(JSON.parse(JSON.stringify(changed)));
+    delete changed.logs[changedId];
+    const removedRevision = await saveCloudState(first.uid, changed, next);
+    expect((await loadCloudState(first.uid))?.state.logs[changedId]).toBeUndefined();
+    expect(await saveCloudState(first.uid, changed, removedRevision)).toBe(removedRevision);
     await expect(saveCloudState(first.uid, state, "outdated")).rejects.toThrow("別の端末");
-    expect((await loadCloudState(first.uid))?.revision).toBe(revision);
+    expect((await loadCloudState(first.uid))?.revision).toBe(removedRevision);
+    state.logs = {};
 
     const secondEmail = `sdk-${crypto.randomUUID()}@test.local`;
     const second = (await createUserWithEmailAndPassword(auth, secondEmail, password)).user;

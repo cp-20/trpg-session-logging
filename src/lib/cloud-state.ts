@@ -11,6 +11,8 @@ import {
   updateDoc,
   writeBatch,
   Timestamp,
+  type DocumentData,
+  type DocumentReference,
   type Firestore,
 } from "firebase/firestore";
 import { getTakufuFirestore } from "./firebase";
@@ -35,6 +37,7 @@ import {
 } from "./session-scenario";
 import { sharedPageScope } from "./share-scope";
 import { docFields, sharedScenarioDoc } from "./scenario-directory";
+import { contentTag, joinWorkspace, splitWorkspace, textTag } from "./workspace-parts";
 
 export interface CloudAuthUserLike {
   uid: string;
@@ -141,23 +144,28 @@ function safeMemberImage(img?: string): string {
   return new TextEncoder().encode(img).length <= 4096 ? img : "";
 }
 
-async function writeChunks(db: Firestore, path: string[], chunks: string[], ownerId?: string) {
+interface ChunkDoc {
+  path: string[];
+  data: string;
+}
+
+function chunkDocs(path: string[], chunks: string[]): ChunkDoc[] {
+  return chunks.map((data, i) => ({ path: [...path, String(i).padStart(4, "0")], data }));
+}
+
+async function writeChunks(db: Firestore, docs: ChunkDoc[], ownerId?: string) {
   // Keep each commit below Firestore's 10MiB request limit, even for four-byte text.
   const batches: ReturnType<typeof writeBatch>[] = [];
-  for (let offset = 0; offset < chunks.length; offset += 10) {
+  for (let offset = 0; offset < docs.length; offset += 10) {
     const batch = writeBatch(db);
-    chunks.slice(offset, offset + 10).forEach((data, i) =>
-      batch.set(doc(db, path.join("/"), String(offset + i).padStart(4, "0")), {
-        data,
-        ...(ownerId ? { ownerId } : {}),
-      }),
-    );
+    for (const { path, data } of docs.slice(offset, offset + 10))
+      batch.set(doc(db, path.join("/")), { data, ...(ownerId ? { ownerId } : {}) });
     batches.push(batch);
   }
   await runConcurrent(batches, 3, (batch) => batch.commit());
 }
 
-async function readChunks(db: Firestore, path: string[], chunkCount: number): Promise<unknown> {
+async function readChunks(db: Firestore, path: string[], chunkCount: number): Promise<string> {
   if (!Number.isInteger(chunkCount) || chunkCount < 1 || chunkCount > MAX_CHUNKS)
     throw new Error("保存データの構成を確認できません。");
   const rows = await getDocs(collection(db, path.join("/")));
@@ -165,7 +173,7 @@ async function readChunks(db: Firestore, path: string[], chunkCount: number): Pr
   const chunks = Array.from({ length: chunkCount }, (_, i) => pieces.get(String(i).padStart(4, "0")));
   if (rows.size !== chunkCount || chunks.some((chunk) => typeof chunk !== "string"))
     throw new Error("保存データをすべて読み込めませんでした。もう一度お試しください。");
-  return JSON.parse(chunks.join(""));
+  return chunks.join("");
 }
 
 async function removeChunks(db: Firestore, path: string[]) {
@@ -180,6 +188,29 @@ async function removeChunks(db: Firestore, path: string[]) {
   await runConcurrent(batches, 3, (batch) => batch.commit());
 }
 
+/**
+ * 切れ端を書いて見出しを切り替える。通信が切れると、切り替わっていても失敗として返ることがあるので、
+ * 失敗したら見出しを読み直し、切り替わっていないと確かめられたときだけ書きかけを片付ける
+ */
+async function switchManifest(
+  ref: DocumentReference,
+  revision: string,
+  write: () => Promise<void>,
+  discard: () => Promise<unknown>,
+): Promise<void> {
+  try {
+    await write();
+  } catch (error) {
+    const active = await getDocFromServer(ref).then(
+      (manifest) => (manifest.data()?.revision as string | undefined) ?? null,
+      () => undefined,
+    );
+    if (active === revision) return;
+    if (active !== undefined) await discard().catch(() => {});
+    throw error;
+  }
+}
+
 async function readGeneration(db: Firestore, manifestPath: string[], parentPath: string[]) {
   const ref = doc(db, manifestPath.join("/"));
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -189,12 +220,12 @@ async function readGeneration(db: Firestore, manifestPath: string[], parentPath:
     const metadata = manifest.data();
     if (typeof metadata.revision !== "string") throw new Error("保存データの構成を確認できません。");
     try {
-      const payload = await readChunks(
+      const text = await readChunks(
         db,
         [...parentPath, "revisions", metadata.revision, "chunks"],
         metadata.chunkCount,
       );
-      return { metadata, payload };
+      return { metadata, payload: JSON.parse(text) as unknown };
     } catch (error) {
       const latest = await getDocFromServer(ref);
       if (attempt === 2 || latest.data()?.revision === metadata.revision) throw error;
@@ -209,42 +240,88 @@ export interface CloudWorkspace {
   revision: string;
 }
 
-export interface CloudWorkspaceManifest {
+/** 保存した部品（src/lib/workspace-parts.ts）の在りか */
+interface CloudPart {
+  /** 切れ端の置き場所 users/{uid}/revisions/{revision}/chunks */
   revision: string;
   chunkCount: number;
-  updatedAt?: string;
+  /** 中身の指紋。同じなら送受信しない */
+  tag: string;
 }
 
-/** ワークスペースの revision だけを確認し、変更がなければチャンク読込を省く */
-export async function fetchCloudWorkspaceManifest(uid: string): Promise<CloudWorkspaceManifest | null> {
-  const db = database();
-  const manifest = await getDocFromServer(doc(db, "users", uid, "workspace", "current"));
-  if (!manifest.exists() || manifest.data().enabled === false || manifest.data().revision === "revoked") {
-    return null;
-  }
-  const data = manifest.data();
-  if (typeof data.revision !== "string") return null;
+export interface CloudWorkspaceManifest {
+  revision: string;
+  parts: Map<string, CloudPart>;
+}
+
+/* 見出しは 1 文書（1MiB まで）なので、部品の数に上限を置く。firestore.rules と同じ */
+const MAX_PARTS = 8000;
+
+/* 部品の在りかは 1 つの文字列で書く（map を入れ子にすると、索引の項目が 1 文書の上限 4 万に近づく） */
+const encodePart = (part: CloudPart) => `${part.revision}.${part.chunkCount}.${part.tag}`;
+
+function decodePart(value: unknown): CloudPart {
+  const [revision, chunkCount, tag] = typeof value === "string" ? value.split(".") : [];
+  if (!revision || !chunkCount || !tag) throw new Error("保存データの構成を確認できません。");
+  return { revision, chunkCount: Number(chunkCount), tag };
+}
+
+function workspaceManifest(data: DocumentData | undefined): CloudWorkspaceManifest | null {
+  if (!data) return null;
+  if (typeof data.revision !== "string" || !data.parts || typeof data.parts !== "object")
+    throw new Error("保存データの構成を確認できません。");
   return {
     revision: data.revision,
-    chunkCount: typeof data.chunkCount === "number" ? data.chunkCount : 1,
-    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : undefined,
+    parts: new Map(Object.entries(data.parts).map(([key, value]) => [key, decodePart(value)])),
   };
 }
 
-export function cloudStateProjection(state: State): State {
-  return state;
+const workspaceRef = (db: Firestore, uid: string) => doc(db, "users", uid, "workspace", "manifest");
+const partPath = (uid: string, part: CloudPart) => ["users", uid, "revisions", part.revision, "chunks"];
+
+/** 記録の見出しだけを読む。revision が手元と同じなら、部品を読まなくてよい */
+export async function fetchCloudWorkspaceManifest(uid: string): Promise<CloudWorkspaceManifest | null> {
+  return workspaceManifest((await getDocFromServer(workspaceRef(database(), uid))).data());
 }
 
-export async function loadCloudState(uid: string): Promise<CloudWorkspace | null> {
+/** 記録を読む。この端末に控え（cached）があれば、中身の同じ部品はそれを使い、違う部品だけを読む */
+export async function loadCloudState(uid: string, cached?: State | null): Promise<CloudWorkspace | null> {
   const db = database();
-  const loaded = await readGeneration(db, ["users", uid, "workspace", "current"], ["users", uid]);
-  if (!loaded) return null;
-  const state = loaded.payload as State;
-  if (state?.me !== uid || !state.users?.[uid])
-    throw new Error("このアカウントの保存データを確認できません。");
-  return { state, revision: loaded.metadata.revision as string };
+  const known = new Map<string, unknown>();
+  if (cached?.me === uid)
+    for (const [key, content] of splitWorkspace(cached)) known.set(`${key} ${contentTag(content)}`, content);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const manifest = await fetchCloudWorkspaceManifest(uid);
+    if (!manifest) return null;
+    const contents = new Map<string, unknown>();
+    try {
+      await runConcurrent([...manifest.parts], 8, async ([key, part]) => {
+        const id = `${key} ${part.tag}`;
+        if (!known.has(id)) {
+          const text = await readChunks(db, partPath(uid, part), part.chunkCount);
+          if (textTag(text) !== part.tag) throw new Error("保存データの構成を確認できません。");
+          known.set(id, JSON.parse(text));
+        }
+        contents.set(key, known.get(id));
+      });
+    } catch (error) {
+      const latest = await fetchCloudWorkspaceManifest(uid);
+      if (attempt === 2 || latest?.revision === manifest.revision) throw error;
+      // Another writer replaced a part while it was being read. Parts already read are kept in `known`.
+      continue;
+    }
+    const state = joinWorkspace(contents);
+    if (state.me !== uid || !state.users?.[uid])
+      throw new Error("このアカウントの保存データを確認できません。");
+    return { state, revision: manifest.revision };
+  }
+  throw new Error("記録が更新されています。もう一度お試しください。");
 }
 
+const CONFLICT =
+  "別の端末で記録が更新されています。この端末のデータをエクスポートしてから、再読み込みしてください。";
+
+/** 記録を保存する。前の保存から中身の変わった部品だけを書き、見出しをまとめて切り替える */
 export async function saveCloudState(
   uid: string,
   state: State,
@@ -253,28 +330,55 @@ export async function saveCloudState(
   if (state.me !== uid || !state.users[uid])
     throw new Error("ログイン中のアカウントと保存データが一致しません。");
   const db = database();
-  const chunks = splitCloudData(cloudStateProjection(state));
-  const revision = crypto.randomUUID();
-  const chunkPath = ["users", uid, "revisions", revision, "chunks"];
-  try {
-    await writeChunks(db, chunkPath, chunks);
-    await runTransaction(db, async (transaction) => {
-      const ref = doc(db, "users", uid, "workspace", "current");
-      const current = await transaction.get(ref);
-      if ((current.data()?.revision ?? null) !== expectedRevision) {
-        throw new Error(
-          "別の端末で記録が更新されています。この端末のデータをエクスポートしてから、再読み込みしてください。",
-        );
-      }
-      transaction.set(ref, { revision, chunkCount: chunks.length, updatedAt: new Date().toISOString() });
-    });
-  } catch (error) {
-    await removeChunks(db, chunkPath).catch(() => {});
-    throw error;
+  const ref = workspaceRef(db, uid);
+  const current = await fetchCloudWorkspaceManifest(uid);
+  if ((current?.revision ?? null) !== expectedRevision) throw new Error(CONFLICT);
+
+  const parts = new Map<string, CloudPart>();
+  const docs: ChunkDoc[] = [];
+  const written: CloudPart[] = [];
+  for (const [key, content] of splitWorkspace(state)) {
+    const tag = contentTag(content);
+    const saved = current?.parts.get(key);
+    if (saved?.tag === tag) {
+      parts.set(key, saved);
+      continue;
+    }
+    const chunks = splitCloudData(content);
+    const part: CloudPart = { revision: crypto.randomUUID(), chunkCount: chunks.length, tag };
+    parts.set(key, part);
+    written.push(part);
+    docs.push(...chunkDocs(partPath(uid, part), chunks));
   }
-  // The old generation remains readable until the manifest switches successfully.
-  if (expectedRevision)
-    void removeChunks(db, ["users", uid, "revisions", expectedRevision, "chunks"]).catch(() => {});
+  if (parts.size > MAX_PARTS)
+    throw new Error("データが保存できる大きさを超えています。JSONをエクスポートしてください。");
+  const replaced = [...(current?.parts ?? [])].flatMap(([key, part]) =>
+    parts.get(key) === part ? [] : [part],
+  );
+  if (current && !written.length && !replaced.length) return current.revision;
+
+  const remove = (list: CloudPart[]) =>
+    runConcurrent(list, 3, (part) => removeChunks(db, partPath(uid, part)));
+  const revision = crypto.randomUUID();
+  await switchManifest(
+    ref,
+    revision,
+    async () => {
+      await writeChunks(db, docs);
+      await runTransaction(db, async (transaction) => {
+        const latest = await transaction.get(ref);
+        if ((latest.data()?.revision ?? null) !== expectedRevision) throw new Error(CONFLICT);
+        transaction.set(ref, {
+          revision,
+          parts: Object.fromEntries([...parts].map(([key, part]) => [key, encodePart(part)])),
+          updatedAt: new Date().toISOString(),
+        });
+      });
+    },
+    () => remove(written),
+  );
+  // Replaced parts stay readable until the manifest switches.
+  void remove(replaced).catch(() => {});
   return revision;
 }
 
@@ -334,26 +438,28 @@ export async function publishSharedLog(log: Log, state: State): Promise<void> {
   const ref = doc(db, "sharedLogs", log.slug);
   const old = await getDocFromServer(ref);
   const path = ["sharedLogs", log.slug, "revisions", revision, "chunks"];
-  try {
-    await writeChunks(db, path, chunks, state.me);
-    await runTransaction(db, async (transaction) => {
-      const current = await transaction.get(ref);
-      if ((current.data()?.revision ?? null) !== (old.data()?.revision ?? null))
-        throw new Error("共有設定が別の端末で更新されています。再読み込みしてください。");
-      transaction.set(ref, {
-        ownerId: state.me,
-        scope,
-        revision,
-        chunkCount: chunks.length,
-        memberIds: Object.entries(log.players)
-          .filter(([, player]) => player.linked)
-          .map(([id]) => id),
+  await switchManifest(
+    ref,
+    revision,
+    async () => {
+      await writeChunks(db, chunkDocs(path, chunks), state.me);
+      await runTransaction(db, async (transaction) => {
+        const current = await transaction.get(ref);
+        if ((current.data()?.revision ?? null) !== (old.data()?.revision ?? null))
+          throw new Error("共有設定が別の端末で更新されています。再読み込みしてください。");
+        transaction.set(ref, {
+          ownerId: state.me,
+          scope,
+          revision,
+          chunkCount: chunks.length,
+          memberIds: Object.entries(log.players)
+            .filter(([, player]) => player.linked)
+            .map(([id]) => id),
+        });
       });
-    });
-  } catch (error) {
-    await removeChunks(db, path).catch(() => {});
-    throw error;
-  }
+    },
+    () => removeChunks(db, path),
+  );
   const oldRevision = old.data()?.revision;
   if (oldRevision)
     void removeChunks(db, ["sharedLogs", log.slug, "revisions", oldRevision, "chunks"]).catch(() => {});
@@ -497,18 +603,20 @@ export async function publishSharedCharacter(character: Character, state: State)
   const ref = doc(db, "sharedCharacters", character.id);
   const old = await getDocFromServer(ref);
   const path = ["sharedCharacters", character.id, "revisions", revision, "chunks"];
-  try {
-    await writeChunks(db, path, chunks, state.me);
-    await runTransaction(db, async (transaction) => {
-      const current = await transaction.get(ref);
-      if ((current.data()?.revision ?? null) !== (old.data()?.revision ?? null))
-        throw new Error("共有設定が別の端末で更新されています。再読み込みしてください。");
-      transaction.set(ref, { ownerId: state.me, enabled: true, revision, chunkCount: chunks.length });
-    });
-  } catch (error) {
-    await removeChunks(db, path).catch(() => {});
-    throw error;
-  }
+  await switchManifest(
+    ref,
+    revision,
+    async () => {
+      await writeChunks(db, chunkDocs(path, chunks), state.me);
+      await runTransaction(db, async (transaction) => {
+        const current = await transaction.get(ref);
+        if ((current.data()?.revision ?? null) !== (old.data()?.revision ?? null))
+          throw new Error("共有設定が別の端末で更新されています。再読み込みしてください。");
+        transaction.set(ref, { ownerId: state.me, enabled: true, revision, chunkCount: chunks.length });
+      });
+    },
+    () => removeChunks(db, path),
+  );
   if (old.data()?.revision && old.data()?.revision !== "revoked")
     void removeChunks(db, [
       "sharedCharacters",

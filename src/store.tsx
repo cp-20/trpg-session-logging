@@ -1,8 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { User as FirebaseUser } from "firebase/auth";
-import type { Character, Log, Scenario, State, User } from "./types";
-import { isSharedByUser, sharedScenarioDoc } from "./lib/scenario-directory";
+import type { State, User } from "./types";
+import { isSharedByUser } from "./lib/scenario-directory";
+import {
+  characterPublishSignature,
+  logPublishSignature,
+  scenarioPublishSignature,
+} from "./lib/publish-signature";
 import type { TablePollSync } from "./lib/table-polls";
 import { parseSavedState, RestoredStateSchema } from "./lib/state-schema";
 export { RestoredStateSchema };
@@ -81,38 +86,6 @@ function readPendingFlag(storageKey: string): boolean {
   } catch {
     return false;
   }
-}
-
-function logPublishSignature(log: Log, state: State): string {
-  const ownProfile = state.users[log.ownerId];
-  const scenario = log.scenarioId ? state.scenarios[log.scenarioId] : null;
-  return JSON.stringify([
-    log,
-    ownProfile?.name,
-    ownProfile?.color,
-    ownProfile?.image,
-    state.prefs.hideSelfOnShare,
-    scenario,
-  ]);
-}
-
-function scenarioPublishSignature(scenario: Scenario, uid: string): string {
-  return JSON.stringify(sharedScenarioDoc(scenario, uid));
-}
-
-function characterPublishSignature(character: Character, state: State, uid: string): string {
-  const ownProfile = state.users[uid];
-  const sessionScopeRefs = character.sessions.map((s) => {
-    const l = state.logs[s.logId];
-    return l ? [l.id, l.slug, l.scope] : [s.logId];
-  });
-  return JSON.stringify([
-    character,
-    ownProfile?.name,
-    ownProfile?.color,
-    state.prefs.hideSelfOnShare,
-    sessionScopeRefs,
-  ]);
 }
 
 interface Toast {
@@ -339,7 +312,7 @@ export function StoreProvider({
     };
   }, [state, persist]);
 
-  /* クラウド同期: 変更があったドキュメント・投影だけを差分送信 */
+  /* クラウド同期: 中身の変わった部品・共有ページだけを送る（src/lib/workspace-parts.ts） */
   useEffect(() => {
     if (!authUser || blockedRef.current || staleRef.current) return;
     if (state === lastSavedState.current && retry === 0) return;

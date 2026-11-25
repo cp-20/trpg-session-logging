@@ -17,7 +17,12 @@ import {
   saveCloudState,
   updateSharedMembership,
 } from "@shared/lib/cloud-state";
-import { isSharedByUser, sharedScenarioDoc } from "@shared/lib/scenario-directory";
+import {
+  characterPublishSignature,
+  logPublishSignature,
+  scenarioPublishSignature,
+} from "@shared/lib/publish-signature";
+import { isSharedByUser } from "@shared/lib/scenario-directory";
 import { parseSavedState } from "@shared/lib/state-schema";
 import { TablePollSync } from "@shared/lib/table-polls";
 import { todayStr } from "@shared/lib/time";
@@ -187,12 +192,7 @@ export function MobileStoreProvider({ children }: { children: ReactNode }) {
       }
     }
     for (const log of owned) {
-      const sig = JSON.stringify([
-        log,
-        snapshot.users,
-        snapshot.prefs,
-        log.scenarioId ? snapshot.scenarios[log.scenarioId] : null,
-      ]);
+      const sig = logPublishSignature(log, snapshot);
       if (publishedLogsRef.current.get(log.slug) === sig) continue;
       await publishSharedLog(log, snapshot);
       publishedLogsRef.current.set(log.slug, sig);
@@ -215,7 +215,7 @@ export function MobileStoreProvider({ children }: { children: ReactNode }) {
       }
     }
     for (const ch of chars) {
-      const sig = JSON.stringify([ch, snapshot.logs, snapshot.users[uid]]);
+      const sig = characterPublishSignature(ch, snapshot, uid);
       if (publishedCharsRef.current.get(ch.id) === sig) continue;
       await publishSharedCharacter(ch, snapshot);
       publishedCharsRef.current.set(ch.id, sig);
@@ -223,7 +223,7 @@ export function MobileStoreProvider({ children }: { children: ReactNode }) {
 
     for (const sc of Object.values(snapshot.scenarios)) {
       if (!isSharedByUser(sc, uid)) continue;
-      const sig = JSON.stringify(sharedScenarioDoc(sc, uid));
+      const sig = scenarioPublishSignature(sc, uid);
       if (publishedScenariosRef.current.get(sc.id) === sig) continue;
       await publishSharedScenario(sc, uid);
       publishedScenariosRef.current.set(sc.id, sig);
@@ -275,9 +275,9 @@ export function MobileStoreProvider({ children }: { children: ReactNode }) {
           const remoteRev = manifest?.revision ?? null;
           let workingState = stateRef.current;
 
-          // マニフェストの revision が異なるときだけ実チャンクを読み込んで 3-Way マージする
+          // 見出しの revision が異なるときだけ、中身の違う部品を読み込んで 3-Way マージする
           if (remoteRev && remoteRev !== revisionRef.current) {
-            const cloud = await loadCloudState(uid);
+            const cloud = await loadCloudState(uid, stateRef.current);
             if (!aliveRef.current || authUserRef.current?.uid !== uid) return;
             if (cloud) {
               const parsedRemote = parseSavedState(JSON.stringify(cloud.state));
