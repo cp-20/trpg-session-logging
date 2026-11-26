@@ -17,6 +17,22 @@ Deploy Now's Next.js builder accepts only npm (`package-lock.json`; pnpm and yar
 
 The deployment command submits an asynchronous build. A successful upload is not proof of readiness: confirm the returned deployment reaches `DEPLOYMENT_STATUS_READY` and visit the public site before reporting success.
 
+## Error monitoring (Sentry)
+
+`@sentry/nextjs` reports browser errors (`src/instrumentation-client.ts`), server request errors (`onRequestError` in `src/instrumentation.ts`) and error-boundary crashes (`src/app/error.tsx`, `global-error.tsx`). Options live in `src/lib/sentry-options.ts`: no DSN means nothing is sent (dev, tests, E2E); `sendDefaultPii` is off; traces are sampled at 2%. Put `NEXT_PUBLIC_SENTRY_DSN` (and optionally `SENTRY_ORG` / `SENTRY_PROJECT`) in `.env.local` and run `deploy --setup` to send them to Deploy Now; it is inlined at build time. Source maps are uploaded only when the build has `SENTRY_AUTH_TOKEN`; set it as a sensitive variable (`lolipop env create SENTRY_AUTH_TOKEN --value-stdin --sensitive --project <id> < file`).
+
+## Feature flags
+
+`src/lib/features.ts` reads `NEXT_PUBLIC_FEATURE_*` at build time. `deploy --setup` always sends each flag, as `"false"` unless `.env.local` has `"true"`. `NEXT_PUBLIC_FEATURE_GOOGLE_CALENDAR` stays off until Google verifies the `calendar.freebusy` / `calendar.calendarlist.readonly` scopes; while off, the settings, the calendar dialog and the privacy policy omit the feature and stored busy ranges are ignored.
+
+## Caching
+
+Static pages revalidate every 5 minutes (`revalidate` in `src/app/layout.tsx`) and `expireTime` is 10 minutes, so the CDN in front of Deploy Now (CloudFront) sends `s-maxage=300, stale-while-revalidate=300` for HTML instead of Next.js's one-year default. A deploy reaches every visitor within 10 minutes without a CDN purge.
+
+## Backups
+
+Firestore `takufu` has point-in-time recovery (7 days, 1-minute granularity) and delete protection. The project is on Blaze with a ¥100/month budget alert (50% / 90% / 100% actual and 100% forecast; e-mails billing admins, does not cap spending). Restore by cloning to a new database: `gcloud firestore databases clone --source-database=projects/takufu-app/databases/takufu --snapshot-time=<RFC3339, whole minute> --destination-database=<new-id>`.
+
 ## Feedback form
 
 `/feedback` posts to `/api/feedback`, which validates the input (`src/lib/feedback.ts`), drops honeypot submissions, limits each IP to 5 posts per 10 minutes (in memory), and forwards the message to a Discord webhook with all mentions disabled. The webhook URL lives only in the server-side environment variable `DISCORD_FEEDBACK_WEBHOOK_URL` on Deploy Now (never `NEXT_PUBLIC_*`, never in the repository). Without it the form answers 503. Set it with `lolipop env create DISCORD_FEEDBACK_WEBHOOK_URL --value-stdin --sensitive --project <id> < file` (the value then never appears in shell history or listings), then redeploy.

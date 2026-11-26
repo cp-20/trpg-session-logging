@@ -23,7 +23,7 @@ import { DICETOUS_COMMONS, FEEDBACK_PATH, OSS_LICENSES } from "../lib/rights";
 import { FEEDBACK_KINDS, FEEDBACK_LIMITS, type FeedbackKind } from "../lib/feedback-kinds";
 
 /** 規約・ポリシーの制定日。改定したら更新する */
-const LEGAL_UPDATED = "2026年11月22日";
+const LEGAL_UPDATED = "2026年11月26日";
 
 /* ---------- 公開ページの外枠（ヘッダーとフッター） ---------- */
 /** 公開ページから記録を使う画面（/signin・/demo・/home）へのリンクは prefetch={false}（先読みで Firebase を落とさない） */
@@ -1058,6 +1058,12 @@ export function Privacy() {
               GMO ペパボ（LOLIPOP! Deploy Now）: 本サービスの配信に使います。アクセス時の IP
               アドレスなどが記録されることがあります。
               <ExternalLink href="https://pepabo.com/privacy/">GMO ペパボのプライバシーポリシー</ExternalLink>
+            </>,
+            <>
+              Sentry（Functional Software, Inc.、米国）:
+              不具合を直すために、画面やサーバーで起きたエラーの内容と、そのときのページの URL・ブラウザと OS
+              の種類を送ります。IP アドレス・Cookie・入力した記録の中身は送りません。
+              <ExternalLink href="https://sentry.io/privacy/">Sentry のプライバシーポリシー</ExternalLink>
             </>,
             "キャラクターシート・シナリオのサイト: 利用者が URL を指定して取り込むとき、本サービスのサーバーがそのページを取得します。利用者のアカウント情報は送りません",
             "X: 卓報告の投稿画面を開くとき、投稿文と共有ページの URL を X に渡します",

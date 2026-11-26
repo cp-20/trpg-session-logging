@@ -1,3 +1,4 @@
+import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
 
 /**
@@ -61,4 +62,14 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Sentry: ソースマップは SENTRY_AUTH_TOKEN があるビルド（本番）でだけ送り、配る JS からは消す
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  silent: !process.env.CI,
+  sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN, deleteSourcemapsAfterUpload: true },
+  telemetry: false,
+  // 依存先（Firestore など）をビルド時に書き換える計測は使わない（Firestore lite で書き換えに失敗する）
+  buildTimeInstrumentation: false,
+});

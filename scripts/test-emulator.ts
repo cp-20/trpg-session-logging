@@ -27,7 +27,9 @@ const result = spawnSync(
   },
 );
 if (result.error) {
-  console.error(`firebase を起動できませんでした（firebase-tools と Java が要ります）: ${result.error.message}`);
+  console.error(
+    `firebase を起動できませんでした（firebase-tools と Java が要ります）: ${result.error.message}`,
+  );
   process.exit(1);
 }
 process.exit(result.status ?? 1);
