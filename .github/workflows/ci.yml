@@ -57,7 +57,7 @@ jobs:
           retention-days: 7
 
   emulator:
-    name: Firestore ルール・Discord 連携（エミュレータ）
+    name: Firestore ルール・保存・Discord 連携（エミュレータ）
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -78,6 +78,7 @@ jobs:
           path: ~/.cache/firebase/emulators
           key: firebase-emulators-${{ runner.os }}-15
       - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm run test:rules
       - run: pnpm run test:emulator -- --discord
       - if: failure()
         uses: actions/upload-artifact@v4

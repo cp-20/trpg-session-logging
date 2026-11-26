@@ -9,7 +9,8 @@ import { spawnSync } from "node:child_process";
 
 const steps = [
   "node scripts/emulator-smoke.ts",
-  "pnpm exec vitest run src/lib/*.emulator.test.ts src/lib/discord/*.emulator.test.ts",
+  // ボットの利用者を作る処理が並列で競るので、1 ファイルずつ・長めの制限時間で流す
+  "pnpm exec vitest run emulator.test --no-file-parallelism --test-timeout=30000",
 ];
 if (process.argv.includes("--discord")) steps.push("pnpm run test:e2e:discord");
 
