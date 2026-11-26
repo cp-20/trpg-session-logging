@@ -1,4 +1,5 @@
-import { createRateLimiter, handleFeedback } from "../../../lib/feedback";
+import { handleFeedback } from "../../../lib/feedback";
+import { clientIp, createRateLimiter } from "../../../lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -6,8 +7,7 @@ export const dynamic = "force-dynamic";
 const allow = createRateLimiter(5, 10 * 60 * 1000);
 
 export async function POST(req: Request): Promise<Response> {
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  if (!allow(ip)) {
+  if (!allow(clientIp(req))) {
     return Response.json(
       { ok: false, error: "続けて送られています。少し時間をおいてから送ってください。" },
       { status: 429 },

@@ -1,4 +1,7 @@
 import dns from "node:dns/promises";
+import https from "node:https";
+import type { LookupFunction } from "node:net";
+import { Readable } from "node:stream";
 import type { ExternalSyncProvider } from "../types";
 import {
   IACHARA_API_ORIGIN,
@@ -8,6 +11,7 @@ import {
   parseExternalUrl,
   type ExternalImportPayload,
 } from "./external-sync";
+import { SITE_URL } from "./site";
 
 export interface ExternalImportDeps {
   lookupAll?: (hostname: string) => Promise<{ address: string }[]>;
@@ -23,7 +27,7 @@ export type ExternalImportServerResponse =
   | ({ ok: true; fetchedAt: string } & ExternalImportPayload)
   | { ok: false; status: number; error: string };
 
-const USER_AGENT = "TakufuImporter/1.0 (+https://takufu.app)";
+const USER_AGENT = `TakufuImporter/1.0 (+${SITE_URL})`;
 const DEFAULT_MAX_BYTES = 2 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 8000;
 const MAX_REDIRECTS = 3;
@@ -39,6 +43,72 @@ async function assertSafePublicHost(
   const records = await lookupAll(hostname);
   if (!records || records.length === 0) return false;
   return records.every((r) => Boolean(r.address) && !isPrivateOrReservedIp(r.address));
+}
+
+/**
+ * 接続するときの名前解決。公開のアドレスしか返さない。
+ * 先に assertSafePublicHost で確かめても、fetch が改めて名前を引くと、その間に向き先を内部のアドレスへ
+ * 変えられる（DNS rebinding）。接続そのものに確かめたアドレスを使わせて、その隙をなくす。
+ */
+export function publicOnlyLookup(lookupAll: (h: string) => Promise<{ address: string }[]>): LookupFunction {
+  const family = (address: string) => (address.includes(":") ? 6 : 4);
+  return ((hostname: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
+    lookupAll(hostname).then(
+      (records) => {
+        const unsafe =
+          records.length === 0 || records.some((r) => !r.address || isPrivateOrReservedIp(r.address));
+        if (unsafe) {
+          callback(Object.assign(new Error(`refused address for ${hostname}`), { code: "EADDRNOTALLOWED" }));
+          return;
+        }
+        if (options.all)
+          callback(
+            null,
+            records.map((r) => ({ address: r.address, family: family(r.address) })),
+          );
+        else callback(null, records[0]!.address, family(records[0]!.address));
+      },
+      (error: unknown) => callback(error),
+    );
+  }) as unknown as LookupFunction;
+}
+
+/**
+ * 外部サイトへの取得の既定。fetch と同じ形で、接続には publicOnlyLookup のアドレスだけを使う。
+ * 転送は追わない（呼び出し側が 1 回ずつ宛先を確かめて追う）。圧縮は頼まないので、本文はそのまま読める。
+ */
+function pinnedFetch(lookupAll: (h: string) => Promise<{ address: string }[]>): typeof fetch {
+  const lookup = publicOnlyLookup(lookupAll);
+  return ((input: string | URL, init: RequestInit = {}) =>
+    new Promise<Response>((resolve, reject) => {
+      const req = https.request(
+        input,
+        {
+          method: init.method ?? "GET",
+          headers: init.headers as Record<string, string> | undefined,
+          lookup,
+          signal: init.signal ?? undefined,
+        },
+        (res) => {
+          try {
+            const headers = new Headers();
+            for (const [key, value] of Object.entries(res.headers)) {
+              for (const v of [value ?? []].flat()) headers.append(key, v);
+            }
+            const status = res.statusCode ?? 502;
+            const body =
+              status === 204 || status === 304 ? null : (Readable.toWeb(res) as ReadableStream<Uint8Array>);
+            resolve(new Response(body, { status, headers }));
+          } catch (error) {
+            res.destroy();
+            reject(error);
+          }
+        },
+      );
+      req.on("error", reject);
+      if (typeof init.body === "string") req.write(init.body);
+      req.end();
+    })) as typeof fetch;
 }
 
 async function readResponseWithLimit(res: Response, maxBytes: number): Promise<string> {
@@ -336,7 +406,7 @@ export async function handleExternalImport(
 ): Promise<ExternalImportServerResponse> {
   const ctx: FetchContext = {
     lookupAll: deps.lookupAll ?? defaultLookupAll,
-    fetchFn: deps.fetchFn ?? fetch,
+    fetchFn: deps.fetchFn ?? pinnedFetch(deps.lookupAll ?? defaultLookupAll),
     now: deps.now ?? (() => new Date()),
     maxBytes: deps.maxBytes ?? DEFAULT_MAX_BYTES,
     timeoutMs: deps.timeoutMs ?? DEFAULT_TIMEOUT_MS,

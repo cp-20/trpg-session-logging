@@ -93,18 +93,4 @@ export async function handleFeedback(body: unknown, deps: FeedbackDeps): Promise
   return { ok: true };
 }
 
-/** 同じ送り元からの連投を抑える（サーバーのメモリ上。再起動で消えてよい） */
-export function createRateLimiter(limit: number, windowMs: number) {
-  const hits = new Map<string, number[]>();
-  return (key: string, now = Date.now()): boolean => {
-    const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
-    if (recent.length >= limit) {
-      hits.set(key, recent);
-      return false;
-    }
-    recent.push(now);
-    hits.set(key, recent);
-    if (hits.size > 5000) hits.clear();
-    return true;
-  };
-}
+export { createRateLimiter } from "./rate-limit";
