@@ -1062,7 +1062,8 @@ export function Privacy() {
             <>
               Sentry（Functional Software, Inc.、米国）:
               不具合を直すために、画面やサーバーで起きたエラーの内容と、そのときのページの URL・ブラウザと OS
-              の種類を送ります。IP アドレス・Cookie・入力した記録の中身は送りません。
+              の種類と、サーバーの警告・エラーの記録を送ります。IP
+              アドレス・Cookie・入力した記録の中身は送りません。
               <ExternalLink href="https://sentry.io/privacy/">Sentry のプライバシーポリシー</ExternalLink>
             </>,
             "キャラクターシート・シナリオのサイト: 利用者が URL を指定して取り込むとき、本サービスのサーバーがそのページを取得します。利用者のアカウント情報は送りません",
