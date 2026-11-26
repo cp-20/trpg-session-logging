@@ -132,10 +132,16 @@ describe("GET /api/calendar/{token}", () => {
     expect(res.status).toBe(404);
   });
 
-  // 不具合: route.ts:31 の fetch が例外を投げる（DNS 失敗・接続断）と、そのまま投げ出して 500 になる。
-  // 応答が失敗したとき（route.ts:33）と同じく 502 で答えるべき。
-  it.fails("Firestore につながらなければ 502 を返す", async () => {
+  it("Firestore につながらなければ 502 を返す", async () => {
     firestore.mockRejectedValue(new TypeError("fetch failed"));
+
+    const res = await call(TOKEN);
+
+    expect(res.status).toBe(502);
+  });
+
+  it("Firestore の本文が JSON として読めなければ 502 を返す", async () => {
+    firestore.mockResolvedValue(new Response("<html>gateway</html>", { status: 200 }));
 
     const res = await call(TOKEN);
 
