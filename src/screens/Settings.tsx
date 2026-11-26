@@ -30,6 +30,7 @@ import { authErrorMessage, linkXAccount, signOutAccount, unlinkXAccount } from "
 import { parseSavedState } from "../lib/state-schema";
 import { LEGAL_LINKS } from "../lib/rights";
 import { GoogleBusySettings } from "../components/google-busy";
+import { features } from "../lib/features";
 import { DiscordAccountRow } from "../components/discord";
 import { download, todayStr, sessionStart } from "../lib/time";
 import { resetData, useStore } from "../store";
@@ -218,7 +219,7 @@ export default function Settings() {
         </SettingRow>
       </div>
 
-      <GoogleCalendarSection />
+      {features.googleCalendar && <GoogleCalendarSection />}
 
       <SectionTitle sub={syncText}>データ</SectionTitle>
       <div className="surface list">

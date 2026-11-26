@@ -120,6 +120,8 @@ const PUBLIC_ENV_KEYS = [
   "NEXT_PUBLIC_FIREBASE_APP_ID",
   "NEXT_PUBLIC_FIREBASE_DATABASE_ID",
 ];
+/** まだ公開しない機能の出し入れ（src/lib/features.ts）。.env.local にない鍵は "false" で送り、前に入れた値を残さない */
+const FEATURE_ENV_KEYS = ["NEXT_PUBLIC_FEATURE_GOOGLE_CALENDAR"];
 
 function readEnvLocal(): Record<string, string> {
   const out: Record<string, string> = {};
@@ -162,8 +164,8 @@ async function cmdDeploy(args: string[]): Promise<void> {
         encoding: "utf8",
       },
     );
-    for (const key of PUBLIC_ENV_KEYS) {
-      const value = env[key];
+    for (const key of [...PUBLIC_ENV_KEYS, ...FEATURE_ENV_KEYS]) {
+      const value = FEATURE_ENV_KEYS.includes(key) ? (env[key] === "true" ? "true" : "false") : env[key];
       if (!value) throw new Error(`${key} is missing in .env.local`);
       // create は値を位置引数で、update は --value で受け取る
       if (existing.includes(`"${key}"`)) {

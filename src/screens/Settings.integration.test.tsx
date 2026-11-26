@@ -1,7 +1,7 @@
 import { renderWithStore } from "../test/integration-harness";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import Settings, { UserDetail } from "./Settings";
 import { parseSavedState } from "../lib/state-schema";
 
@@ -55,9 +55,16 @@ describe("Settings + UserDetail + ThemeSync + Backup 復元結合テスト", () 
     await waitFor(() => expect(view.readPersistedState()?.users.u_mikan?.name).toBe("バックアップ復元後"));
   });
 
+  it("Google カレンダーの機能を切っている間は、設定に欄を出さない", () => {
+    vi.stubEnv("NEXT_PUBLIC_FEATURE_GOOGLE_CALENDAR", "false");
+    renderWithStore(<Settings />, { initialPath: "/settings" });
+    expect(screen.queryByRole("checkbox", { name: "Google カレンダーの空き時間を使う" })).toBeNull();
+  });
+
   it("Google カレンダーの照らし合わせは既定でオフ。オフにすると取り込んだ時間帯と許可の記録を消す", async () => {
     const user = userEvent.setup();
     // 既定（お試し中・未許可）: オフで、お試し中は押せない
+    vi.stubEnv("NEXT_PUBLIC_FEATURE_GOOGLE_CALENDAR", "true");
     const first = renderWithStore(<Settings />, { initialPath: "/settings" });
     const toggle = screen.getByRole("checkbox", { name: "Google カレンダーの空き時間を使う" });
     expect(toggle).not.toBeChecked();

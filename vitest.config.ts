@@ -17,5 +17,7 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}", "mobile/src/**/*.test.{ts,tsx}"],
     css: false,
+    // vi.stubEnv で変えた環境変数を、テストごとに元へ戻す
+    unstubEnvs: true,
   },
 });

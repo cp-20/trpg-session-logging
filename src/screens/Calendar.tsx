@@ -30,6 +30,7 @@ import {
 } from "../components/ui";
 import { Avatar, AvatarStack } from "../components/identity";
 import { GoogleBusySettings } from "../components/google-busy";
+import { features } from "../lib/features";
 import { getJapaneseHolidayName } from "../lib/holidays";
 import { buildFeedIcs, feedUrl, newFeedToken, publishFeed, revokeFeed } from "../lib/calendar-feed";
 import {
@@ -527,13 +528,19 @@ export default function Calendar() {
  *   候補は開始だけが違い、長さは日程調整に 1 つだけ持つ。
  * ============================================================ */
 
+/** 取り込み済みの Google の時間帯。機能を切っている間は、残っていても照らし合わせに使わない */
+function useGoogleBusy() {
+  const { state } = useStore();
+  return features.googleCalendar ? state.prefs.googleBusy : undefined;
+}
+
 /** 自分の予定（Google の時間帯と、卓譜で確定した予定）と照らし合わせる関数 */
 export function useOwnPlans(): {
   find: (date: string, startTime: string, durationMin: number) => OwnPlan[];
   hasSource: boolean;
 } {
   const { state } = useStore();
-  const { googleBusy } = state.prefs;
+  const googleBusy = useGoogleBusy();
   const { events, tables, me } = state;
   return useMemo(() => {
     const confirmed = confirmedOwnPlans({ events, tables, me });
@@ -1235,7 +1242,7 @@ const MonthCalendar = memo(function MonthCalendar({
   const [year, month] = ym.split("-").map(Number);
   const cells = useMemo(() => monthCells(ym), [ym]);
   const selectedInMonth = selectedDay.startsWith(`${ym}-`);
-  const { googleBusy } = state.prefs;
+  const googleBusy = useGoogleBusy();
   const entriesByDate = useMemo(() => {
     const inFilter = (tableId?: string) => tableFilter === "all" || tableId === tableFilter;
     const map = new Map<string, GridEntry[]>();
@@ -2271,12 +2278,14 @@ function CalendarSyncDialog({ onClose }: { onClose: () => void }) {
         <FieldError text={feedError} />
       </section>
 
-      <section aria-labelledby="sync-in" className="mt-6 border-t border-base-300 pt-5">
-        <h3 id="sync-in" className="mb-3 font-bold">
-          自分の予定と照らし合わせる
-        </h3>
-        <GoogleBusySettings frame="plain" />
-      </section>
+      {features.googleCalendar && (
+        <section aria-labelledby="sync-in" className="mt-6 border-t border-base-300 pt-5">
+          <h3 id="sync-in" className="mb-3 font-bold">
+            自分の予定と照らし合わせる
+          </h3>
+          <GoogleBusySettings frame="plain" />
+        </section>
+      )}
 
       {guideOpen && <SubscribeGuide onClose={() => setGuideOpen(false)} />}
     </Modal>
