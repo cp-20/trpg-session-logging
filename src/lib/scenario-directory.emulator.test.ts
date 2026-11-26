@@ -27,6 +27,8 @@ const denied = { code: "permission-denied" };
 /**
  * 共有シナリオ一覧（scenarios）と修正の提案（scenarioEditRequests）を、実際のルールとサーバーの問い合わせで確かめる
  */
+// エミュレーター（Auth 9099 / Firestore 8080）に対して動く。`pnpm run test:emulator` が立てて動かす。
+// `pnpm test` では接続先が無く待ち続けるので飛ばす
 it.skipIf(process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATORS !== "true")(
   "共有シナリオ一覧はボットと足した本人だけが書け、サーバーが切れ端で探せる。修正の提案は足した人にだけ届き、足した人だけが決める",
   async () => {

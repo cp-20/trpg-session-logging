@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import JSZip from "jszip";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import fixtureRaw from "../../e2e/fixtures/ccfolia-sample.json";
 import { inferSystem } from "../data/systems";
 import type { Channel, Msg } from "../types";
@@ -71,7 +71,7 @@ describe("parseCcfoliaLog", () => {
     expect(parseCcfoliaLog('{"foo":1}')).toBeNull();
   });
 
-  it("t/time/message/body/speakerId/cn/channelId/tab/type/role/roll(critical・fumble・value) を正しく復元する", () => {
+  describe("別名のキー（t/time/message/body/speakerId/cn/channelId/tab/type/role/roll）を持つ JSON", () => {
     const raw = JSON.stringify({
       ignoredObj: { nested: "skip" },
       list: [
@@ -157,56 +157,89 @@ describe("parseCcfoliaLog", () => {
         },
       ],
     });
-    const out = parseCcfoliaLog(raw)!;
-    expect(out.messageCount).toBe(9);
-    expect(out.kinds).toMatchObject({
-      PC_A: "PL",
-      案内役: "SYSTEM",
-      GM: "KP",
-      探索者3: "PC",
-      逆順A: "PC",
-      "KP：進行": "NPC",
-      "GM 進行": "KP",
-      境界値1e12: "GM",
+    let out: ReturnType<typeof parseCcfoliaLog> & object;
+    beforeEach(() => {
+      out = parseCcfoliaLog(raw)!;
     });
 
-    const secretA = out.channels.find((c) => c.id === "秘匿A")!;
-    expect(secretA.secret).toBe(true);
-    expect(secretA.msgs[0]?.roll).toEqual({ cmd: "ロール", skill: "", dice: "100", result: "ファンブル" });
-    expect(secretA.msgs[1]?.roll).toEqual({ cmd: "ロール", skill: "", dice: "30,40", result: "成功" });
-
-    // 正規チャンネル名判定とメイン先頭ソート
-    expect(out.channels[0]?.name).toBe("メイン");
-    // 表記の違う情報タブ（info / 情報）は 1 つにまとまり、中は時刻の順
-    const infoCh = out.channels.filter((c) => c.name === "情報");
-    expect(infoCh).toHaveLength(1);
-    expect(infoCh[0]?.secret).toBe(false);
-    expect(infoCh[0]?.msgs.map((m) => m.ts)).toEqual([1000000000, 1e12]);
-    expect(out.channels.filter((c) => c.name === "チャット").every((c) => !c.secret)).toBe(true);
-
-    const chat = out.channels.find((c) => c.name === "チャット")!;
-    expect(chat.secret).toBe(false);
-    // 雑談 と chat_sub は同じチャットタブにまとまる。ロールを持つ発言は type: "roll"
-    expect(chat.msgs.map((m) => m.sp)).toEqual(["GM 進行", "案内役"]);
-    expect(chat.msgs[1]).toMatchObject({
-      sp: "案内役",
-      kind: "SYSTEM",
-      type: "roll",
-      ts: 1794831610,
-      roll: { cmd: "1d100<=50", skill: "目星", dice: "1", result: "クリティカル" },
+    it("全発言を復元する", () => {
+      expect(out.messageCount).toBe(9);
     });
 
-    const other = out.channels.find((c) => c.id === "other")!;
-    expect(other.msgs[0]).toMatchObject({ sp: "PC_A", type: "note", ts: 1794831600 });
+    it("role と名前の接頭辞から発言者の種別を推定する", () => {
+      expect(out.kinds).toMatchObject({
+        PC_A: "PL",
+        案内役: "SYSTEM",
+        GM: "KP",
+        探索者3: "PC",
+        逆順A: "PC",
+        "KP：進行": "NPC",
+        "GM 進行": "KP",
+        境界値1e12: "GM",
+      });
+    });
 
-    const main = out.channels.find((c) => c.name === "メイン")!;
-    expect(main.msgs[0]).toMatchObject({ sp: "不正時刻", ts: 0 });
-    expect(summarizeParsed(out)).toContain("秘匿A(2) [シークレット]");
-    expect(summarizeParsed(out)).toContain("チャット(2)");
-    expect(sessionDatesOf(out).length).toBeGreaterThanOrEqual(2);
+    it("ファンブル・成功のロールをシークレットタブの発言に復元する", () => {
+      const secretA = out.channels.find((c) => c.id === "秘匿A")!;
+
+      expect(secretA.secret).toBe(true);
+      expect(secretA.msgs[0]?.roll).toEqual({ cmd: "ロール", skill: "", dice: "100", result: "ファンブル" });
+      expect(secretA.msgs[1]?.roll).toEqual({ cmd: "ロール", skill: "", dice: "30,40", result: "成功" });
+    });
+
+    it("メインのタブを先頭に並べる", () => {
+      expect(out.channels[0]?.name).toBe("メイン");
+    });
+
+    it("表記の違う情報タブ（info / 情報）は 1 つにまとまり、中は時刻の順に並ぶ", () => {
+      const infoCh = out.channels.filter((c) => c.name === "情報");
+
+      expect(infoCh).toHaveLength(1);
+      expect(infoCh[0]?.secret).toBe(false);
+      expect(infoCh[0]?.msgs.map((m) => m.ts)).toEqual([1000000000, 1e12]);
+    });
+
+    it("チャットのタブはシークレットにならない", () => {
+      expect(out.channels.filter((c) => c.name === "チャット").every((c) => !c.secret)).toBe(true);
+    });
+
+    it("雑談と chat_sub は同じチャットタブにまとまり、ロールを持つ発言は type: roll になる", () => {
+      const chat = out.channels.find((c) => c.name === "チャット")!;
+
+      expect(chat.secret).toBe(false);
+      expect(chat.msgs.map((m) => m.sp)).toEqual(["GM 進行", "案内役"]);
+      expect(chat.msgs[1]).toMatchObject({
+        sp: "案内役",
+        kind: "SYSTEM",
+        type: "roll",
+        ts: 1794831610,
+        roll: { cmd: "1d100<=50", skill: "目星", dice: "1", result: "クリティカル" },
+      });
+    });
+
+    it("speakerId と type: note を持つ発言をそのままのタブに復元する", () => {
+      const other = out.channels.find((c) => c.id === "other")!;
+
+      expect(other.msgs[0]).toMatchObject({ sp: "PC_A", type: "note", ts: 1794831600 });
+    });
+
+    it("時刻が不正な発言は ts=0 にする", () => {
+      const main = out.channels.find((c) => c.name === "メイン")!;
+
+      expect(main.msgs[0]).toMatchObject({ sp: "不正時刻", ts: 0 });
+    });
+
+    it("要約にシークレットタブとチャットのタブを件数付きで載せる", () => {
+      expect(summarizeParsed(out)).toContain("秘匿A(2) [シークレット]");
+      expect(summarizeParsed(out)).toContain("チャット(2)");
+    });
+
+    it("2 日以上にわたる発言の日付を返す", () => {
+      expect(sessionDatesOf(out).length).toBeGreaterThanOrEqual(2);
+    });
   });
 
-  it("HTML ログ3形式(DOMParser)・BOM付きパース・ZIPログ読み込みを検証する", async () => {
+  describe("HTML ログと ZIP", () => {
     // BOM 付き HTML 自動ディスパッチ + 3形式 (生<p><span> / div.tab / section.tab)
     const rawHtml = `\uFEFF<html><body>
       <p><span>[情報]</span><span>KP:夜霜</span><span>資料1</span><span>資料2</span></p>
@@ -214,60 +247,99 @@ describe("parseCcfoliaLog", () => {
       <p><span></span><span></span><span>空要素スキップ</span></p>
       <p><span>[main]</span><span>system</span><span>◆ 開始</span></p>
     </body></html>`;
-    const fromRaw = parseCcfoliaLog(rawHtml)!;
-    // 発言者の無い行も本文があれば残す（名前を消したダイスなど）
-    expect(fromRaw.messageCount).toBe(4);
-    expect(fromRaw.channels[0]?.name).toBe("メイン");
-    expect(fromRaw.channels[0]?.msgs[0]).toMatchObject({ kind: "SYSTEM", type: "note" });
-    const emptyTabCh = fromRaw.channels.find((c) => c.id === "ch0")!;
-    expect(emptyTabCh.msgs[0]).toMatchObject({ sp: "無印", text: "空タブテスト" });
-    expect(fromRaw.channels.find((c) => c.name === "情報")?.msgs[0]?.text).toBe("資料1\n資料2");
-
     const divTabHtml = `<div class="tab"><p class="tabtitle"></p>
       <p class="player"><b>GM 花子</b>それでは進めます</p>
       <p class="player"><b>空テキスト</b></p>
     </div>`;
-    const fromDiv = parseCcfoliaLogHtml(divTabHtml)!;
-    expect(fromDiv.channels[0]).toMatchObject({ id: "ch1", name: "ch1", secret: true });
-    expect(fromDiv.channels[0]?.msgs[0]).toMatchObject({
-      sp: "GM 花子",
-      kind: "KP",
-      text: "それでは進めます",
-    });
-
     const secTabHtml = `<section class="tab">
       <div class="player"><span class="speaker-text">system</span><div class="player-message">◆ シーン終了</div></div>
     </section>`;
-    const fromSec = parseCcfoliaLogHtml(secTabHtml)!;
-    expect(fromSec.channels[0]?.id).toBe("ch1");
-    expect(fromSec.channels[0]?.msgs[0]).toMatchObject({ sp: "system", kind: "SYSTEM", type: "note" });
-    expect(parseCcfoliaLogHtml("<p>no spans</p>")).toBeNull();
 
-    // ZIP: サブフォルダ JSON よりルート JSON 優先 / JSON なしならルート HTML を採用 / 破損 ZIP は null
-    expect(await parseCcfoliaLogZip(new Uint8Array([9, 8, 7]).buffer)).toBeNull();
+    it("BOM 付きの生 HTML は発言者の無い行も本文があれば残す", () => {
+      const fromRaw = parseCcfoliaLog(rawHtml)!;
 
-    const emptyZip = new JSZip();
-    emptyZip.file("readme.txt", "none");
-    expect(await parseCcfoliaLogZip(await emptyZip.generateAsync({ type: "arraybuffer" }))).toBeNull();
+      expect(fromRaw.messageCount).toBe(4);
+    });
 
-    const jsonZip = new JSZip();
-    jsonZip.file(
-      "sub/sub.json",
-      JSON.stringify({ messages: [{ name: "Sub", text: "nested", createdAt: 1794831600000 }] }),
-    );
-    jsonZip.file(
-      "root.json",
-      JSON.stringify({ messages: [{ name: "Root", text: "top", createdAt: 1794831600000 }] }),
-    );
-    const zJsonRes = await parseCcfoliaLogZip(await jsonZip.generateAsync({ type: "arraybuffer" }));
-    expect(zJsonRes?.channels[0]?.msgs[0]?.text).toBe("top");
+    it("生 HTML の [main] タブをメインとして先頭に並べ、system の発言を場面見出しにする", () => {
+      const fromRaw = parseCcfoliaLog(rawHtml)!;
 
-    const htmlZip = new JSZip();
-    htmlZip.file("bad.json", "{invalid}");
-    htmlZip.file("nested/log.htm", rawHtml);
-    htmlZip.file("log.html", divTabHtml);
-    const zHtmlRes = await parseCcfoliaLogZip(await htmlZip.generateAsync({ type: "arraybuffer" }));
-    expect(zHtmlRes?.channels[0]?.msgs[0]?.sp).toBe("GM 花子");
+      expect(fromRaw.channels[0]?.name).toBe("メイン");
+      expect(fromRaw.channels[0]?.msgs[0]).toMatchObject({ kind: "SYSTEM", type: "note" });
+    });
+
+    it("生 HTML の空タブ名の行は ch0 に入れる", () => {
+      const fromRaw = parseCcfoliaLog(rawHtml)!;
+
+      const emptyTabCh = fromRaw.channels.find((c) => c.id === "ch0")!;
+      expect(emptyTabCh.msgs[0]).toMatchObject({ sp: "無印", text: "空タブテスト" });
+    });
+
+    it("生 HTML の複数の本文 span は改行でつなぐ", () => {
+      const fromRaw = parseCcfoliaLog(rawHtml)!;
+
+      expect(fromRaw.channels.find((c) => c.name === "情報")?.msgs[0]?.text).toBe("資料1\n資料2");
+    });
+
+    it("div.tab 形式はタブ名が空なら ch1 をシークレットとして読み、GM を KP と推定する", () => {
+      const fromDiv = parseCcfoliaLogHtml(divTabHtml)!;
+
+      expect(fromDiv.channels[0]).toMatchObject({ id: "ch1", name: "ch1", secret: true });
+      expect(fromDiv.channels[0]?.msgs[0]).toMatchObject({
+        sp: "GM 花子",
+        kind: "KP",
+        text: "それでは進めます",
+      });
+    });
+
+    it("section.tab 形式を読み、system の発言を場面見出しにする", () => {
+      const fromSec = parseCcfoliaLogHtml(secTabHtml)!;
+
+      expect(fromSec.channels[0]?.id).toBe("ch1");
+      expect(fromSec.channels[0]?.msgs[0]).toMatchObject({ sp: "system", kind: "SYSTEM", type: "note" });
+    });
+
+    it("span を持たない HTML は null を返す", () => {
+      expect(parseCcfoliaLogHtml("<p>no spans</p>")).toBeNull();
+    });
+
+    it("破損した ZIP は null を返す", async () => {
+      expect(await parseCcfoliaLogZip(new Uint8Array([9, 8, 7]).buffer)).toBeNull();
+    });
+
+    it("ログを含まない ZIP は null を返す", async () => {
+      const emptyZip = new JSZip();
+      emptyZip.file("readme.txt", "none");
+
+      expect(await parseCcfoliaLogZip(await emptyZip.generateAsync({ type: "arraybuffer" }))).toBeNull();
+    });
+
+    it("ZIP はサブフォルダの JSON よりルートの JSON を優先する", async () => {
+      const jsonZip = new JSZip();
+      jsonZip.file(
+        "sub/sub.json",
+        JSON.stringify({ messages: [{ name: "Sub", text: "nested", createdAt: 1794831600000 }] }),
+      );
+      jsonZip.file(
+        "root.json",
+        JSON.stringify({ messages: [{ name: "Root", text: "top", createdAt: 1794831600000 }] }),
+      );
+
+      const zJsonRes = await parseCcfoliaLogZip(await jsonZip.generateAsync({ type: "arraybuffer" }));
+
+      expect(zJsonRes?.channels[0]?.msgs[0]?.text).toBe("top");
+    });
+
+    it("ZIP に読める JSON がなければルートの HTML を採用する", async () => {
+      const htmlZip = new JSZip();
+      htmlZip.file("bad.json", "{invalid}");
+      htmlZip.file("nested/log.htm", rawHtml);
+      htmlZip.file("log.html", divTabHtml);
+
+      const zHtmlRes = await parseCcfoliaLogZip(await htmlZip.generateAsync({ type: "arraybuffer" }));
+
+      expect(zHtmlRes?.channels[0]?.msgs[0]?.sp).toBe("GM 花子");
+    });
   });
 });
 

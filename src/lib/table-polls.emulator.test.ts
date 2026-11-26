@@ -31,6 +31,8 @@ async function connect(slice: Slice): Promise<{ sync: TablePollSync; stop: () =>
   return { sync, stop };
 }
 
+// エミュレーター（Auth 9099 / Firestore 8080）に対して動く。`pnpm run test:emulator` が立てて動かす。
+// `pnpm test` では接続先が無く待ち続けるので飛ばす
 it.skipIf(process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATORS !== "true")(
   "卓の日程調整を共有し、メンバーが自分のアカウントから回答し、確定が全員に届く（実際の SDK とルール）",
   async () => {

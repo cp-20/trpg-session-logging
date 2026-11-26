@@ -8,7 +8,7 @@ import {
 } from "./cloud-state";
 
 describe("cloud boundaries", () => {
-  it("round-trips multiple chunks including surrogate boundaries and rejects oversized data", () => {
+  it("サロゲートペアをまたぐ複数チャンクに分けても元に戻り、大きすぎるデータは拒否する", () => {
     const value = { text: "あ😀".repeat(100_000) };
     const chunks = splitCloudData(value);
     expect(chunks.length).toBeGreaterThan(1);
@@ -20,7 +20,7 @@ describe("cloud boundaries", () => {
     expect(() => splitCloudData("x".repeat(24_000_000))).toThrow("大きさ");
   });
 
-  it("keeps channels and notes intact while stripping personal account data from shared payloads", () => {
+  it("共有用の内容からは個人のアカウント情報を除き、チャンネルとメモは残す", () => {
     const state = seedState();
     const source = Object.values(state.logs).find((log) => log.hasLog && log.channels.some((c) => c.secret))!;
     const log = structuredClone(source);
@@ -41,7 +41,7 @@ describe("cloud boundaries", () => {
     expect(state.logs[source.id]).toEqual(source);
   });
 
-  it("publishes public scope regardless of scenario", () => {
+  it("公開範囲が public なら、シナリオの設定にかかわらず公開用の投影を返す", () => {
     const state = seedState();
     const log = Object.values(state.logs)[0];
     log.scope = "public";
@@ -51,7 +51,7 @@ describe("cloud boundaries", () => {
     expect(publicLogProjection(log, state)).toBeNull();
   });
 
-  it("physically removes character fields excluded from sharing", () => {
+  it("共有しない項目は、キャラクターの公開用の内容から取り除く", () => {
     const state = seedState();
     const character = Object.values(state.characters)[0];
     character.share = {

@@ -8,7 +8,7 @@ function firebaseError(code: string, message: string) {
 }
 
 describe("userFacingError", () => {
-  it("never shows Firebase internals", () => {
+  it("Firebase の内部情報や未知のエラーは利用者に見せず、代わりの文言を返す", () => {
     const denied = firebaseError(
       "permission-denied",
       "Missing or insufficient permissions. false for 'create' @ L73",
@@ -20,7 +20,7 @@ describe("userFacingError", () => {
     expect(userFacingError(null, FALLBACK)).toBe(FALLBACK);
   });
 
-  it("maps known codes to polite Japanese and keeps our own messages", () => {
+  it("既知のコードは丁寧な日本語にし、卓譜自身の文言はそのまま返す", () => {
     expect(userFacingError(firebaseError("unavailable", "offline"), FALLBACK)).toMatch(
       /接続できませんでした。.*ください。$/,
     );

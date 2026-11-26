@@ -86,7 +86,7 @@ test("Discord 連携: つなぐ → 日程調整 → ボタンで回答 → 確�
     .toBeGreaterThan(0);
   const original = JSON.stringify(discord.find("PATCH", /@original$/)[0]!.body);
   const code = /\/tables\/discord\?code=([\w-]+)/.exec(original)?.[1];
-  expect(code, "つなぐリンクのコード").toBeTruthy();
+  expect(code, "つなぐリンクのコード").toMatch(/^[\w-]+$/);
 
   // 3. リンクを開いて、卓とチャンネルをつなぐ
   await page.goto(`/tables/discord?code=${code}`);
@@ -147,7 +147,9 @@ test("Discord 連携: つなぐ → 日程調整 → ボタンで回答 → 確�
 
   // 6. Discord のボタンで、2 つ目の候補に × と答える（署名つき）
   const poll = await readDoc(`tablePolls/${eventId}`);
-  expect(poll, "tablePolls に日程調整がある").toBeTruthy();
+  expect(poll, "tablePolls に日程調整がある").toEqual(
+    expect.objectContaining({ candidates: expect.any(Array) }),
+  );
   expect(poll.candidates).toHaveLength(2);
   const ownerUid: string = poll.ownerId;
   const [, c2] = poll.candidates.map((c: any) => c.id as string);

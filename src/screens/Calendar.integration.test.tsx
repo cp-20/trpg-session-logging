@@ -36,7 +36,6 @@ describe("Calendar + schedule + ics 結合テスト", () => {
 
     const saved = view.readPersistedState()!;
     const confirmed = Object.values(saved.events).find((e) => e.title === "新章イントロ相談");
-    expect(confirmed).toBeDefined();
     expect(confirmed!.status).toBe("confirmed");
 
     // 確定した予定から生成される ICS カレンダーにそのまま載ることを確認

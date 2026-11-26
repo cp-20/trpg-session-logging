@@ -12,6 +12,8 @@ import type { DiscordStore } from "./types";
  * 実際の Firestore とルール（エミュレーター）に対して、ボットの利用者として DiscordStore を確かめる。
  * 日程調整・共有ページ・キャラクターは、ふつうの利用者がルールどおりに書いたものを読む
  */
+// エミュレーター（Auth 9099 / Firestore 8080）に対して動く。`pnpm run test:emulator` が立てて動かす。
+// `pnpm test` では接続先が無く待ち続けるので飛ばす
 const enabled = process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATORS === "true";
 const PASSWORD = "test-password-123";
 

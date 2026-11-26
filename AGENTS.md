@@ -21,6 +21,7 @@
 
 - `pnpm run check`: lint（oxlint・oxfmt・デザイン規約）、型、単体テスト、ビルド。
 - `pnpm run test:e2e`: 主要な操作と、全画面のデザイン検査（横スクロール、面の入れ子、主ボタンは 1 つ、文字 12px 以上、禁止文言、コントラストなど）。開発サーバー（5173）を使う。
+- テストの書き方と、ルール（`pnpm run test:rules`）・エミュレータ（`pnpm run test:emulator`）を含む種類ごとのコマンドは [docs/testing.md](docs/testing.md)。
 - `pnpm run test:e2e:discord`: Discord 連携の通し確認（偽の Discord・テスト鍵の署名・専用の開発サーバー 5181）。Firebase エミュレータ（9099 / 8080）が要る。Discord 周りは本物やブラウザ操作で確かめず、これを増やす。
 - `pnpm run review`: 全画面をデスクトップ・モバイル・ダークで撮影して `.impeccable/review/` に出す。`目視` 項目はこれで確かめる。コードを読んだだけで「直った」と言わない。
 

@@ -33,7 +33,7 @@ describe("handle", () => {
   it("予約語は使えない", () => {
     expect(RESERVED_HANDLES.has("settings")).toBe(true);
     expect(handleProblem("settings")).toBe("この ID は使えません");
-    expect(handleProblem("join")).not.toBeNull();
+    expect(handleProblem("join")).toBe("この ID は使えません");
   });
 
   it("理由は文字数・文字種・先頭の順に 1 つだけ返す", () => {

@@ -110,7 +110,7 @@ test("スキップリンクでメインコンテンツへ直接移動でき、�
   await page.goto("/calendar");
   const activeDayBtn = page.locator('[data-calendar-day][tabindex="0"]').first();
   const initialDay = await activeDayBtn.getAttribute("data-calendar-day");
-  expect(initialDay).toBeTruthy();
+  expect(initialDay).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   await activeDayBtn.focus();
   // フォーカス移動は再描画後に起きるので、移り終わるまで待ってから読む
   const focusedDay = () =>

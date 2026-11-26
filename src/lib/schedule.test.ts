@@ -203,24 +203,40 @@ describe("日程調整・RSVP・確定", () => {
     expect(m.get("b")).toHaveLength(2);
   });
 
-  it("applyCandidateRsvp と applyConfirmCandidate が候補回答・確定・欠損IDを正しく処理する", () => {
-    const doc = {
-      me: "u_b",
-      events: {
-        ev1: poll(),
-        legacy: poll({ id: "legacy", candidates: [], responses: {} }),
-      } as State["events"],
-    };
+  const rsvpDoc = () => ({
+    me: "u_b",
+    events: {
+      ev1: poll(),
+      legacy: poll({ id: "legacy", candidates: [], responses: {} }),
+    } as State["events"],
+  });
+
+  it("候補への回答はその候補にだけ記録し、存在しない予定・候補の ID は無視する", () => {
+    const doc = rsvpDoc();
+
     applyCandidateRsvp(doc, "missing", "c1", "ok");
     applyCandidateRsvp(doc, "ev1", "no_cand", "ok");
     applyCandidateRsvp(doc, "ev1", "c2", "maybe");
+
     expect(doc.events.ev1?.candidates?.[0]?.responses.u_b).toBeUndefined();
     expect(doc.events.ev1?.candidates?.[1]?.responses.u_b).toBe("maybe");
+  });
+
+  it("候補のない古い形式への回答は予定自体の回答になる", () => {
+    const doc = rsvpDoc();
+
     applyCandidateRsvp(doc, "legacy", "default", "ng");
+
     expect(doc.events.legacy?.responses.u_b).toBe("ng");
+  });
+
+  it("候補を確定すると日時を確定し、候補を取り除く（存在しない ID は無視）", () => {
+    const doc = rsvpDoc();
+    applyCandidateRsvp(doc, "ev1", "c2", "maybe");
 
     applyConfirmCandidate(doc, "missing", doc.events.ev1!.candidates![1]!);
     applyConfirmCandidate(doc, "ev1", doc.events.ev1!.candidates![1]!);
+
     expect(doc.events.ev1).toMatchObject({
       status: "confirmed",
       date: "2026-11-22",
@@ -247,15 +263,20 @@ describe("購読リンク", () => {
 });
 
 describe("近い予定の言い方", () => {
-  it("今日・あす・あとN日（13日境界）・範囲外", () => {
+  it("daysBetween は後の日付なら正、前の日付なら負の日数を返す", () => {
     expect(daysBetween("2026-11-30", "2026-12-02")).toBe(2);
     expect(daysBetween("2026-12-02", "2026-11-30")).toBe(-2);
-    expect(relativeDayLabel("2026-11-18", "2026-11-18")).toBe("今日");
-    expect(relativeDayLabel("2026-11-18", "2026-11-19")).toBe("あす");
-    expect(relativeDayLabel("2026-11-18", "2026-11-21")).toBe("あと3日");
-    expect(relativeDayLabel("2026-11-18", "2026-12-01")).toBe("あと13日");
-    expect(relativeDayLabel("2026-11-18", "2026-12-02")).toBeNull();
-    expect(relativeDayLabel("2026-11-18", "2026-11-17")).toBeNull();
+  });
+
+  it.each([
+    ["同じ日", "2026-11-18", "今日"],
+    ["翌日", "2026-11-19", "あす"],
+    ["3 日後", "2026-11-21", "あと3日"],
+    ["13 日後（境界）", "2026-12-01", "あと13日"],
+    ["14 日後（範囲外）", "2026-12-02", null],
+    ["過去", "2026-11-17", null],
+  ])("relativeDayLabel は %s のとき %j を返す", (_name, date, expected) => {
+    expect(relativeDayLabel("2026-11-18", date)).toBe(expected);
   });
 });
 
@@ -287,8 +308,8 @@ describe("自分に関係する予定", () => {
     },
   } as unknown as Pick<State, "tables" | "events" | "logs" | "me">;
 
-  it("返事待ち・これから・記録がまだ（30日境界・記録済み除外・時刻順）に分類する", () => {
-    const view = myScheduleView(
+  const classify = () =>
+    myScheduleView(
       {
         ...base,
         events: {
@@ -334,9 +355,21 @@ describe("自分に関係する予定", () => {
       },
       "2026-11-18",
     );
-    expect(view.upcoming.map((e) => e.id)).toEqual(["personalMine", "aEarly", "aLate", "personalResp"]);
-    expect(view.unrecorded.map((e) => e.id)).toEqual(["diffTableSameDate", "unrecRecent", "unrecBoundary"]);
-    expect(view.pollsNeedingReply.map((e) => e.id)).toEqual(["pollNeed"]);
+
+  it("これからの予定は日付と時刻の順に並べ、他の卓の予定を含めない", () => {
+    expect(classify().upcoming.map((e) => e.id)).toEqual(["personalMine", "aEarly", "aLate", "personalResp"]);
+  });
+
+  it("記録がまだの予定は 30 日以内で、同じ卓に記録済みの日を除いて新しい順に並べる", () => {
+    expect(classify().unrecorded.map((e) => e.id)).toEqual([
+      "diffTableSameDate",
+      "unrecRecent",
+      "unrecBoundary",
+    ]);
+  });
+
+  it("返事待ちは自分が未回答の日程調整だけを返す", () => {
+    expect(classify().pollsNeedingReply.map((e) => e.id)).toEqual(["pollNeed"]);
   });
 });
 
@@ -388,22 +421,38 @@ describe("自分の予定との照らし合わせ", () => {
     expect(check("2026-11-21", "21:00", 180)).toBe(false);
   });
 
-  it("終日の予定は countAllDay のときだけ数え、オフのカレンダーは数えない", () => {
-    const allDay = { start: "2026-11-23T00:00:00+09:00", end: "2026-11-24T00:00:00+09:00" };
+  const allDay = { start: "2026-11-23T00:00:00+09:00", end: "2026-11-24T00:00:00+09:00" };
+
+  it("終日の予定は countAllDay がオフなら予定ありにしない", () => {
     expect(busyChecker({ googleBusy: google([allDay]) })("2026-11-23", "21:00", 180)).toBe(false);
+  });
+
+  it("終日の予定は countAllDay がオンなら予定ありにする", () => {
     expect(
       busyChecker({ googleBusy: google([allDay], { countAllDay: true }) })("2026-11-23", "21:00", 180),
     ).toBe(true);
+  });
+
+  it("オフにしたカレンダーの終日の予定は countAllDay がオンでも数えない", () => {
     const holiday = busyChecker({
       googleBusy: google([{ ...allDay, calendarId: "holiday" }], { countAllDay: true }),
     });
     expect(holiday("2026-11-23", "21:00", 180)).toBe(false);
   });
 
-  it("Google の許可がなければ常に false", () => {
+  it("Google の許可がなければ予定ありにしない", () => {
     expect(busyChecker({})("2026-11-21", "21:00", 180)).toBe(false);
+  });
+
+  it("hasBusySource は Google の許可がなければ false を返す", () => {
     expect(hasBusySource({})).toBe(false);
+  });
+
+  it("hasBusySource は予定が 1 件もなければ false を返す", () => {
     expect(hasBusySource({ googleBusy: google([]) })).toBe(false);
+  });
+
+  it("hasBusySource は予定が 1 件でもあれば true を返す", () => {
     expect(
       hasBusySource({ googleBusy: google([{ start: "2026-11-21T00:00:00Z", end: "2026-11-21T01:00:00Z" }]) }),
     ).toBe(true);
@@ -461,7 +510,7 @@ describe("日程調整の編集と回答", () => {
     ).toBe(150);
   });
 
-  it("applyPollEdit は長さをそろえ、日時を変えた候補の回答だけを消して並べ直す", () => {
+  const edited = () => {
     const s = base();
     applyPollEdit(s, "ev1", {
       title: " 次回（改） ",
@@ -473,9 +522,19 @@ describe("日程調整の編集と回答", () => {
         { id: "c3", date: "2026-11-20", startTime: "19:00" },
       ],
     });
-    const ev = s.events.ev1!;
+    return s;
+  };
+
+  it("applyPollEdit は題名を整え、空白だけのメモを消す", () => {
+    const ev = edited().events.ev1!;
+
     expect(ev.title).toBe("次回（改）");
     expect(ev.note).toBeUndefined();
+  });
+
+  it("applyPollEdit は長さをそろえ、日時を変えた候補の回答だけを消して並べ直す", () => {
+    const ev = edited().events.ev1!;
+
     expect(ev.durationMin).toBe(240);
     expect(ev.candidates!.map((c) => [c.id, c.endTime, c.responses])).toEqual([
       ["c3", "23:00", {}],
@@ -483,9 +542,14 @@ describe("日程調整の編集と回答", () => {
       ["c2", "25:00", {}],
     ]);
     expect(ev.date).toBe("2026-11-20");
-    // 候補が空になる編集は受け付けない
+  });
+
+  it("applyPollEdit は候補が空になる編集を受け付けない", () => {
+    const s = edited();
+
     applyPollEdit(s, "ev1", { title: "x", durationMin: 60, candidates: [] });
-    expect(ev.candidates).toHaveLength(3);
+
+    expect(s.events.ev1!.candidates).toHaveLength(3);
   });
 
   it("applyPollAnswers は自分の回答だけをまとめて書く", () => {

@@ -189,10 +189,15 @@ describe("古い保存データ（dates + t0 + t1）の読み替え", () => {
     expect(migrateLegacySchedule({})).toEqual([]);
     expect(migrateLegacySchedule({ t0: "x", dates: "y", channels: [{ msgs: "z" }] })).toEqual([]);
   });
-  it("upgradeLogSchedule は sittings を正とし古い欄を消す", () => {
+  it("upgradeLogSchedule は古い欄を sittings に移して消し、true を返す", () => {
     const legacy: Record<string, unknown> = { dates: ["2026-11-08"], t0: 100, t1: 200, channels: [] };
+
     expect(upgradeLogSchedule(legacy)).toBe(true);
+
     expect(legacy).toEqual({ channels: [], sittings: [{ start: 100, end: 200 }] });
+  });
+
+  it("upgradeLogSchedule は sittings があればそれを正として並べ替え、古い欄を消す", () => {
     const current: Record<string, unknown> = {
       sittings: [
         { start: 300, end: 400 },
@@ -200,13 +205,18 @@ describe("古い保存データ（dates + t0 + t1）の読み替え", () => {
       ],
       t0: 1,
     };
+
     upgradeLogSchedule(current);
+
     expect(current).toEqual({
       sittings: [
         { start: 100, end: 200 },
         { start: 300, end: 400 },
       ],
     });
+  });
+
+  it("upgradeLogSchedule は変えるものがなければ false を返す", () => {
     expect(upgradeLogSchedule({ channels: [] })).toBe(false);
   });
 });

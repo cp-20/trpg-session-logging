@@ -129,7 +129,10 @@ describe("卓とチャンネルをつなぐ", () => {
     linkTable(t.store, { channelId: "ch_other" });
     expect(await completeChannelLink(t.ctx, "u_pl", code, T1)).toMatchObject({ ok: false, status: 403 });
     expect(t.store.data.tables.get("t1")?.ownerId).toBe("u_owner");
-    expect(await previewChannelLink(t.ctx, code)).not.toBeNull();
+    expect(await previewChannelLink(t.ctx, code)).toEqual({
+      channelName: expect.any(String),
+      expiresAt: expect.any(Number),
+    });
   });
 
   it("期限切れのコードは使えない", async () => {

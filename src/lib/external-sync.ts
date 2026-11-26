@@ -194,14 +194,21 @@ export function isPrivateOrReservedIp(rawIp: string): boolean {
   const hextets = expandIpv6Hextets(ip);
   if (!hextets) return true;
 
+  const embedded = (hi: number, lo: number) =>
+    isPrivateIpv4Octets([(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff]);
+
   // :: / ::1 は下の IPv4 互換判定（0.0.0.0 / 0.0.0.1 → 0.0.0.0/8）で拒否される
   const isIpv4Mapped =
     hextets.slice(0, 5).every((x) => x === 0) && (hextets[5] === 0xffff || hextets[5] === 0);
-  if (isIpv4Mapped) {
-    const hi = hextets[6]!;
-    const lo = hextets[7]!;
-    return isPrivateIpv4Octets([(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff]);
+  if (isIpv4Mapped) return embedded(hextets[6]!, hextets[7]!);
+
+  // IPv4 を埋め込む形も中の IPv4 で判定する。NAT64（64:ff9b::/96）のある網や 6to4（2002::/16）の中継から内側に届くため
+  if (hextets[0] === 0x64 && hextets[1] === 0xff9b) {
+    // 64:ff9b:1::/48 は網の中だけで使う変換の範囲（RFC 8215）
+    if (hextets[2] === 1) return true;
+    if (hextets.slice(2, 6).every((x) => x === 0)) return embedded(hextets[6]!, hextets[7]!);
   }
+  if (hextets[0] === 0x2002) return embedded(hextets[1]!, hextets[2]!);
 
   const first = hextets[0]!;
   if (first >= 0xfc00 && first <= 0xfdff) return true; // fc00::/7 Unique local

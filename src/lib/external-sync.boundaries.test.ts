@@ -334,23 +334,32 @@ describe("parseCharasheetResponse の JSONP 判定", () => {
     }
   });
 
-  it("pc_name が無ければ画像があっても null、画像キーの候補順", () => {
+  it("pc_name が無ければ画像があっても null を返す", () => {
     expect(parseCharasheetResponse(JSON.stringify({ pc_image: "https://cdn.example.com/p.png" }))).toBeNull();
+  });
+
+  it("画像は image キーからも読む", () => {
     expect(
       parseCharasheetResponse(JSON.stringify({ pc_name: "A", image: "https://cdn.example.com/i.png" }))
         ?.image,
     ).toBe("https://cdn.example.com/i.png");
+  });
+
+  it("画像は image_url キーからも読む", () => {
     expect(
       parseCharasheetResponse(JSON.stringify({ pc_name: "A", image_url: "https://cdn.example.com/u.png" }))
         ?.image,
     ).toBe("https://cdn.example.com/u.png");
+  });
+
+  it("画像がなければ image キーを持たない", () => {
     const noImg = parseCharasheetResponse(JSON.stringify({ pc_name: "A" }));
     expect(noImg && Object.hasOwn(noImg, "image")).toBe(false);
   });
 });
 
 describe("parseYtsheetResponse の HTML フォールバック", () => {
-  it("説明・画像・システム推定を拾う", () => {
+  it("og タグから名前・説明・画像・システム推定を拾う", () => {
     expect(
       parseYtsheetResponse(
         html(
@@ -366,11 +375,17 @@ describe("parseYtsheetResponse の HTML フォールバック", () => {
       stats: {},
       image: "https://cdn.example.com/y.png",
     });
+  });
+
+  it("og タグがなければ meta description と title を使い、先頭の空白を許す", () => {
     expect(
       parseYtsheetResponse(
         ` ${html(`<meta name="description" content="記述" /><title>名 | ゆとシート</title>`)}`,
       ),
     ).toStrictEqual({ name: "名", memo: "記述", systemId: "sw25", stats: {} });
+  });
+
+  it("説明がなければ memo を空にする", () => {
     expect(parseYtsheetResponse(html(og("og:title", "説明無し")))).toStrictEqual({
       name: "説明無し",
       memo: undefined,
@@ -401,7 +416,7 @@ describe("parseYtsheetResponse の HTML フォールバック", () => {
 });
 
 describe("parseBoothResponse", () => {
-  it("JSON: 全項目・タグの正規化・システム推定", () => {
+  it("JSON: 全項目を読み、タグの正規化とシステム推定をする", () => {
     expect(
       parseBoothResponse(
         ` ${JSON.stringify({
@@ -431,12 +446,15 @@ describe("parseBoothResponse", () => {
     expect(parseBoothResponse(JSON.stringify(obj), BOOTH)?.systemId).toBe(expected);
   });
 
-  it("JSON: 名前無しは null、HTML 文字列を含む JSON も HTML として扱わない", () => {
+  it("JSON: 名前無しは null を返す", () => {
     expect(parseBoothResponse("{}", BOOTH)).toBeNull();
+  });
+
+  it("JSON: HTML 文字列を含む JSON も HTML として扱わない", () => {
     expect(parseBoothResponse(JSON.stringify({ description: "<title>X</title>" }), BOOTH)).toBeNull();
   });
 
-  it("HTML: 作者の分割・連続区切り・説明の正規化", () => {
+  it("HTML: 作者を分割し、連続した区切りと空の説明を正規化する", () => {
     expect(
       parseBoothResponse(
         html(og("og:title", "上巻  -  下巻  -  作者 - BOOTH") + og("og:description", "&nbsp;")),
@@ -451,13 +469,24 @@ describe("parseBoothResponse", () => {
       tags: [],
       description: undefined,
     });
+  });
+
+  it("HTML: タイトル末尾の &nbsp; を除く", () => {
     expect(parseBoothResponse(html(og("og:title", "題&nbsp;")), BOOTH)?.title).toBe("題");
+  });
+
+  it("HTML: 改行を含むサフィックスは BOOTH 接尾辞として扱わず作者にする", () => {
     expect(parseBoothResponse(html(og("og:title", "題 - 作 - BOOTH\nX")), BOOTH)).toMatchObject({
       title: "題 - 作",
       author: "BOOTH\nX",
     });
-    expect(parseBoothResponse(html(og("og:description", "説明のみ")), BOOTH)).toBeNull();
-    expect(parseBoothResponse("<html></html>", BOOTH)).toBeNull();
+  });
+
+  it.each([
+    ["タイトルがなく説明だけ", html(og("og:description", "説明のみ"))],
+    ["空の HTML", "<html></html>"],
+  ])("HTML: %s なら null を返す", (_label, text) => {
+    expect(parseBoothResponse(text, BOOTH)).toBeNull();
   });
 
   it.each([
@@ -476,7 +505,7 @@ describe("parseBoothResponse", () => {
 });
 
 describe("parseTaltoResponse", () => {
-  it("JSON: 必須はタイトルのみ・タグは 8 件まで", () => {
+  it("JSON: 必須はタイトルのみで、他は既定値にする", () => {
     expect(parseTaltoResponse(` ${JSON.stringify({ name: "名のみ" })}`, TALTO)).toStrictEqual({
       title: "名のみ",
       author: undefined,
@@ -486,8 +515,15 @@ describe("parseTaltoResponse", () => {
       tags: [],
       description: undefined,
     });
+  });
+
+  it("JSON: タグは 8 件までにする", () => {
     const tags = Array.from({ length: 10 }, (_, i) => `t${i}`);
+
     expect(parseTaltoResponse(JSON.stringify({ title: "T", tags }), TALTO)?.tags).toEqual(tags.slice(0, 8));
+  });
+
+  it("JSON: 説明文からシステムを推定する", () => {
     expect(parseTaltoResponse(JSON.stringify({ title: "T", description: "マダミス" }), TALTO)?.systemId).toBe(
       "madamis",
     );
@@ -532,20 +568,28 @@ describe("parseTaltoResponse", () => {
     expect(parseTaltoResponse(html(og("og:title", title)), TALTO)?.title).toBe(expected);
   });
 
-  it("og:description / description / 欠損", () => {
+  it("og:description を説明にする", () => {
     expect(
       parseTaltoResponse(html(og("og:title", "題") + og("og:description", "OGD")), TALTO)?.description,
     ).toBe("OGD");
+  });
+
+  it("説明が欠けていれば description を空にする", () => {
     expect(parseTaltoResponse(html(og("og:title", "題")), TALTO)?.description).toBeUndefined();
+  });
+
+  it("題名の手がかりが何もなければ null を返す", () => {
     expect(parseTaltoResponse(html(""), TALTO)).toBeNull();
-    // og:title / <title> が無くても JSON-LD の name を題名にする（サイト名の接尾辞は落とす）
+    expect(
+      parseTaltoResponse(html(`<script type="application/ld+json">{"author":"L"}</script>`), TALTO),
+    ).toBeNull();
+  });
+
+  it("og:title / <title> が無くても JSON-LD の name を題名にし、サイト名の接尾辞は落とす", () => {
     expect(
       parseTaltoResponse(html(`<script type="application/ld+json">{"name":"LD | TALTO"}</script>`), TALTO)
         ?.title,
     ).toBe("LD");
-    expect(
-      parseTaltoResponse(html(`<script type="application/ld+json">{"author":"L"}</script>`), TALTO),
-    ).toBeNull();
   });
 });
 
@@ -569,30 +613,39 @@ describe("シナリオのシステム推定 (BOOTH JSON 経由)", () => {
 });
 
 describe("computeExternalContentHash の安定性", () => {
-  it("既知の値に対して固定のハッシュを返す（保存済みハッシュとの互換）", () => {
-    expect(computeExternalContentHash({ name: "A", stats: { san: 50, hp: 10 }, tags: ["x", null] })).toBe(
-      "f99e7fa0acf434eb",
-    );
-    expect(computeExternalContentHash({ n: 140 })).toBe("093a0b140f09aeed");
+  it.each([
+    ["入れ子の値", { name: "A", stats: { san: 50, hp: 10 }, tags: ["x", null] }, "f99e7fa0acf434eb"],
+    ["数値", { n: 140 }, "093a0b140f09aeed"],
+  ])("%s に対して固定のハッシュを返す（保存済みハッシュとの互換）", (_label, value, hash) => {
+    expect(computeExternalContentHash(value)).toBe(hash);
   });
 
-  it("null / undefined / 配列 / オブジェクトを区別して正規化する", () => {
-    const h = computeExternalContentHash;
+  const h = computeExternalContentHash;
+
+  it("null と undefined は同じハッシュに正規化する", () => {
     expect(h(null)).toBe(h(undefined));
     expect(h([undefined])).toBe(h([null]));
-    expect(h([null])).not.toBe(h([]));
-    expect(h([1])).not.toBe(h({ 0: 1 }));
-    expect(h([1])).not.toBe(h([2]));
-    expect(h({ a: 1 })).not.toBe(h({ a: 2 }));
-    expect(h({ a: 1 })).not.toBe(h({ b: 1 }));
+  });
+
+  it.each([
+    ["null を含む配列と空配列", [null], []],
+    ["配列とオブジェクト", [1], { 0: 1 }],
+    ["配列の値違い", [1], [2]],
+    ["オブジェクトの値違い", { a: 1 }, { a: 2 }],
+    ["オブジェクトのキー違い", { a: 1 }, { b: 1 }],
+  ])("%s は別のハッシュになる", (_label, a, b) => {
+    expect(h(a)).not.toBe(h(b));
   });
 });
 
 describe("parseExternalResponse のプロバイダ振り分け", () => {
-  it("TALTO は TALTO パーサー、BOOTH は BOOTH パーサーで解析する", () => {
+  it("TALTO は TALTO パーサーで解析する", () => {
     const talto = parseExternalResponse("talto", JSON.stringify({ title: "T" }), "application/json", TALTO);
     expect(talto).toMatchObject({ kind: "scenario", provider: "talto", providerLabel: "TALTO", url: TALTO });
     expect(talto?.kind === "scenario" && talto.scenario.title).toBe("T");
+  });
+
+  it("BOOTH は BOOTH パーサーで解析し、title だけの JSON や空文字は null を返す", () => {
     expect(
       parseExternalResponse("booth", JSON.stringify({ title: "T" }), "application/json", BOOTH),
     ).toBeNull();
@@ -628,6 +681,9 @@ describe("parseExternalResponse のプロバイダ振り分け", () => {
       stats: { hp: 56, lv: 90 },
     });
     expect(p.contentHash).toBe(computeExternalContentHash(p.character));
+  });
+
+  it("iachara の JSON 応答は null を返す", () => {
     expect(
       parseExternalResponse("iachara", JSON.stringify({ name: "I", san: 1 }), "application/json", IA),
     ).toBeNull();
@@ -742,10 +798,13 @@ describe("mergeExternalCharacterUpdate の境界", () => {
 
 describe("shouldAutoSync の境界", () => {
   const now = Date.parse("2026-11-20T12:00:00.000Z");
-  it("lastSyncedAt が空文字なら同期する・間隔を指定できる", () => {
+  it("lastSyncedAt が空文字なら同期する", () => {
     expect(shouldAutoSync({ provider: "iachara", url: IA, autoSync: true, lastSyncedAt: "" }, now)).toBe(
       true,
     );
+  });
+
+  it("間隔を指定でき、ちょうどなら同期し 1ms 足りなければ同期しない", () => {
     const sync = {
       provider: "iachara" as const,
       url: IA,

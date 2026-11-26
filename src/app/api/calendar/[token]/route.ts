@@ -29,10 +29,14 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
   const url =
     `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${DATABASE}` +
     `/documents/calendarFeeds/${token}${API_KEY ? `?key=${API_KEY}` : ""}`;
-  const res = await fetch(url, { cache: "no-store" });
+  const upstreamError = () => new Response("Upstream error", { status: 502 });
+  // つながらない・本文が読めないときも、応答が失敗したときと同じく 502（Firestore 側の不調）で答える
+  const res = await fetch(url, { cache: "no-store" }).catch(() => null);
+  if (!res) return upstreamError();
   if (res.status === 404 || res.status === 403) return new Response("Not found", { status: 404 });
-  if (!res.ok) return new Response("Upstream error", { status: 502 });
-  const doc = (await res.json()) as { fields?: { ics?: { stringValue?: string } } };
+  if (!res.ok) return upstreamError();
+  const doc = (await res.json().catch(() => null)) as { fields?: { ics?: { stringValue?: string } } } | null;
+  if (!doc) return upstreamError();
   const ics = doc.fields?.ics?.stringValue;
   if (!ics) return new Response("Not found", { status: 404 });
   return new Response(ics, {
