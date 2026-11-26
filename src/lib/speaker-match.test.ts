@@ -111,36 +111,67 @@ describe("matchSpeakerToState", () => {
     expect(matchSpeakerToState("怜", world()).character).toBeNull();
   });
 
-  it("キャラが見つからなければ PL 名でユーザーを返し、文字列コンテキスト・境界スコア・弱一致フォールバックを扱う", () => {
+  it("キャラが見つからなければ PL 名でユーザーを返す", () => {
     const r = matchSpeakerToState("そら", world());
+
     expect(r.character).toBeNull();
     expect(r.user?.id).toBe("u_b");
+  });
 
-    // 文字列第3引数は preferredSystemId として扱われる
+  it("文字列の第 3 引数は preferredSystemId として扱う", () => {
     expect(matchSpeakerToState("遠沢澄花", world(), "emoklore").character?.id).toBe("c2");
+  });
 
-    // 部分一致 51点 (<55) かつ所有者ヒント一致なしなら、user ヒント (>= 50) が勝ち、無ければ弱いキャラへフォールバック
+  it("部分一致が 51 点（55 未満）なら、所有者ヒント（PL 名）の一致するユーザーを返しキャラは付けない", () => {
     const w = world();
     w.characters.c4 = char("c4", "u_a", "アリスインワンダ"); // sp=アリス(3)/len=8 で score=51 (<55)
+
     expect(matchSpeakerToState("アリス（そら）", w)).toMatchObject({
       character: null,
       user: { id: "u_b" },
     });
+  });
+
+  it("所有者ヒントがなければ 51 点の弱い一致のキャラへフォールバックする", () => {
+    const w = world();
+    w.characters.c4 = char("c4", "u_a", "アリスインワンダ");
+
     expect(matchSpeakerToState("アリス", w).character?.id).toBe("c4");
+  });
+
+  it("部分一致が 55 点ちょうどならキャラを採る", () => {
+    const w = world();
     w.characters.c5 = char("c5", "u_b", "一二三四五六"); // sp=一二三(3)/len=6 で score=55
+
     expect(matchSpeakerToState("一二三", w).character?.id).toBe("c5");
+  });
 
-    // spClean 長さ1文字・nClean 長さ1文字・文字長タイブレーク (20 文字上限)・user 参加者スコア(+10)・未知キャラ
+  it.each([
+    ["発言者名が 1 文字", "あ(補足)"],
+    ["キャラ名が 1 文字で発言者名と一致しない", "か(補足)"],
+    ["発言者名の本体が 1 文字のキャラ名にしか当たらず括弧内が別キャラの名前", "あいうえお（白瀬怜）"],
+  ])("%s ならキャラを採らない", (_label, speaker) => {
+    const w = world();
     w.characters.c6 = char("c6", "u_a", "あ");
-    expect(matchSpeakerToState("あ(補足)", w).character).toBeNull();
-    expect(matchSpeakerToState("か(補足)", w).character).toBeNull();
-    expect(matchSpeakerToState("あいうえお（白瀬怜）", w).character).toBeNull();
-    expect(matchSpeakerToState("遠沢澄花さん", w, { participantIds: ["u_a"] }).character?.id).toBe("c1");
 
-    // user 同点時に participantIds と文字長タイブレークが効く
+    expect(matchSpeakerToState(speaker, w).character).toBeNull();
+  });
+
+  it("参加者（participantIds）の持ち主のキャラを優先する", () => {
+    expect(matchSpeakerToState("遠沢澄花さん", world(), { participantIds: ["u_a"] }).character?.id).toBe(
+      "c1",
+    );
+  });
+
+  it("ユーザーが同点なら参加者（participantIds）のユーザーを優先する", () => {
+    const w = world();
     w.users.u_c = user("u_c", "あ"); // len=1 なので nameScore 0, hint 60
+
     expect(matchSpeakerToState("未知（あ）（そら）", w, { participantIds: ["u_b"] }).user?.id).toBe("u_b");
-    expect(matchSpeakerToState("完全に未知の発言者", w)).toEqual({ character: null, user: null });
+  });
+
+  it("どのキャラにもユーザーにも当たらなければ両方 null を返す", () => {
+    expect(matchSpeakerToState("完全に未知の発言者", world())).toEqual({ character: null, user: null });
   });
 });
 
@@ -159,31 +190,46 @@ describe("buildDraft", () => {
   ];
   const avatars = { character: (c: Character) => `char:${c.id}`, user: (u: User) => `user:${u.id}` };
 
-  it("卓のメンバーを手がかりに発言者を紐付け、参加者とアイコンを埋める", () => {
-    const d = buildDraft({
-      fileNames: ["log.json"],
-      channels,
-      attachLog: null,
-      presetTable: "t1",
-      presetScenario: "",
-      state: world(),
-      avatars,
+  describe("卓のメンバーを手がかりにした紐付け", () => {
+    const build = () =>
+      buildDraft({
+        fileNames: ["log.json"],
+        channels,
+        attachLog: null,
+        presetTable: "t1",
+        presetScenario: "",
+        state: world(),
+        avatars,
+      });
+
+    it("キャラ名の発言者を持ち主とキャラに紐付け、キャラのアイコンを埋める", () => {
+      const d = build();
+
+      expect(d.speakerLinks["遠沢澄花"]).toEqual({ userId: "u_a", characterId: "c1" });
+      expect(d.speakerIcons["遠沢澄花"]).toBe("char:c1");
     });
-    expect(d.speakerLinks["遠沢澄花"]).toEqual({ userId: "u_a", characterId: "c1" });
-    expect(d.speakerIcons["遠沢澄花"]).toBe("char:c1");
-    expect(d.kinds["そら"]).toBe("PL");
-    expect(d.players).toEqual(
-      expect.arrayContaining([
-        { userId: "u_a", characterIds: ["c1"] },
-        { userId: "u_b", characterIds: [] },
-      ]),
-    );
-    expect(d.kinds.KP).toBe("KP");
+
+    it("PL 名の発言者は PL、KP の発言者は KP にする", () => {
+      const d = build();
+
+      expect(d.kinds["そら"]).toBe("PL");
+      expect(d.kinds.KP).toBe("KP");
+    });
+
+    it("発言者に当たったユーザーを参加者にする", () => {
+      const d = build();
+
+      expect(d.players).toEqual(
+        expect.arrayContaining([
+          { userId: "u_a", characterIds: ["c1"] },
+          { userId: "u_b", characterIds: [] },
+        ]),
+      );
+    });
   });
 
-  it("ログの紐づけでシナリオ・GM/KP の昇格・時刻なしの導出・卓なしの代替を扱う", () => {
-    const w = world();
-    w.scenarios.sc1 = {
+  describe("既存のログに紐づけて取り込む", () => {
+    const scenario = {
       id: "sc1",
       title: "潮騒",
       author: "A",
@@ -194,7 +240,7 @@ describe("buildDraft", () => {
       tags: [],
       claimedBy: null,
       addedBy: "user",
-    };
+    } as const;
     const attachLog: Log = {
       id: "log1",
       tableId: "t1",
@@ -228,86 +274,144 @@ describe("buildDraft", () => {
         ],
       },
     ];
-    const attached = buildDraft({
-      fileNames: ["a.html"],
-      channels: zeroTsChannels,
-      attachLog,
-      presetTable: "",
-      presetScenario: "",
-      state: w,
-      avatars,
-    });
-    expect(attached.meta).toEqual({ systemId: "sw25" });
-    expect(attached.scope).toBe("public");
-    expect(attached.scenarioId).toBe("sc1");
-    expect(attached.tableId).toBe("t1");
-    // ログに時刻がなければ添付先の時間帯を使う
-    expect(attached.sittings).toEqual([{ start: 100, end: 200 }]);
-    expect(attached.kinds["GM:みかん"]).toBe("GM");
-    expect(attached.kinds["KP:そら"]).toBe("KP");
-    // 既存の attachLog.speakerIcons を上書きしない
-    expect(attached.speakerIcons["GM:みかん"]).toBe("https://cdn.example.com/gm.png");
-    expect(attached.speakerIcons["KP:そら"]).toBe("user:u_b");
-    expect(attached.players).toEqual(
-      expect.arrayContaining([
-        { userId: "u_b", characterIds: ["c2", "c3"] },
-        { userId: "u_a", characterIds: ["c1"] },
-      ]),
-    );
-
-    // presetScenario からの systemId 補完 + 卓なしは general / 空 players な attachLog / table.systemId / SYSTEM 優先順位 / 逆順タイムスタンプ再マップ
-    w.tables.t2 = {
-      id: "t2",
-      name: "CoC6卓",
-      ownerId: "u_kp",
-      systemId: "coc6",
-      memberIds: ["u_kp", "u_a"],
-      createdAt: "2026-01-01",
+    const buildAttached = () => {
+      const w = world();
+      w.scenarios.sc1 = { ...scenario, tags: [] };
+      return buildDraft({
+        fileNames: ["a.html"],
+        channels: zeroTsChannels,
+        attachLog,
+        presetTable: "",
+        presetScenario: "",
+        state: w,
+        avatars,
+      });
     };
-    const presetOnly = buildDraft({
-      fileNames: [],
-      channels: [],
-      attachLog: null,
-      presetTable: "",
-      presetScenario: "sc1",
-      state: w,
-      avatars,
-    });
-    expect(presetOnly.meta).toEqual({ systemId: "emoklore" });
-    expect(presetOnly.sittings).toEqual([]);
-    expect(presetOnly.guess).toBeNull();
 
-    const emptyPlayersAttach: Log = { ...attachLog, systemId: "general", players: {} };
-    delete (emptyPlayersAttach as Partial<Log>).systemId;
-    const tableFallback = buildDraft({
-      fileNames: ["b.json"],
-      channels: [
-        {
-          id: "c",
-          name: "メイン",
-          secret: false,
-          msgs: [
-            { id: "1", ts: 10, sp: "進行", kind: "SYSTEM", type: "text", text: "システム" },
-            { id: "2", ts: 20, sp: "進行", kind: "PC", type: "text", text: "上書きされない" },
-            { id: "3", ts: 30, sp: "みかん", kind: "PC", type: "text", text: "自参加" },
-          ],
-        },
-      ],
-      attachLog: null,
-      presetTable: "t2",
-      presetScenario: "",
-      state: w,
-      avatars,
+    it("添付先のシステム・共有範囲・シナリオ・卓を引き継ぐ", () => {
+      const attached = buildAttached();
+
+      expect(attached.meta).toEqual({ systemId: "sw25" });
+      expect(attached.scope).toBe("public");
+      expect(attached.scenarioId).toBe("sc1");
+      expect(attached.tableId).toBe("t1");
     });
-    expect(tableFallback.meta.systemId).toBe("coc6");
-    expect(tableFallback.kinds["進行"]).toBe("SYSTEM");
-    expect(tableFallback.players).toEqual([{ userId: "u_a", characterIds: [] }]);
-    expect(tableFallback.sittings).toEqual([{ start: 10, end: 30 }]);
+
+    it("ログに時刻がなければ添付先の時間帯を使う", () => {
+      expect(buildAttached().sittings).toEqual([{ start: 100, end: 200 }]);
+    });
+
+    it("GM・KP の接頭辞の発言者は PC でも GM・KP に昇格する", () => {
+      const attached = buildAttached();
+
+      expect(attached.kinds["GM:みかん"]).toBe("GM");
+      expect(attached.kinds["KP:そら"]).toBe("KP");
+    });
+
+    it("添付先に既にあるアイコンは上書きせず、ないものはユーザーのアイコンで埋める", () => {
+      const attached = buildAttached();
+
+      expect(attached.speakerIcons["GM:みかん"]).toBe("https://cdn.example.com/gm.png");
+      expect(attached.speakerIcons["KP:そら"]).toBe("user:u_b");
+    });
+
+    it("既に参加しているキャラを重複させずに参加者へ足す", () => {
+      expect(buildAttached().players).toEqual(
+        expect.arrayContaining([
+          { userId: "u_b", characterIds: ["c2", "c3"] },
+          { userId: "u_a", characterIds: ["c1"] },
+        ]),
+      );
+    });
+  });
+
+  describe("既存のログがないときの導出", () => {
+    const scenario = {
+      id: "sc1",
+      title: "潮騒",
+      author: "A",
+      systemId: "emoklore",
+      source: "manual",
+      emoji: "🎲",
+      bg: "#fff",
+      tags: [],
+      claimedBy: null,
+      addedBy: "user",
+    } as const;
+
+    it("卓なしで presetScenario だけなら、シナリオのシステムを補い時間帯と推定は空にする", () => {
+      const w = world();
+      w.scenarios.sc1 = { ...scenario, tags: [] };
+
+      const presetOnly = buildDraft({
+        fileNames: [],
+        channels: [],
+        attachLog: null,
+        presetTable: "",
+        presetScenario: "sc1",
+        state: w,
+        avatars,
+      });
+
+      expect(presetOnly.meta).toEqual({ systemId: "emoklore" });
+      expect(presetOnly.sittings).toEqual([]);
+      expect(presetOnly.guess).toBeNull();
+    });
+
+    describe("卓のシステムで取り込む（逆順の時刻つき）", () => {
+      const tableFallback = () => {
+        const w = world();
+        w.tables.t2 = {
+          id: "t2",
+          name: "CoC6卓",
+          ownerId: "u_kp",
+          systemId: "coc6",
+          memberIds: ["u_kp", "u_a"],
+          createdAt: "2026-01-01",
+        };
+        return buildDraft({
+          fileNames: ["b.json"],
+          channels: [
+            {
+              id: "c",
+              name: "メイン",
+              secret: false,
+              msgs: [
+                { id: "1", ts: 10, sp: "進行", kind: "SYSTEM", type: "text", text: "システム" },
+                { id: "2", ts: 20, sp: "進行", kind: "PC", type: "text", text: "上書きされない" },
+                { id: "3", ts: 30, sp: "みかん", kind: "PC", type: "text", text: "自参加" },
+              ],
+            },
+          ],
+          attachLog: null,
+          presetTable: "t2",
+          presetScenario: "",
+          state: w,
+          avatars,
+        });
+      };
+
+      it("卓のシステムをログのシステムにする", () => {
+        expect(tableFallback().meta.systemId).toBe("coc6");
+      });
+
+      it("同じ発言者の SYSTEM は後の PC の発言で上書きしない", () => {
+        expect(tableFallback().kinds["進行"]).toBe("SYSTEM");
+      });
+
+      it("発言者に当たった卓のメンバーだけを参加者にする", () => {
+        expect(tableFallback().players).toEqual([{ userId: "u_a", characterIds: [] }]);
+      });
+
+      it("発言の最初と最後の時刻から時間帯を導く", () => {
+        expect(tableFallback().sittings).toEqual([{ start: 10, end: 30 }]);
+      });
+    });
   });
 });
 
 describe("carryDraftEdits: ログを足しても決めたことを残す", () => {
-  it("タイトル・卓・参加者・共有範囲・残っている発言者の設定を引き継ぎ、時間帯は導き直す", () => {
+  describe("決めた設定を引き継ぎ、時間帯は導き直す", () => {
     const base = {
       fileNames: ["1.json"],
       channels: [],
@@ -340,17 +444,38 @@ describe("carryDraftEdits: ログを足しても決めたことを残す", () =>
         { start: 9, end: 10 },
       ],
     };
-    const out = carryDraftEdits(base, fresh);
-    expect(out.fileNames).toEqual(["1.json", "2.json"]);
-    expect(out.kinds).toEqual({ A: "PC", C: "PC" });
-    expect(out.speakerIcons).toEqual({ A: "a.png", C: "c.png" });
-    expect(out.speakerLinks).toEqual({ A: { userId: "u1", characterId: "c1" } });
-    expect(out.meta).toEqual({ systemId: "coc7" });
-    expect([out.scope, out.tableId, out.scenarioId]).toEqual(["public", "t1", "sc1"]);
-    expect(out.players.map((p) => p.userId)).toEqual(["u1", "u2"]);
-    expect(out.sittings).toHaveLength(2);
-    expect(out.self).toEqual(base.self);
-    expect(carryDraftEdits(base, { ...fresh, sittings: [] }).sittings).toEqual(base.sittings);
+    const carried = () => carryDraftEdits(base, fresh);
+
+    it("ファイル名は新しいログの全件にする", () => {
+      expect(carried().fileNames).toEqual(["1.json", "2.json"]);
+    });
+
+    it("発言者の種別は決めた値を残し、新しい発言者は導出値を使う", () => {
+      expect(carried().kinds).toEqual({ A: "PC", C: "PC" });
+    });
+
+    it("発言者のアイコンと紐付けは決めた値を残す", () => {
+      expect(carried().speakerIcons).toEqual({ A: "a.png", C: "c.png" });
+      expect(carried().speakerLinks).toEqual({ A: { userId: "u1", characterId: "c1" } });
+    });
+
+    it("システム・共有範囲・卓・シナリオは決めた値を残す", () => {
+      expect(carried().meta).toEqual({ systemId: "coc7" });
+      expect([carried().scope, carried().tableId, carried().scenarioId]).toEqual(["public", "t1", "sc1"]);
+    });
+
+    it("参加者は決めた人に新しい人を足す", () => {
+      expect(carried().players.map((p) => p.userId)).toEqual(["u1", "u2"]);
+    });
+
+    it("時間帯は新しいログから導き直し、本人の設定は残す", () => {
+      expect(carried().sittings).toHaveLength(2);
+      expect(carried().self).toEqual(base.self);
+    });
+
+    it("新しいログに時間帯がなければ決めた時間帯を残す", () => {
+      expect(carryDraftEdits(base, { ...fresh, sittings: [] }).sittings).toEqual(base.sittings);
+    });
   });
 });
 

@@ -55,16 +55,24 @@ describe("コメント・宣言・処理命令・CDATA", () => {
     expect(parseHtml(html)).toEqual([{ tab: "メイン", sp: "太郎", text: "本物" }]);
   });
 
-  it("要素の中のコメント・宣言・処理命令は子要素にも本文にもならない", () => {
+  it("要素の中のコメント・宣言・処理命令は子要素にならない", () => {
     const html = `<p><!-- c --><?pi x?><!x y><span>[メイン]</span><span>太郎</span><span>本文</span></p>`;
     expect(parseHtml(html)).toEqual([{ tab: "メイン", sp: "太郎", text: "本文" }]);
-    expect(chatText("前<!-- a > b -->後")).toBe("前後");
-    expect(chatText("前<?pi a b?>後")).toBe("前後");
-    expect(chatText("前<!DOCTYPE x>後")).toBe("前後");
+  });
+
+  it.each([
+    ["コメント", "前<!-- a > b -->後"],
+    ["処理命令", "前<?pi a b?>後"],
+    ["宣言", "前<!DOCTYPE x>後"],
+  ])("本文の中の%sは本文にならない", (_label, input) => {
+    expect(chatText(input)).toBe("前後");
   });
 
   it("CDATA は空白も記号もそのまま本文にする", () => {
     expect(chatText("<![CDATA[星野 光 <b>&amp;</b>]]>")).toBe("星野 光 <b>&amp;</b>");
+  });
+
+  it("空の CDATA は後ろの本文だけを残す", () => {
     expect(chatText("<![CDATA[]]>本文")).toBe("本文");
   });
 });
@@ -80,6 +88,9 @@ describe("閉じタグと末尾", () => {
 
   it("閉じられていない要素の末尾の文字も本文にする", () => {
     expect(parseChats(`<chat name=A>途中まで&amp;`)[0]?.text).toBe("途中まで&");
+  });
+
+  it("開いただけで終わった要素の本文は空にする", () => {
     expect(parseChats(`<chat name=A>`)[0]?.text).toBe("");
   });
 
@@ -172,9 +183,11 @@ describe("CCFOLIA 旧整形ログ (div.tab > p.player > b)", () => {
     ).toEqual([]);
   });
 
-  it("class が空・tab を含まない div はタブにしない", () => {
-    expect(parseHtml(`<div class=""><p class="player"><b>太郎</b>本文</p></div>`)).toEqual([]);
-    expect(parseHtml(`<div class="tabs"><p class="player"><b>太郎</b>本文</p></div>`)).toEqual([]);
+  it.each([
+    ["class が空", `<div class="">`],
+    ["tab を含まない class", `<div class="tabs">`],
+  ])("%s の div はタブにしない", (_label, open) => {
+    expect(parseHtml(`${open}<p class="player"><b>太郎</b>本文</p></div>`)).toEqual([]);
   });
 });
 
@@ -193,9 +206,11 @@ describe("CCFOLIA 新整形ログ (section.tab > .player)", () => {
     ]);
   });
 
-  it("class=tab の section だけをタブにする", () => {
-    expect(parseHtml(`<section>${row("太郎", "本文")}</section>`)).toEqual([]);
-    expect(parseHtml(`<article class="tab">${row("太郎", "本文")}</article>`)).toEqual([]);
+  it.each([
+    ["class のない section", `<section>`, "</section>"],
+    ["class=tab の article", `<article class="tab">`, "</article>"],
+  ])("%s はタブにしない", (_label, open, close) => {
+    expect(parseHtml(`${open}${row("太郎", "本文")}${close}`)).toEqual([]);
   });
 });
 
