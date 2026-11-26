@@ -181,6 +181,26 @@ describe("SSRF guard: isIpLiteral & isPrivateOrReservedIp", () => {
   });
 });
 
+describe("isPrivateOrReservedIp: IPv4 を埋め込んだ IPv6", () => {
+  it.each([
+    ["NAT64 の 10.0.0.1", "64:ff9b::a00:1"],
+    ["NAT64 の 127.0.0.1（ドット表記）", "64:ff9b::127.0.0.1"],
+    ["NAT64 の 169.254.169.254（メタデータ）", "64:ff9b::a9fe:a9fe"],
+    ["網の中だけの NAT64（64:ff9b:1::/48）", "64:ff9b:1::5db8:d822"],
+    ["6to4 の 192.168.1.1", "2002:c0a8:101::1"],
+    ["6to4 の 127.0.0.1", "2002:7f00:1::"],
+  ])("%s は内側として拒む", (_label, ip) => {
+    expect(isPrivateOrReservedIp(ip)).toBe(true);
+  });
+
+  it.each([
+    ["NAT64 の 93.184.216.34", "64:ff9b::5db8:d822"],
+    ["6to4 の 93.184.216.34", "2002:5db8:d822::1"],
+  ])("%s は外側として通す", (_label, ip) => {
+    expect(isPrivateOrReservedIp(ip)).toBe(false);
+  });
+});
+
 describe("parseExternalUrl", () => {
   it("対応サービスの URL を正規化し取得候補 URL を返す", () => {
     const ia = {

@@ -107,9 +107,7 @@ describe("handleExternalImport: 名前解決の結果で断る", () => {
     expect(res).toMatchObject({ ok: true, kind: "character" });
   });
 
-  // 不具合: isPrivateOrReservedIp（external-sync.ts）は NAT64 の 64:ff9b::/96 に埋め込まれた IPv4 を見ないので、
-  // NAT64 のある網では 64:ff9b::a00:1（= 10.0.0.1）経由で内側に届いてしまう。IPv4 射影と同じく中の IPv4 で判定すべき。
-  it.fails("NAT64 の形で内側の IPv4 を埋め込んだアドレスに解決されたら 400 を返す", async () => {
+  it("NAT64 の形で内側の IPv4 を埋め込んだアドレスに解決されたら 400 を返す", async () => {
     const fetchFn = vi.fn(async () => sheetJson());
 
     const res = await handleExternalImport(
