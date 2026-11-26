@@ -28,6 +28,7 @@
     "deploy:rules": "node scripts/ops.ts rules",
     "discord": "node scripts/discord.ts",
     "check:emulator": "node scripts/emulator-smoke.ts",
+    "test:emulator": "node scripts/test-emulator.ts",
     "deploy": "node scripts/ops.ts deploy",
     "check:firebase": "node scripts/ops.ts firebase",
     "start": "next start -p 5173",
