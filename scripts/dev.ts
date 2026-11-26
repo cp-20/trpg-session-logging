@@ -46,7 +46,8 @@ const next = spawn(
   {
     cwd: ROOT,
     stdio: "inherit",
-    env: { ...process.env, ...discordEnv() },
+    // 開発では公開前の機能（src/lib/features.ts）も出す。切った姿を見るときは環境変数で false を渡す
+    env: { NEXT_PUBLIC_FEATURE_GOOGLE_CALENDAR: "true", ...process.env, ...discordEnv() },
   },
 );
 children.push(next);
