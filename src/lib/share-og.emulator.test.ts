@@ -15,6 +15,8 @@ import { sharedCharacterPage, sharedLogPage } from "../server/shared-pages";
  * 共有ページの OG 画像・題名は、サーバーが誰でもない立場で公開 REST API を読んで作る。
  * 実際のルールで、誰にでも見せてよい分だけが読め、参加者だけの記録は題名も読めないことを確かめる
  */
+// エミュレーター（Auth 9099 / Firestore 8080）に対して動く。`pnpm run test:emulator` が立てて動かす。
+// `pnpm test` では接続先が無く待ち続けるので飛ばす
 it.skipIf(process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATORS !== "true")(
   "OG 画像は公開の記録・共有中のキャラクターだけ中身を読み、参加者だけの記録は中身に触れない",
   async () => {

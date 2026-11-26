@@ -18,6 +18,8 @@ const BOT_ONLY = [
   "discordReminders",
 ];
 
+// エミュレーター（Auth 9099 / Firestore 8080）に対して動く。`pnpm run test:emulator` が立てて動かす。
+// `pnpm test` では接続先が無く待ち続けるので飛ばす
 it.skipIf(process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATORS !== "true")(
   "Discord 連携の文書は、ブラウザからは自分の userDiscord を読む・消す以外できない（実際のルール）",
   async () => {
