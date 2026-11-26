@@ -188,6 +188,10 @@ async function cmdDeploy(args: string[]): Promise<void> {
   try {
     for (const f of files) cpSync(join(ROOT, f), join(staging, f), { recursive: true });
     prepareNpmSource(staging);
+    // Sentry の release。デプロイするコミット（未コミットの変更も送るので、あれば -dirty）をビルドに埋め込む
+    const git = (gitArgs: string[]) => execFileSync("git", gitArgs, { cwd: ROOT, encoding: "utf8" }).trim();
+    const release = `takufu@${git(["rev-parse", "--short=12", "HEAD"])}${git(["status", "--porcelain"]) ? "-dirty" : ""}`;
+    writeFileSync(join(staging, ".env.production"), `NEXT_PUBLIC_SENTRY_RELEASE=${release}\n`);
     if (args.includes("--local-build")) {
       // クラウドと同じ手順を手元で試す（アップロードしない）
       const env = { ...process.env, ...readEnvLocal() };

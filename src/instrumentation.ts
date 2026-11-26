@@ -9,7 +9,11 @@ export const onRequestError = Sentry.captureRequestError;
  * Sentry を立ち上げ、Discord 連携の設定があれば、前日のお知らせの時計を動かす（src/lib/discord/scheduler.ts、docs/DEPLOYMENT.md「Discord」）。
  */
 export async function register(): Promise<void> {
-  Sentry.init(sentryOptions());
+  // サーバーの console.warn / console.error も Sentry の記録（Logs）に送る
+  Sentry.init({
+    ...sentryOptions(),
+    integrations: [Sentry.consoleLoggingIntegration({ levels: ["warn", "error"] })],
+  });
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   try {
     const { serverContext } = await import("./lib/discord/server");
