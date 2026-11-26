@@ -42,7 +42,7 @@ function hasReasonComment(lines: string[], i: number): boolean {
 export function lintTestSource(file: string, source: string): TestLintViolation[] {
   const out: TestLintViolation[] = [];
   const lines = source.split("\n");
-  const isVitestTs = /\.test\.ts$/.test(file);
+  const isVitestTs = file.endsWith(".test.ts");
   const isJsdom = JSDOM_DOCBLOCK_RE.test(source.split("\n").slice(0, 15).join("\n"));
   let domReported = false;
 

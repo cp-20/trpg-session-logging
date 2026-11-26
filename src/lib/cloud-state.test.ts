@@ -51,7 +51,7 @@ describe("cloud boundaries", () => {
     expect(publicLogProjection(log, state)).toBeNull();
   });
 
-  it("共有から除外したキャラクターの項目は、公開用の内容から実際に取り除く", () => {
+  it("共有しない項目は、キャラクターの公開用の内容から取り除く", () => {
     const state = seedState();
     const character = Object.values(state.characters)[0];
     character.share = {
