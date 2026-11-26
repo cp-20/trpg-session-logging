@@ -4,20 +4,42 @@ import { defineConfig } from "vitest/config";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
+const alias = {
+  "@shared": path.resolve(rootDir, "src"),
+  "@": path.resolve(rootDir, "src"),
+};
+
+/**
+ * 純粋なロジック（*.test.ts）は node で、画面（*.test.tsx）は jsdom で動かす。
+ * jsdom を作るのが全体の半分の時間を占めていたため。
+ * DOM を使う *.test.ts は先頭に `// @vitest-environment jsdom` を書く（scripts/lint-tests.ts が確かめる）。
+ * 各ファイルの分離（isolate）は保ったまま。
+ */
 export default defineConfig({
-  resolve: {
-    alias: {
-      "@shared": path.resolve(rootDir, "src"),
-      "@": path.resolve(rootDir, "src"),
-    },
-  },
+  resolve: { alias },
   test: {
-    environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
-    include: ["src/**/*.test.{ts,tsx}", "mobile/src/**/*.test.{ts,tsx}"],
     css: false,
-    // vi.stubEnv で変えた環境変数を、テストごとに元へ戻す
+    // vi.stubEnv / vi.stubGlobal で変えたものを、テストごとに元へ戻す
     unstubEnvs: true,
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "node",
+          environment: "node",
+          include: ["src/**/*.test.ts", "mobile/src/**/*.test.ts"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "dom",
+          environment: "jsdom",
+          include: ["src/**/*.test.tsx", "mobile/src/**/*.test.tsx"],
+        },
+      },
+    ],
   },
 });
