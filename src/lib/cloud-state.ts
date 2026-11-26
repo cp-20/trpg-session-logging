@@ -722,7 +722,7 @@ export async function acceptSharedInvite(token: string, me?: User): Promise<Shar
     };
     if (!existing.exists())
       transaction.set(ref, { inviteId: token, hidden: false, linked: true, ...identity });
-    else transaction.update(ref, { linked: true, ...identity });
+    else transaction.update(ref, { linked: true, inviteId: token, revoked: false, ...identity });
   });
   const shared = await fetchSharedLog(invite.slug);
   if (!shared) throw new Error("この記録は共有を終了しています。");
@@ -756,7 +756,8 @@ export async function revokeSharedMember(slug: string, uid: string): Promise<voi
   const db = database();
   const ref = doc(db, "sharedLogs", slug, "members", uid);
   const batch = writeBatch(db);
-  batch.update(ref, { linked: false });
+  // revoked: 本人が自分で linked を戻せないようにする印（戻れるのは新しい招待で入り直すときだけ。firestore.rules）
+  batch.update(ref, { linked: false, revoked: true });
   await batch.commit();
 }
 

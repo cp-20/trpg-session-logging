@@ -17,6 +17,7 @@ useRulesEnv();
 
 const SLUG = "slug1";
 const TOKEN = "t".repeat(32);
+const TOKEN2 = "n".repeat(32);
 const DAY = 24 * 60 * 60 * 1000;
 
 function share(overrides: Record<string, unknown> = {}) {
@@ -280,12 +281,13 @@ describe("sharedLogs/{slug}/members/{userId}", () => {
     await assertFails(updateDoc(ref, { inviteId: "u".repeat(32) }));
   });
 
-  it("持ち主はメンバーの linked を外せるが、表示名は変えられない", async () => {
+  it("持ち主はメンバーを外せる（linked を外し revoked を付ける）が、表示名は変えられない", async () => {
     await seedShare();
     await seed((db) => setDoc(doc(db, "sharedLogs", SLUG, "members", BOB), member()));
     const ref = doc(as(ALICE), "sharedLogs", SLUG, "members", BOB);
 
-    await assertSucceeds(updateDoc(ref, { linked: false }));
+    await assertFails(updateDoc(ref, { linked: false }));
+    await assertSucceeds(updateDoc(ref, { linked: false, revoked: true }));
     await assertFails(updateDoc(ref, { displayName: "勝手な名前" }));
   });
 
@@ -294,6 +296,45 @@ describe("sharedLogs/{slug}/members/{userId}", () => {
     await seed((db) => setDoc(doc(db, "sharedLogs", SLUG, "members", BOB), member({ linked: false })));
 
     await assertFails(updateDoc(doc(as(ALICE), "sharedLogs", SLUG, "members", BOB), { linked: true }));
+  });
+
+  describe("持ち主に外されたメンバー", () => {
+    const revoked = () =>
+      seed((db) =>
+        setDoc(doc(db, "sharedLogs", SLUG, "members", BOB), member({ linked: false, revoked: true })),
+      );
+    const bobRef = () => doc(as(BOB), "sharedLogs", SLUG, "members", BOB);
+
+    it("自分で linked を戻せず、読めないまま", async () => {
+      await seedShare();
+      await revoked();
+
+      await assertFails(updateDoc(bobRef(), { linked: true }));
+      await assertFails(updateDoc(bobRef(), { linked: true, revoked: false }));
+      await assertFails(getDoc(chunkRef(as(BOB))));
+    });
+
+    it("期限の切れた招待では入り直せない", async () => {
+      await seedShare();
+      await revoked();
+      await seed((db) =>
+        setDoc(
+          doc(db, "sharedInvites", TOKEN2),
+          invite({ expiresAt: Timestamp.fromMillis(Date.now() - DAY) }),
+        ),
+      );
+
+      await assertFails(updateDoc(bobRef(), { linked: true, revoked: false, inviteId: TOKEN2 }));
+    });
+
+    it("持ち主が新しく出した期限内の招待でなら入り直せる", async () => {
+      await seedShare();
+      await revoked();
+      await seed((db) => setDoc(doc(db, "sharedInvites", TOKEN2), invite()));
+
+      await assertSucceeds(updateDoc(bobRef(), { linked: true, revoked: false, inviteId: TOKEN2 }));
+      await assertSucceeds(getDoc(chunkRef(as(BOB))));
+    });
   });
 
   it("隠したメンバーの印は、読める人にも見えない", async () => {

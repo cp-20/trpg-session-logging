@@ -49,11 +49,17 @@ service cloud.firestore {
     }
     function validMember() {
       let data = request.resource.data;
-      return data.keys().hasOnly(['inviteId', 'hidden', 'linked', 'displayName', 'color', 'image'])
+      return data.keys().hasOnly(['inviteId', 'hidden', 'linked', 'displayName', 'color', 'image', 'revoked'])
         && data.inviteId is string && data.hidden is bool && data.linked is bool
+        && data.get('revoked', false) is bool
         && data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 100
         && data.color is string && data.color.matches('^#[0-9a-fA-F]{6}$')
         && data.image is string && data.image.size() <= 4096;
+    }
+    // 期限内の、この共有の持ち主が出した招待か
+    function validInvite(inviteId, slug) {
+      let invite = get(/databases/$(database)/documents/sharedInvites/$(inviteId)).data;
+      return invite.slug == slug && invite.ownerId == share(slug).ownerId && invite.expiresAt > request.time;
     }
     function validShare() {
       let data = request.resource.data;
@@ -93,17 +99,21 @@ service cloud.firestore {
       match /members/{userId} {
         allow get, list: if ownUser(userId) || owner(share(slug))
           || (resource.data.hidden == false && resource.data.linked == true && canReadShare(slug, share(slug).revision));
-        allow create: if ownUser(userId) && validMember() && (
+        allow create: if ownUser(userId) && validMember() && request.resource.data.get('revoked', false) == false && (
           owner(share(slug)) || userId in share(slug).memberIds || (
             request.resource.data.hidden == false && request.resource.data.linked == true
-            && get(/databases/$(database)/documents/sharedInvites/$(request.resource.data.inviteId)).data.slug == slug
-            && get(/databases/$(database)/documents/sharedInvites/$(request.resource.data.inviteId)).data.ownerId == share(slug).ownerId
-            && get(/databases/$(database)/documents/sharedInvites/$(request.resource.data.inviteId)).data.expiresAt > request.time));
+            && validInvite(request.resource.data.inviteId, slug)));
+        // 本人は表示を変えられる。持ち主に外された（revoked）人が戻れるのは、期限内の新しい招待で入り直すときだけ
         allow update: if (
           ownUser(userId) && validMember()
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hidden', 'linked', 'displayName', 'color', 'image']))
-          || (owner(share(slug)) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linked'])
-            && request.resource.data.linked == false);
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hidden', 'linked', 'displayName', 'color', 'image', 'inviteId', 'revoked'])
+          && request.resource.data.get('revoked', false) == false
+          // 招待の番号を書き換えられるのは、期限内の招待で入り直すときだけ
+          && (request.resource.data.inviteId == resource.data.inviteId || validInvite(request.resource.data.inviteId, slug))
+          && (resource.data.get('revoked', false) == false
+            || (request.resource.data.linked == true && validInvite(request.resource.data.inviteId, slug))))
+          || (owner(share(slug)) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linked', 'revoked'])
+            && request.resource.data.linked == false && request.resource.data.revoked == true);
         allow delete: if false;
       }
     }
