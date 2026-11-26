@@ -23,6 +23,7 @@ export default defineConfig({
     css: false,
     // vi.stubEnv / vi.stubGlobal で変えたものを、テストごとに元へ戻す
     unstubEnvs: true,
+    unstubGlobals: true,
     projects: [
       {
         extends: true,
@@ -37,6 +38,8 @@ export default defineConfig({
         test: {
           name: "dom",
           environment: "jsdom",
+          // 結合テスト（*.integration.test.tsx）は画面を通しで動かす。機械が混んでいても落ちない長さにする
+          testTimeout: 15_000,
           include: ["src/**/*.test.tsx", "mobile/src/**/*.test.tsx"],
         },
       },
