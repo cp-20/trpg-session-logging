@@ -10,7 +10,10 @@ import {
   resolveThemeName,
 } from "./theme";
 
+const originalMatchMedia = window.matchMedia;
+
 afterEach(() => {
+  window.matchMedia = originalMatchMedia;
   localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
   vi.restoreAllMocks();
@@ -37,24 +40,28 @@ describe("theme helpers", () => {
     expect(resolveThemeName("system", false)).toBe("takufu");
   });
 
-  it("currentThemeMode / resolveTheme / applyTheme とストレージ例外フォールバックを検証する", () => {
+  it("保存された設定がなければ system を返し、ストレージが例外を投げても system にフォールバックする", () => {
     expect(currentThemeMode()).toBe("system");
-
-    const getItemSpy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("storage blocked");
     });
     expect(currentThemeMode()).toBe("system");
-    getItemSpy.mockRestore();
+  });
 
+  it("resolveTheme は system のとき OS のダーク設定を matchMedia で調べ、light / dark はそのまま解決する", () => {
     const mmSpy = vi.fn().mockReturnValue({ matches: true } as MediaQueryList);
     window.matchMedia = mmSpy;
     expect(resolveTheme("system")).toBe("takufuDark");
     expect(mmSpy).toHaveBeenCalledWith("(prefers-color-scheme: dark)");
     expect(resolveTheme("light")).toBe("takufu");
+  });
 
+  it("matchMedia が使えない環境では system をライトとして解決する", () => {
     window.matchMedia = undefined as unknown as typeof window.matchMedia;
     expect(resolveTheme("system")).toBe("takufu");
+  });
 
+  it("applyTheme は設定を保存し、data-theme を更新して変更イベントを 1 回送る", () => {
     const listener = vi.fn();
     window.addEventListener(THEME_CHANGE_EVENT, listener);
     applyTheme("dark");
@@ -62,12 +69,14 @@ describe("theme helpers", () => {
     expect(currentThemeMode()).toBe("dark");
     expect(document.documentElement.getAttribute("data-theme")).toBe("takufuDark");
     expect(listener).toHaveBeenCalledTimes(1);
+    window.removeEventListener(THEME_CHANGE_EVENT, listener);
+  });
 
+  it("ストレージに書けなくても applyTheme は data-theme を更新する", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("quota");
     });
     applyTheme("light");
     expect(document.documentElement.getAttribute("data-theme")).toBe("takufu");
-    window.removeEventListener(THEME_CHANGE_EVENT, listener);
   });
 });

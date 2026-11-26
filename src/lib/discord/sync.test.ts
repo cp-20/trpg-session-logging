@@ -128,7 +128,7 @@ describe("確定した予定を映す", () => {
       syncPollFromApp(t.ctx, "u_owner", poll.id),
     ]);
     expect(ops(t).filter((op) => op === "createScheduledEvent")).toHaveLength(1);
-    expect(t.store.data.posts.get(poll.id)?.confirmMessageId).toBeTruthy();
+    expect(t.store.data.posts.get(poll.id)?.confirmMessageId).toEqual(expect.any(String));
     const confirmCreates = t.rest.calls.filter(
       (c) => c.op === "createMessage" && JSON.stringify(c.args[1]).includes("イベント"),
     );

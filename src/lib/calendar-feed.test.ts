@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedState } from "../data/seed";
 
 const docMock = vi.fn((db: unknown, col: string, id: string) => ({ db, col, id }));
@@ -26,11 +26,17 @@ beforeEach(() => {
   getCloudFirestoreMock.mockReturnValue({ projectId: "mock-db" });
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("calendar feed", () => {
-  it("newFeedToken は乱数から一意かつ +, /, = を URL セーフ文字に置換し、FEED_TOKEN_RE で境界検証する", () => {
+  it("newFeedToken は URL に使える一意のトークンを作る", () => {
     const tokens = new Set([newFeedToken(), newFeedToken(), newFeedToken()]);
     expect(tokens.size).toBe(3);
+  });
 
+  it("newFeedToken は base64 の + / = を - _ に置き換え、43 文字の URL セーフな文字列にする", () => {
     vi.spyOn(crypto, "getRandomValues").mockImplementationOnce((arr) => {
       const bytes = arr as Uint8Array;
       for (let i = 0; i < bytes.length; i++) {
@@ -48,7 +54,10 @@ describe("calendar feed", () => {
     expect(fixed).toMatch(FEED_TOKEN_RE);
     // 32 bytes base64 (44 chars) becomes length 43 after stripping trailing '=' padding
     expect(fixed).toHaveLength(43);
+    expect(feedUrl("https://takufu.example", fixed)).toBe(`https://takufu.example/api/calendar/${fixed}.ics`);
+  });
 
+  it("FEED_TOKEN_RE は 32〜64 文字の URL セーフ文字だけを通す", () => {
     expect(FEED_TOKEN_RE.test("a".repeat(31))).toBe(false);
     expect(FEED_TOKEN_RE.test("a".repeat(32))).toBe(true);
     expect(FEED_TOKEN_RE.test("a".repeat(64))).toBe(true);
@@ -56,8 +65,6 @@ describe("calendar feed", () => {
     expect(FEED_TOKEN_RE.test("!" + "a".repeat(32))).toBe(false);
     expect(FEED_TOKEN_RE.test("a".repeat(32) + "!")).toBe(false);
     expect(FEED_TOKEN_RE.test("abc_DEF-0123456789_xyzABCDEF0123")).toBe(true);
-
-    expect(feedUrl("https://takufu.example", fixed)).toBe(`https://takufu.example/api/calendar/${fixed}.ics`);
   });
 
   it("確定した予定の 60 日前境界・ソート・卓名プレフィックス・カレンダー名を正しく出力する", () => {
@@ -130,7 +137,7 @@ describe("calendar feed", () => {
     expect(ics.indexOf("UID:boundary@takufu")).toBeLessThan(ics.indexOf("UID:laterDay@takufu"));
   });
 
-  it("publishFeed / revokeFeed が Firestore 未設定時にエラーを投げ、設定時に読み書きする", async () => {
+  it("Firestore 未設定なら publishFeed / revokeFeed はエラーを投げ、設定済みなら読み書きする", async () => {
     getCloudFirestoreMock.mockReturnValueOnce(null);
     await expect(publishFeed("tok_1", "u1", "ICS")).rejects.toThrow("Firebase is not configured");
 

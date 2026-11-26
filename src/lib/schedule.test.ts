@@ -203,7 +203,7 @@ describe("日程調整・RSVP・確定", () => {
     expect(m.get("b")).toHaveLength(2);
   });
 
-  it("applyCandidateRsvp と applyConfirmCandidate が候補回答・確定・欠損IDを正しく処理する", () => {
+  it("候補への回答と確定を反映し、存在しない ID は無視する", () => {
     const doc = {
       me: "u_b",
       events: {

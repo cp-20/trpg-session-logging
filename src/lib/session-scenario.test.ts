@@ -54,7 +54,6 @@ describe("セッションは名前を持たず、シナリオの題名で呼ぶ"
     without.title = "自作の卓";
     delete without.scenarioId;
     const restored = validateSavedState(old)!;
-    expect(restored).not.toBeNull();
     expect(Object.values(restored.logs).every((l) => !("title" in l) && Boolean(l.scenarioId))).toBe(true);
     const ownScenario = restored.scenarios[restored.logs[without.id as string]!.scenarioId]!;
     expect(ownScenario).toMatchObject({ title: "自作の卓", private: true });

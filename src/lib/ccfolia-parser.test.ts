@@ -206,7 +206,7 @@ describe("parseCcfoliaLog", () => {
     expect(sessionDatesOf(out).length).toBeGreaterThanOrEqual(2);
   });
 
-  it("HTML ログ3形式(DOMParser)・BOM付きパース・ZIPログ読み込みを検証する", async () => {
+  it("HTML ログ 3 形式・BOM 付き・ZIP 内のログを読み込める", async () => {
     // BOM 付き HTML 自動ディスパッチ + 3形式 (生<p><span> / div.tab / section.tab)
     const rawHtml = `\uFEFF<html><body>
       <p><span>[情報]</span><span>KP:夜霜</span><span>資料1</span><span>資料2</span></p>

@@ -123,8 +123,8 @@ describe("characterCard", () => {
 
 describe("部品", () => {
   it("safeImage は埋め込みの画像だけを通す", () => {
-    expect(safeImage("data:image/jpeg;base64,xx")).toBeDefined();
-    expect(safeImage("data:image/svg+xml;utf8,<svg/>")).toBeDefined();
+    expect(safeImage("data:image/jpeg;base64,xx")).toBe("data:image/jpeg;base64,xx");
+    expect(safeImage("data:image/svg+xml;utf8,<svg/>")).toBe("data:image/svg+xml;utf8,<svg/>");
     expect(safeImage("http://169.254.169.254/x.png")).toBeUndefined();
     expect(safeImage("data:text/html,<p>")).toBeUndefined();
   });

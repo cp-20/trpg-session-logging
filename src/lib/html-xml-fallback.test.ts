@@ -23,7 +23,7 @@ describe("HTML / XML fallback parsers without DOMParser (Hermes compatibility)",
     vi.stubGlobal("DOMParser", undefined);
     const withoutDom = parseCcfoliaLogHtml(html);
 
-    expect(withDom).not.toBeNull();
+    expect(withDom?.messageCount).toBeGreaterThan(0);
     expect(withoutDom).toEqual(withDom);
     expect(withoutDom?.messageCount).toBe(3);
     expect(withoutDom?.channels.find((c) => c.name === "秘匿HO1")?.secret).toBe(true);
@@ -39,7 +39,7 @@ describe("HTML / XML fallback parsers without DOMParser (Hermes compatibility)",
     vi.stubGlobal("DOMParser", undefined);
     const withoutDom = parseCcfoliaLogHtml(html);
 
-    expect(withDom).not.toBeNull();
+    expect(withDom?.messageCount).toBeGreaterThan(0);
     expect(withoutDom).toEqual(withDom);
     expect(withoutDom?.channels[0]?.name).toBe("メイン");
     expect(withoutDom?.messageCount).toBe(2);
@@ -54,7 +54,6 @@ describe("HTML / XML fallback parsers without DOMParser (Hermes compatibility)",
     vi.stubGlobal("DOMParser", undefined);
     const parsed = parseCcfoliaLogHtml(html);
 
-    expect(parsed).not.toBeNull();
     expect(parsed?.messageCount).toBe(2);
     expect(parsed?.channels[0]?.msgs[0]?.text).toBe('1行目\n2行目 & "確認"');
     expect(parsed?.channels[0]?.msgs[1]?.kind).toBe("SYSTEM");

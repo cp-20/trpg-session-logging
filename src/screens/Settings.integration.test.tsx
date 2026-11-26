@@ -1,9 +1,13 @@
 import { renderWithStore } from "../test/integration-harness";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import Settings, { UserDetail } from "./Settings";
 import { parseSavedState } from "../lib/state-schema";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("Settings + UserDetail + ThemeSync + Backup 復元結合テスト", () => {
   it("プロフィール編集モーダルで表示名と自己紹介を更新し、永続化データとして復元できる", async () => {
@@ -46,7 +50,7 @@ describe("Settings + UserDetail + ThemeSync + Backup 復元結合テスト", () 
     const exported = view.readPersistedState()!;
     exported.users.u_mikan!.name = "バックアップ復元後";
     const backupJson = JSON.stringify(exported);
-    expect(parseSavedState(backupJson)).not.toBeNull();
+    expect(parseSavedState(backupJson)?.users.u_mikan?.name).toBe("バックアップ復元後");
 
     const file = new File([backupJson], "takufu-backup.json", { type: "application/json" });
     const fileInput = screen.getByLabelText("記録を読み込む");

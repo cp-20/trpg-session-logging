@@ -120,7 +120,6 @@ describe("produceDraft (構造共有 Copy-on-Write)", () => {
     expect(nextArrHolder[0]).toBe(1);
     expect(() => (leakedListItem as { v: number }).v).toThrow(TypeError);
     expect("keep" in definedNext).toBe(false);
-    expect(definedNext.list).not.toBeNull();
   });
 
   it("変更されたパスだけを複製し、未変更のサブツリーは元の参照を保つ", () => {

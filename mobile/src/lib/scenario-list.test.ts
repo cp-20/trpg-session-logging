@@ -27,7 +27,7 @@ const dir = (id: string, extra: Partial<DirectoryScenario> = {}): DirectoryScena
 });
 
 describe("remoteOnly", () => {
-  it("drops same id and same TALTO work", () => {
+  it("ローカルと同じ ID・同じ TALTO 作品のリモート行は一覧から落とす", () => {
     const l = [local("a"), local("mine", { sourceUrl: "https://talto.cc/projects/xyz" })];
     const r = [dir("a"), dir("sc_talto_xyz"), dir("b")];
     expect(remoteOnly(l, r).map((d) => d.id)).toEqual(["b"]);
@@ -35,7 +35,7 @@ describe("remoteOnly", () => {
 });
 
 describe("mergeScenarioCandidates", () => {
-  it("puts local first then remote", () => {
+  it("ローカルの行を先に、リモートの行を後に並べる", () => {
     expect(mergeScenarioCandidates([local("a")], [dir("a"), dir("b")]).map((d) => d.id)).toEqual(["a", "b"]);
   });
 });

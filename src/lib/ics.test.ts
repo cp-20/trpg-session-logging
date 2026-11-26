@@ -8,7 +8,7 @@ afterEach(() => {
 });
 
 describe("ics module", () => {
-  it("RFC 5545 の必須ヘッダ・エスケープ・日跨ぎ時刻・ゼロ埋め・複数イベントを出力する", () => {
+  it("RFC 5545 に沿った ICS を出力する（ヘッダ・エスケープ・日跨ぎ・ゼロ埋め・複数イベント）", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-05T01:02:03.000Z"));
 
@@ -66,7 +66,7 @@ describe("ics module", () => {
     expect(secondEvent).not.toContain("DESCRIPTION:");
   });
 
-  it("既定カレンダー名・空一覧・data URL・ダウンロード MIME・Google URL を検証する", () => {
+  it("既定のカレンダー名・空の一覧・data URL・MIME・Google URL を扱う", () => {
     const emptyIcs = buildIcsCalendar([]);
     expect(emptyIcs).toContain("X-WR-CALNAME:卓譜 卓予定");
     expect(emptyIcs).toContain("BEGIN:VCALENDAR");

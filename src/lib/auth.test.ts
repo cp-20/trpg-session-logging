@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import type { User as FirebaseUser } from "firebase/auth";
 import { authErrorMessage, firebaseUserProfile } from "./auth";
 
-it("uses recognizable profile data without storing OAuth credentials", () => {
+it("Firebase ユーザーから表示用のプロフィールだけを作り、OAuth の資格情報や内部 ID は含めない", () => {
   const user = {
     uid: "uid",
     displayName: "プレイヤー",

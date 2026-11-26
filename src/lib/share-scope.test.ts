@@ -18,9 +18,9 @@ describe("shared page scope is exactly what the user picked", () => {
 describe("firestore.rules validShare", () => {
   const rules = fs.readFileSync(path.join(process.cwd(), "firestore.rules"), "utf8");
 
-  it("mirrors the scope list and never consults the scenario policy", () => {
+  it("firestore.rules の validShare は共有範囲の一覧と一致し、シナリオの方針を参照しない", () => {
     const body = rules.match(/function validShare\(\) \{([\s\S]*?)\n {4}\}/)?.[1];
-    expect(body, "validShare() not found in firestore.rules").toBeTruthy();
+    expect(body, "validShare() not found in firestore.rules").toMatch(/scope/);
     const scopes = body!
       .match(/data\.scope in \[([^\]]*)\]/)?.[1]
       .split(",")
@@ -31,7 +31,7 @@ describe("firestore.rules validShare", () => {
     expect(body).not.toMatch(/data\.scenarioPolicy\s*==|scenarioPolicy\s*==/);
   });
 
-  it("read rules do not depend on scenarioPolicy", () => {
+  it("読み取りルールはシナリオの方針に依存しない", () => {
     const readRules = rules.replace(/function validShare\(\)[\s\S]*?\n {4}\}/, "");
     expect(readRules).not.toMatch(/scenarioPolicy/);
   });

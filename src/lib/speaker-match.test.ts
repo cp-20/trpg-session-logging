@@ -181,7 +181,7 @@ describe("buildDraft", () => {
     expect(d.kinds.KP).toBe("KP");
   });
 
-  it("attachLog・presetScenario・GM/KP 昇格・ts=0 の derived null・卓なしフォールバックを検証する", () => {
+  it("ログの紐づけでシナリオ・GM/KP の昇格・時刻なしの導出・卓なしの代替を扱う", () => {
     const w = world();
     w.scenarios.sc1 = {
       id: "sc1",

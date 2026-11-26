@@ -116,7 +116,7 @@ it("新規ログあり・新規ログなしの両方を commitLogImport で作�
   expect(refused).toMatchObject({ ok: false, reason: "シナリオを選んでください。" });
 });
 
-it("commitLogImport の添付・アイコン削除・ID採番・スケジュール/デフォルト日時の細部を検証する", async () => {
+it("commitLogImport は添付・アイコン削除・ID採番・日時の既定を反映して保存する", async () => {
   const state = structuredClone(seedState());
   const target = Object.values(state.logs).find((log) => log.ownerId === state.me)!;
   target.speakerIcons = { 既存: "https://cdn.example.com/old.png" };
