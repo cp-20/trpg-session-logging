@@ -143,6 +143,15 @@ function readEnvLocal(): Record<string, string> {
 async function cmdDeploy(args: string[]): Promise<void> {
   const [cliCmd, ...cliPrefix] = resolveLolipopCli();
   const lolipop = (cmdArgs: string[], cwd = ROOT) => runCmd(cliCmd, [...cliPrefix, ...cmdArgs], cwd);
+  const envNames = () =>
+    execFileSync(cliCmd, [...cliPrefix, "env", "list", "--project", LOLIPOP_PROJECT, "--json"], {
+      encoding: "utf8",
+    });
+  /** Deploy Now の環境変数を書く。create は値を位置引数で、update は --value で受け取る */
+  const setEnv = (key: string, value: string, existing: string) =>
+    existing.includes(`"${key}"`)
+      ? lolipop(["env", "update", key, "--value", value, "--project", LOLIPOP_PROJECT])
+      : lolipop(["env", "create", key, value, "--project", LOLIPOP_PROJECT]);
   if (args.includes("--setup")) {
     lolipop([
       "build-config",
@@ -159,23 +168,12 @@ async function cmdDeploy(args: string[]): Promise<void> {
       DEPLOY_BUILD.output,
     ]);
     const env = readEnvLocal();
-    const existing = execFileSync(
-      cliCmd,
-      [...cliPrefix, "env", "list", "--project", LOLIPOP_PROJECT, "--json"],
-      {
-        encoding: "utf8",
-      },
-    );
+    const existing = envNames();
     const optional = OPTIONAL_PUBLIC_ENV_KEYS.filter((key) => env[key]);
     for (const key of [...PUBLIC_ENV_KEYS, ...FEATURE_ENV_KEYS, ...optional]) {
       const value = FEATURE_ENV_KEYS.includes(key) ? (env[key] === "true" ? "true" : "false") : env[key];
       if (!value) throw new Error(`${key} is missing in .env.local`);
-      // create は値を位置引数で、update は --value で受け取る
-      if (existing.includes(`"${key}"`)) {
-        lolipop(["env", "update", key, "--value", value, "--project", LOLIPOP_PROJECT]);
-      } else {
-        lolipop(["env", "create", key, value, "--project", LOLIPOP_PROJECT]);
-      }
+      setEnv(key, value, existing);
     }
   }
   // Git が追跡しているファイルだけを送る（作業中の資料や手元の秘密を送らない）。.env* はどの階層でも送らない
@@ -189,10 +187,10 @@ async function cmdDeploy(args: string[]): Promise<void> {
   try {
     for (const f of files) cpSync(join(ROOT, f), join(staging, f), { recursive: true });
     prepareNpmSource(staging);
-    // Sentry の release。デプロイするコミット（未コミットの変更も送るので、あれば -dirty）をビルドに埋め込む
+    // Sentry の release。デプロイするコミット（追跡中のファイルに未コミットの変更があれば -dirty）をビルドに埋め込む。
+    // .env* はアップロードから外れるので、Deploy Now の環境変数として毎回送る（ビルド時に埋め込まれる）
     const git = (gitArgs: string[]) => execFileSync("git", gitArgs, { cwd: ROOT, encoding: "utf8" }).trim();
-    const release = `takufu@${git(["rev-parse", "--short=12", "HEAD"])}${git(["status", "--porcelain"]) ? "-dirty" : ""}`;
-    writeFileSync(join(staging, ".env.production"), `NEXT_PUBLIC_SENTRY_RELEASE=${release}\n`);
+    const release = `takufu@${git(["rev-parse", "--short=12", "HEAD"])}${git(["status", "--porcelain", "--untracked-files=no"]) ? "-dirty" : ""}`;
     if (args.includes("--local-build")) {
       // クラウドと同じ手順を手元で試す（アップロードしない）
       const env = { ...process.env, ...readEnvLocal() };
@@ -207,6 +205,7 @@ async function cmdDeploy(args: string[]): Promise<void> {
       console.log("Local build OK (nothing uploaded).");
       return;
     }
+    setEnv("NEXT_PUBLIC_SENTRY_RELEASE", release, envNames());
     lolipop(["deploy", "--project", LOLIPOP_PROJECT, "--json"], staging);
     console.log(
       `Check status: ${[cliCmd, ...cliPrefix].join(" ")} project show --project ${LOLIPOP_PROJECT} --json\nSite: https://takufu.app`,
