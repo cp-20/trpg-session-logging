@@ -7,7 +7,7 @@ import { rollSpeech } from "../lib/roll-text";
 import { rollTone } from "../lib/roll-tone";
 import { fmtDate, fmtDateShort, jstTime, sessionDay } from "../lib/time";
 import type { Character, Log, Msg, State, User } from "../types";
-import { IconCalendarTime, IconDice, IconFileText, IconLock, IconSearch } from "./icons";
+import { IconCalendarTime, IconDice, IconFileText, IconLock, IconPlayerPlay, IconSearch } from "./icons";
 import { LoadMore, Seg, Select, Tag, cx, useVisibleCount } from "./ui";
 
 export interface SpeakerMeta {
@@ -192,12 +192,15 @@ const MessageRow = memo(function MessageRow({
   const isNarratorText = m.type === "text" && (m.kind === "KP" || m.kind === "GM");
   return (
     <div
+      data-msg-id={m.id}
+      data-ts={m.ts > 0 ? m.ts : undefined}
       className={cx(
         // ホバーの面が上下対称になるよう、行の余白は上下同じにする。発言者の切り替わりは行の外（margin）で空ける。
         // シークレットは左の帯ではなく、薄い地の色と SecretMark で示す
         "group flex gap-3 rounded-lg px-2 py-1 sm:px-3 transition-colors",
         !grouped && "mt-2",
         secret ? "bg-warning/[0.06] hover:bg-warning/10" : "hover:bg-base-200/50",
+        NOW_ROW,
       )}
     >
       <div className="w-9 shrink-0">
@@ -226,7 +229,7 @@ const MessageRow = memo(function MessageRow({
             <span className="text-xs text-ink2">{meta.plName ? `PC · ${meta.plName}` : meta.roleLabel}</span>
             {secret && chName && <SecretMark name={chName} />}
             {!secret && chName && <span className="text-xs text-ink3">#{chName}</span>}
-            <MsgTime ts={m.ts} className="ml-auto text-xs tabular-nums text-ink3" />
+            <MsgTime m={m} className="ml-auto text-xs tabular-nums text-ink3" />
           </div>
         )}
         <div className="flex items-start gap-2">
@@ -246,7 +249,7 @@ const MessageRow = memo(function MessageRow({
           </div>
           {grouped && (
             <MsgTime
-              ts={m.ts}
+              m={m}
               className="invisible pt-1 text-xs tabular-nums text-ink3 group-hover:visible group-focus-within:visible"
             />
           )}
@@ -257,27 +260,56 @@ const MessageRow = memo(function MessageRow({
 });
 
 /**
- * 発言時刻から録画のその場面を開く URL を返す関数。録画の開始時刻が分かっているときだけ、時刻をリンクにする。
- * セッション詳細・共有ページが関連するもの（src/components/media.tsx の recordingLinksAt）から渡す。
+ * ログと録画の結び付き（src/components/recording-dock.tsx が渡す）。
+ * - 録画に映っている発言は、時刻を押すとそこから再生する
+ * - 合わせる発言を選んでいる間は、時刻の代わりに「合わせる」を出す
+ * - 再生中の発言は data-now で示す（ドックが行の data-msg-id / data-ts を見て付ける）
  */
-export const RecordingLinkContext = createContext<((ts: number) => string | undefined) | null>(null);
+export interface RecordingSync {
+  /** その時刻を映している録画の位置（"1:23:45"）。映していなければ null */
+  clockAt: (ts: number) => string | null;
+  play: (ts: number) => void;
+  anchoring: boolean;
+  anchor: (m: Msg) => void;
+}
 
-function MsgTime({ ts, className }: { ts: number; className: string }) {
-  const linkAt = useContext(RecordingLinkContext);
+export const RecordingSyncContext = createContext<RecordingSync | null>(null);
+
+/** 再生中の発言の地。行ごとの見た目（ホバー・シークレット）より上に重ねる */
+const NOW_ROW = "data-[now]:bg-primary/10 data-[now]:hover:bg-primary/15 scroll-mt-40 scroll-mb-40";
+
+function MsgTime({ m, className }: { m: Msg; className: string }) {
+  const sync = useContext(RecordingSyncContext);
+  const ts = m.ts;
   // 時刻のないログ（ts = 0）では何も出さない
   if (!(ts > 0)) return null;
-  const href = linkAt?.(ts);
-  if (!href) return <span className={className}>{jstTime(ts)}</span>;
+  if (sync?.anchoring) {
+    return (
+      <button
+        type="button"
+        onClick={() => sync.anchor(m)}
+        aria-label={`${jstTime(ts)} の発言に録画を合わせる`}
+        className={cx(className, "btn btn-xs !visible")}
+      >
+        合わせる
+      </button>
+    );
+  }
+  const clock = sync?.clockAt(ts);
+  if (!sync || !clock) return <span className={className}>{jstTime(ts)}</span>;
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      aria-label={`録画で ${jstTime(ts)} の場面を開く`}
-      className={cx(className, "underline decoration-dotted underline-offset-2 hover:text-primary")}
+    <button
+      type="button"
+      onClick={() => sync.play(ts)}
+      aria-label={`録画の ${clock} から再生`}
+      className={cx(
+        className,
+        "inline-flex items-center gap-1 rounded underline decoration-dotted underline-offset-2 hover:text-primary",
+      )}
     >
+      <IconPlayerPlay width={11} height={11} aria-hidden />
       {jstTime(ts)}
-    </a>
+    </button>
   );
 }
 
@@ -378,7 +410,11 @@ function RollMessage({ m }: { m: Msg }) {
 const NoteLine = memo(function NoteLine({ row }: { row: Row }) {
   const { m, chName, secret } = row;
   return (
-    <div className="my-5 flex items-center gap-3 px-3 text-sm text-ink2">
+    <div
+      data-msg-id={m.id}
+      data-ts={m.ts > 0 ? m.ts : undefined}
+      className={cx("my-5 flex items-center gap-3 rounded-lg px-3 py-1 text-sm text-ink2", NOW_ROW)}
+    >
       <span className="h-px min-w-4 flex-1 bg-base-300" aria-hidden />
       <span className="inline-flex min-w-0 flex-wrap items-center justify-center gap-1.5 text-center">
         <IconFileText width={14} height={14} className="flex-none opacity-50" aria-hidden />
@@ -395,7 +431,7 @@ const NoteLine = memo(function NoteLine({ row }: { row: Row }) {
         ) : (
           chName && <span className="text-ink3">#{chName}</span>
         )}
-        <MsgTime ts={m.ts} className="tabular-nums text-xs text-ink3" />
+        <MsgTime m={m} className="tabular-nums text-xs text-ink3" />
       </span>
       <span className="h-px min-w-4 flex-1 bg-base-300" aria-hidden />
     </div>
@@ -411,7 +447,9 @@ const NarrationBlock = memo(function NarrationBlock({ row }: { row: Row }) {
   return (
     <section
       aria-label={m.sp}
-      className={cx("my-4 rounded-lg px-2 py-2 sm:px-3", secret && "bg-warning/[0.06]")}
+      data-msg-id={m.id}
+      data-ts={m.ts > 0 ? m.ts : undefined}
+      className={cx("my-4 rounded-lg px-2 py-2 sm:px-3", secret && "bg-warning/[0.06]", NOW_ROW)}
     >
       <div className="flex gap-3">
         <div className="flex w-9 shrink-0 justify-center pt-0.5 text-ink3">
@@ -424,7 +462,7 @@ const NarrationBlock = memo(function NarrationBlock({ row }: { row: Row }) {
             </span>
             {secret && chName && <SecretMark name={chName} />}
             {!secret && chName && <span className="text-xs text-ink3">#{chName}</span>}
-            <MsgTime ts={m.ts} className="ml-auto text-xs tabular-nums text-ink3" />
+            <MsgTime m={m} className="ml-auto text-xs tabular-nums text-ink3" />
           </div>
           <p
             data-user-content
@@ -701,8 +739,20 @@ export function SessionTimeline({
         setVisibleCount((n) => Math.max(n, idx + 40));
       }
     }
+    /** 録画の再生位置まで、まだ出していない発言を出す（ドックが送る） */
+    function onRevealTs(ev: Event) {
+      const ts = (ev as CustomEvent<number>).detail;
+      if (!(ts > 0)) return;
+      let idx = rows.findIndex((r) => r.m.ts > ts);
+      if (idx < 0) idx = rows.length;
+      setVisibleCount((n) => (idx + 40 > n ? idx + 40 : n));
+    }
     window.addEventListener("takufu:jump-day", onJumpDay);
-    return () => window.removeEventListener("takufu:jump-day", onJumpDay);
+    window.addEventListener("takufu:reveal-ts", onRevealTs);
+    return () => {
+      window.removeEventListener("takufu:jump-day", onJumpDay);
+      window.removeEventListener("takufu:reveal-ts", onRevealTs);
+    };
   }, [rows, setVisibleCount]);
 
   const speakerIdx = useMemo(() => buildSpeakerNameIndex(state), [state]);

@@ -73,7 +73,13 @@ import {
   type MediaPreview,
 } from "../lib/media-preview";
 import type { Log, State } from "../types";
-import { sessionStart, sessionDays } from "../lib/sittings";
+import {
+  clockNearSittings,
+  recordingVideos,
+  videoChapters,
+  videoLabels,
+  type LogLine,
+} from "../lib/recording-sync";
 
 type Icon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -118,17 +124,6 @@ const SCOPE_OPTIONS = (Object.keys(MEDIA_SCOPE_LABEL) as MediaScope[]).map((valu
 }));
 const KIND_OPTIONS = MEDIA_KINDS.map((d) => ({ value: d.kind, label: d.label }));
 
-/** epoch 秒 → 日本時間の YYYY-MM-DD と HH:MM */
-function jstParts(epoch: number): { date: string; time: string } {
-  const d = new Date((epoch + 9 * 3600) * 1000).toISOString();
-  return { date: d.slice(0, 10), time: d.slice(11, 16) };
-}
-function jstEpoch(date: string, time: string): number | undefined {
-  if (!date || !/^\d{1,2}:\d{2}$/.test(time)) return undefined;
-  const ms = Date.parse(`${date}T${time.padStart(5, "0")}:00+09:00`);
-  return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
-}
-
 function participantIds(log: Log): string[] {
   return [log.ownerId, ...Object.keys(log.players).filter((id) => id !== log.ownerId)];
 }
@@ -136,7 +131,7 @@ function participantIds(log: Log): string[] {
 /* ---------- 題名・本文の頭（サーバーの /api/media-preview から） ---------- */
 const previewCache = new Map<string, Promise<MediaPreview | null>>();
 
-function loadPreview(path: string): Promise<MediaPreview | null> {
+export function loadPreview(path: string): Promise<MediaPreview | null> {
   let p = previewCache.get(path);
   if (!p) {
     p = fetch(path, { credentials: "omit" })
@@ -214,6 +209,9 @@ function ItemMenu({
 
 interface ItemProps {
   m: SessionMedia;
+  /** ログの発言（場面の見出しから目次を作る） */
+  lines: readonly LogLine[];
+  onReadWithLog?: () => void;
   state: State;
   viewer: MediaViewer;
   canEdit: boolean;
@@ -222,7 +220,7 @@ interface ItemProps {
 }
 
 /* ---------- 再生できるもの（録画・録音・配信・リプレイ動画） ---------- */
-function PlayableCard({ m, state, viewer, canEdit, onEdit, onDelete }: ItemProps) {
+function PlayableCard({ m, lines, onReadWithLog, state, viewer, canEdit, onEdit, onDelete }: ItemProps) {
   const def = MEDIA_KIND_MAP[m.kind];
   const KindIcon = KIND_ICON[m.kind];
   const parts = [
@@ -235,11 +233,8 @@ function PlayableCard({ m, state, viewer, canEdit, onEdit, onDelete }: ItemProps
   const hidden = shouldHideSpoiler(m, viewer) && !revealed;
   const current = parts[part];
   const link = current ? detectMediaLink(current.url) : null;
-  // ニコニコはサムネイルを、題名のない YouTube は題名を引く（伏せていてもサムネイルはぼかして出すので引く）
-  const preview = useMediaPreview(
-    current?.url,
-    link?.service === "niconico" || (link?.service === "youtube" && !m.title),
-  );
+  // ニコニコはサムネイル、YouTube は題名と配信の開始時刻を引く（伏せていてもサムネイルはぼかして出すので引く）
+  const preview = useMediaPreview(current?.url, link?.service === "niconico" || link?.service === "youtube");
   // サムネイルの読めなかったもの・小さいもの（古いニコニコなど）は URL ごとに覚える（パートを替えても持ち越さない）
   const [thumbIssues, setThumbIssues] = useState<Record<string, "failed" | "small">>({});
   const thumb = thumbnailCandidates(mediaThumbnail(current?.url) ?? preview?.thumbnail).find(
@@ -250,7 +245,12 @@ function PlayableCard({ m, state, viewer, canEdit, onEdit, onDelete }: ItemProps
     setThumbIssues((cur) => (cur[u] === issue ? cur : { ...cur, [u]: issue }));
   // 大きな再生面は、再生中か大きなサムネイルがあるときだけ。ほかは低い帯にして、空の 16:9 を出さない
   const wide = (playingAt !== null && Boolean(link?.embedUrl)) || Boolean(thumb && !smallThumb);
-  const chapters = (m.chapters ?? []).filter((c) => (c.part ?? 1) === part + 1);
+  // 目次は、書いたものがなければログの場面の見出しから（録画とログが時刻で合っているとき）
+  const video = recordingVideos(m, () =>
+    preview ? { startedAt: preview.startedAt, durationSec: preview.durationSec } : undefined,
+  )[part];
+  const chapters = video ? videoChapters(video, m.chapters, lines) : [];
+  const partLabels = videoLabels(recordingVideos(m));
   const title = hidden
     ? `${def.label}（ネタバレを含みます）`
     : m.title || preview?.title || link?.label || def.label;
@@ -312,7 +312,7 @@ function PlayableCard({ m, state, viewer, canEdit, onEdit, onDelete }: ItemProps
                 ) : (
                   <>
                     <IconPlayerPlay width={18} height={18} aria-hidden />
-                    {parts.length > 1 ? `Part${part + 1} を再生` : "再生"}
+                    {parts.length > 1 ? `${partLabels[part]} を再生` : "再生"}
                   </>
                 )}
               </span>
@@ -365,13 +365,20 @@ function PlayableCard({ m, state, viewer, canEdit, onEdit, onDelete }: ItemProps
               ariaLabel="パート"
               size="sm"
               value={String(part)}
-              options={parts.map((p, i) => ({ v: String(i), label: p.label || `Part${i + 1}` }))}
+              options={parts.map((_, i) => ({ v: String(i), label: partLabels[i] ?? `Part${i + 1}` }))}
               onChange={(v) => {
                 setPart(Number(v));
                 setPlayingAt(null);
               }}
             />
           </div>
+        )}
+
+        {!hidden && onReadWithLog && (video?.startedAt !== undefined || canEdit) && (
+          <button type="button" className="btn btn-sm mt-3" onClick={onReadWithLog}>
+            <IconLayoutList width={16} height={16} aria-hidden />
+            ログと並べて見る
+          </button>
         )}
 
         {!hidden && chapters.length > 0 && (
@@ -490,7 +497,7 @@ interface Draft {
   spoilerTouched: boolean;
   parts: string;
   chapters: string;
-  startDate: string;
+  /** 録画を始めた時刻（日付は遊んだ時間帯から決める） */
   startTime: string;
   expiresAt: string;
   credits: string;
@@ -498,9 +505,14 @@ interface Draft {
   consent: boolean;
 }
 
-function toDraft(m: SessionMedia | null, log: Log): Draft {
-  const start = m?.startedAt ?? (sessionStart(log) || undefined);
-  const parts = start ? jstParts(start) : { date: sessionDays(log)[0] ?? "", time: "" };
+/** 録画の開始時刻の書き方。秒まで合わせてあれば秒も出す（書き直さなければ、保存しても秒を落とさない） */
+function startClock(epoch: number | undefined): string {
+  if (epoch === undefined) return "";
+  const d = new Date((epoch + 9 * 3600) * 1000).toISOString();
+  return d.slice(17, 19) === "00" ? d.slice(11, 16) : d.slice(11, 19);
+}
+
+function toDraft(m: SessionMedia | null): Draft {
   return {
     url: m?.url ?? "",
     kind: m?.kind ?? "recording",
@@ -514,8 +526,7 @@ function toDraft(m: SessionMedia | null, log: Log): Draft {
     spoilerTouched: Boolean(m),
     parts: (m?.parts ?? []).map((p) => (p.label ? `${p.label} ${p.url}` : p.url)).join("\n"),
     chapters: formatChapters(m?.chapters),
-    startDate: parts.date,
-    startTime: m?.startedAt ? parts.time : "",
+    startTime: startClock(m?.startedAt),
     expiresAt: m?.expiresAt ?? "",
     credits: m?.credits ?? "",
     note: m?.note ?? "",
@@ -620,7 +631,7 @@ function MediaEditor({
   onSave: (m: SessionMedia) => void;
   onClose: () => void;
 }) {
-  const [d, setD] = useState<Draft>(() => toDraft(initial, log));
+  const [d, setD] = useState<Draft>(() => toDraft(initial));
   const [picked, setPicked] = useState<MediaSourceId | null>(null);
   const [lastPicked, setLastPicked] = useState<MediaSourceId | null>(null);
   const [urlBlurred, setUrlBlurred] = useState(Boolean(initial));
@@ -679,9 +690,21 @@ function MediaEditor({
       );
     if (d.scope === "people" && d.audience.length === 0) return setError("共有する人を選んでください。");
     if (consentNeeded && !d.consent) return setError("共有するには同卓者全員の了承が要ります。");
-    const startedAt = def.timed ? jstEpoch(d.startDate, d.startTime) : undefined;
+    const startedAt = !def.timed
+      ? undefined
+      : initial?.startedAt !== undefined && d.startTime === startClock(initial.startedAt)
+        ? initial.startedAt
+        : (clockNearSittings(d.startTime, log.sittings) ?? undefined);
+    if (def.timed && d.startTime.trim() && startedAt === undefined)
+      return setError("録画を始めた時刻は 21:00 のように入れてください。");
     const chapters = def.timed ? parseChapters(d.chapters) : [];
-    const parts = def.timed ? parseParts(d.parts) : [];
+    // ログと合わせたパートの開始時刻は、URL が同じなら残す
+    const parts = def.timed
+      ? parseParts(d.parts).map((p) => {
+          const was = initial?.parts?.find((x) => x.url === p.url)?.startedAt;
+          return was !== undefined ? { ...p, startedAt: was } : p;
+        })
+      : [];
     const m: SessionMedia = {
       id: initial?.id ?? uid("md_"),
       kind: d.kind,
@@ -752,25 +775,19 @@ function MediaEditor({
           </Field>
         );
       case "startedAt":
+        // 発言に時刻のないログでは、録画の開始時刻を使う所がない
+        if (log.sittings.length === 0) return null;
         return (
-          <div key={f} className="grid gap-x-4 sm:grid-cols-2">
-            <Field label="録画を始めた日">
-              <DateInput
-                value={d.startDate}
-                onChange={(e) => set("startDate", e.target.value)}
-                className="w-full"
-              />
-            </Field>
-            <Field label="録画を始めた時刻" hint="ログの発言から録画のその場面を開けます">
-              <input
-                className="input input-bordered w-full tabular-nums"
-                inputMode="numeric"
-                placeholder="21:00"
-                value={d.startTime}
-                onChange={(e) => set("startTime", e.target.value)}
-              />
-            </Field>
-          </div>
+          <Field key={f} label="録画を始めた時刻">
+            <input
+              className="input input-bordered w-40 tabular-nums"
+              inputMode="numeric"
+              // 配信のアーカイブなら、配信を始めた時刻が分かっている（書かなければそれを使う）
+              placeholder={startClock(preview?.startedAt) || "21:00"}
+              value={d.startTime}
+              onChange={(e) => set("startTime", e.target.value)}
+            />
+          </Field>
         );
       case "pov":
         return (
@@ -979,6 +996,8 @@ export function SessionMediaSection({
   editable,
   onChange,
   className,
+  hidePlayable,
+  onReadWithLog,
 }: {
   className?: string;
   log: Log;
@@ -987,9 +1006,20 @@ export function SessionMediaSection({
   /** 追加・編集できるか（自分の記録として持っているとき） */
   editable: boolean;
   onChange?: (media: SessionMedia[]) => void;
+  /** 再生できるものを出さない（同じページでログの横に再生面を置くとき） */
+  hidePlayable?: boolean;
+  /** ログと並べて読む画面へ（ログのあるセッション詳細） */
+  onReadWithLog?: () => void;
 }) {
   const [editing, setEditing] = useState<SessionMedia | null | "new">(null);
-  const items = useMemo(() => visibleMedia(log.media, viewer), [log.media, viewer]);
+  const items = useMemo(
+    () =>
+      visibleMedia(log.media, viewer).filter(
+        (m) => !(hidePlayable && MEDIA_KIND_MAP[m.kind].timed && recordingVideos(m).length > 0),
+      ),
+    [log.media, viewer, hidePlayable],
+  );
+  const lines = useMemo(() => log.channels.flatMap((c) => c.msgs), [log.channels]);
   if (!editable && items.length === 0) return null;
   const all = log.media ?? [];
   const canEditItem = (m: SessionMedia) => editable && (m.addedBy === state.me || log.ownerId === state.me);
@@ -997,6 +1027,8 @@ export function SessionMediaSection({
   const others = items.filter((m) => !MEDIA_KIND_MAP[m.kind].timed);
   const itemProps = (m: SessionMedia): ItemProps => ({
     m,
+    lines,
+    onReadWithLog,
     state,
     viewer,
     canEdit: canEditItem(m),
@@ -1058,19 +1090,4 @@ export function SessionMediaSection({
       )}
     </section>
   );
-}
-
-/** ログの発言時刻から、その場面を開ける録画のリンク（見てよいものだけ） */
-export function recordingLinksAt(
-  log: Log,
-  epochSec: number,
-  viewer: MediaViewer,
-): { id: string; title: string; href: string }[] {
-  return visibleMedia(log.media, viewer)
-    .filter((m) => MEDIA_KIND_MAP[m.kind].timed && m.url && m.startedAt !== undefined)
-    .flatMap((m) => {
-      const off = epochSec - m.startedAt!;
-      if (off < 0 || off > 16 * 3600) return [];
-      return [{ id: m.id, title: m.title || MEDIA_KIND_MAP[m.kind].label, href: urlAt(m.url!, off) }];
-    });
 }
