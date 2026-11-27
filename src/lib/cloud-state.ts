@@ -3,6 +3,7 @@ import {
   doc,
   getDocFromServer,
   getDocs,
+  limit,
   query,
   where,
   runTransaction,
@@ -17,6 +18,7 @@ import {
 } from "firebase/firestore";
 import { getTakufuFirestore } from "./firebase";
 import { validateSharedPayload, type AcceptedShare } from "./accept-share";
+import { sanitizeEditChanges } from "./edit-request";
 import { mediaForSharedPage } from "./session-media";
 import { identiconDataUri } from "./identicon";
 import type {
@@ -810,7 +812,10 @@ export async function publishSharedScenario(scenario: Scenario, uid: string): Pr
 
 const editRequestsOf = (db: Firestore) => collection(db, "scenarioEditRequests");
 
-function toEditRequest(id: string, d: Record<string, unknown>): ScenarioEditRequest {
+function toEditRequest(id: string, d: Record<string, unknown>): ScenarioEditRequest | null {
+  // 中身は提案した人が書いたもの。形の違う提案は一覧に出さない（src/lib/edit-request.ts）
+  const changes = sanitizeEditChanges(d.changes);
+  if (!changes) return null;
   const at = d.createdAt instanceof Timestamp ? d.createdAt.toDate().toISOString() : new Date().toISOString();
   return {
     id,
@@ -818,7 +823,7 @@ function toEditRequest(id: string, d: Record<string, unknown>): ScenarioEditRequ
     uid: String(d.uid ?? ""),
     requesterName: typeof d.requesterName === "string" ? d.requesterName : undefined,
     at,
-    changes: (d.changes as ScenarioEditChanges | undefined) ?? undefined,
+    changes,
     note: typeof d.note === "string" ? d.note : undefined,
     status: d.status === "accepted" || d.status === "rejected" ? d.status : "pending",
   };
@@ -859,9 +864,14 @@ export async function fetchPendingEditRequests(
       where(role === "owner" ? "ownerUid" : "uid", "==", uid),
       where("scenarioId", "==", scenarioId),
       where("status", "==", "pending"),
+      // 未決の提案を際限なく読まない（画面に出すのは新しい順ではなく届いた順の先頭）
+      limit(50),
     ),
   );
-  return snap.docs.map((d) => toEditRequest(d.id, d.data())).sort((a, b) => a.at.localeCompare(b.at));
+  return snap.docs
+    .map((d) => toEditRequest(d.id, d.data()))
+    .filter((r): r is ScenarioEditRequest => r !== null)
+    .sort((a, b) => a.at.localeCompare(b.at));
 }
 
 /** 足した人が、提案を反映した・却下したと記す */

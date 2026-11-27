@@ -348,6 +348,15 @@ service cloud.firestore {
 
     // シナリオの修正の提案（src/lib/scenario-edit-requests.ts）。足した人ではない人が送り、足した人が反映か却下を決める。
     // 読めるのは送った人と足した人だけ。問い合わせは uid か ownerUid で絞る
+    // 修正提案の値の型と長さ（共有シナリオ一覧の validScenario と同じ上限）。キーワードの中身は読むときにも確かめる
+    function validEditChanges(c) {
+      return (!('title' in c) || (c.title is string && c.title.size() > 0 && c.title.size() <= 200))
+        && (!('author' in c) || (c.author is string && c.author.size() <= 200))
+        && (!('systemId' in c) || (c.systemId is string && c.systemId.size() > 0 && c.systemId.size() <= 64))
+        && (!('sourceUrl' in c) || (c.sourceUrl is string && c.sourceUrl.size() <= 500))
+        && (!('tags' in c) || (c.tags is list && c.tags.size() <= 20))
+        && (!('description' in c) || (c.description is string && c.description.size() <= 2000));
+    }
     match /scenarioEditRequests/{requestId} {
       allow get, list: if signedIn()
         && (resource.data.uid == request.auth.uid || resource.data.ownerUid == request.auth.uid);
@@ -364,6 +373,7 @@ service cloud.firestore {
           == get(/databases/$(database)/documents/scenarios/$(request.resource.data.scenarioId)).data.addedByUid
         && request.resource.data.changes is map
         && request.resource.data.changes.keys().hasOnly(['title', 'author', 'systemId', 'sourceUrl', 'tags', 'description'])
+        && validEditChanges(request.resource.data.changes)
         && (!('note' in request.resource.data) || (request.resource.data.note is string && request.resource.data.note.size() <= 1000));
       allow update: if signedIn() && resource.data.ownerUid == request.auth.uid && resource.data.status == 'pending'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])

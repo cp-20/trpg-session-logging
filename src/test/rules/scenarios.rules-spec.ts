@@ -137,6 +137,19 @@ describe("scenarioEditRequests/{requestId}", () => {
     await assertSucceeds(setDoc(doc(as(BOB), "scenarioEditRequests", REQ), editRequest()));
   });
 
+  it.each([
+    ["題名が数", { title: 1 }],
+    ["題名が空", { title: "" }],
+    ["題名が 201 字", { title: "あ".repeat(201) }],
+    ["キーワードが並びでない", { tags: "ホラー" }],
+    ["キーワードが 21 個", { tags: Array.from({ length: 21 }, (_, i) => `t${i}`) }],
+    ["概要が 2001 字", { description: "あ".repeat(2001) }],
+  ])("提案の値の型・長さが決まりに合わなければ送れない（%s）", async (_label, changes) => {
+    await seed((db) => setDoc(doc(db, "scenarios", ID), scenario()));
+
+    await assertFails(setDoc(doc(as(BOB), "scenarioEditRequests", REQ), editRequest({ changes })));
+  });
+
   it("足した人は自分のシナリオに提案を送れない", async () => {
     await seed((db) => setDoc(doc(db, "scenarios", ID), scenario()));
 
