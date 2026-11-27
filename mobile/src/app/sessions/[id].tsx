@@ -5,7 +5,12 @@ import { SYSTEMS } from "@shared/data/systems";
 import { userHref } from "@shared/lib/people";
 import { recentSystemIds, systemOptions } from "@shared/lib/system-options";
 import { xIntentUrl } from "@shared/external";
-import { reportCardFromSession } from "@shared/lib/report-card";
+import {
+  REPORT_DEFAULTS,
+  reportCardChoices,
+  reportCardFromSession,
+  type ReportCardOptions,
+} from "@shared/lib/report-card";
 import { createSharedInvite, fetchSharedLog, revokeSharedMember } from "@shared/lib/cloud-state";
 import { fmtSessionWhen, fmtDur, jstTime, sessionPlayMinutes, uid } from "@shared/lib/time";
 import { sittingToFields, sittingsFromFields, type SittingFields } from "@shared/lib/sittings";
@@ -984,10 +989,12 @@ function ReportCardSheet({ log, onClose }: { log: Log; onClose: () => void }) {
   const origin = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.app";
   const shareUrl = `${origin}/share/l/${log.slug}`;
   /* 画像は Web と同じくサーバーが描く（src/app/api/report-card。中身は src/lib/report-card.ts） */
-  const card = useMemo(() => reportCardFromSession(log, state), [log, state]);
+  const [options, setOptions] = useState<ReportCardOptions>(REPORT_DEFAULTS);
+  const card = useMemo(() => reportCardFromSession(log, state, options), [log, state, options]);
+  const choices = useMemo(() => reportCardChoices(log, state), [log, state]);
   const tweet = useMemo(
-    () => ({ title: card.title, playerCount: card.cast.length, shareUrl }),
-    [card.title, card.cast.length, shareUrl],
+    () => ({ title: card.title, playerCount: card.players, shareUrl }),
+    [card.title, card.players, shareUrl],
   );
   const [uri, setUri] = useState<string | null>(null);
 
@@ -1067,12 +1074,29 @@ function ReportCardSheet({ log, onClose }: { log: Log; onClose: () => void }) {
           </View>
         )}
       </View>
+      {choices.map((c) => (
+        <View key={c.key} style={styles.reportChoice}>
+          <Text style={[styles.reportChoiceLabel, { color: tokens.ink }]}>{c.label}</Text>
+          <Toggle
+            label={c.label}
+            on={options[c.key]}
+            onChange={(v) => setOptions((o) => ({ ...o, [c.key]: v }))}
+          />
+        </View>
+      ))}
       <InlineNotice text={error} tone="error" />
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
+  reportChoice: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 6,
+  },
+  reportChoiceLabel: { fontSize: 15 },
   memberRow: {
     flexDirection: "row",
     alignItems: "center",

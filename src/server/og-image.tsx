@@ -7,7 +7,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { BRAND_COLORS, MARK_BODY, MARK_PIP_R, MARK_PIPS, MARK_SHAPE } from "../components/brand";
 import { identiconDataUri } from "../lib/identicon";
 import { phraseText, titleSize, type OgCard, type OgPerson, type OgSystem } from "../lib/og-card";
-import type { ReportCard, ReportCardPerson } from "../lib/report-card";
+import { REPORT_CAST_MAX, type ReportCard, type ReportCardMember } from "../lib/report-card";
 
 export const OG_SIZE = { width: 1200, height: 630 };
 
@@ -378,74 +378,106 @@ function Card({ card }: { card: OgCard }) {
   return <GenericCard card={card} />;
 }
 
-/* ---------- 卓報告カード（X の #卓報告 に貼る画像。1200×675 = X の 16:9） ---------- */
+/* ---------- 卓報告カード（X に貼る画像。1200×675 = X の 16:9 で、タイムラインで切られない） ---------- */
 
 export const REPORT_SIZE = { width: 1200, height: 675 };
 
-function ReportFace({ p, kind, size }: { p: ReportCardPerson; kind: "user" | "character"; size: number }) {
-  return (
-    // oxlint-disable-next-line nextjs/no-img-element -- satori は <img> で描く
-    <img
-      src={p.image ?? identiconDataUri(p.seed, kind)}
-      width={size}
-      height={size}
-      style={{ borderRadius: 999, objectFit: "cover", border: `2px solid ${C.line}`, flexShrink: 0 }}
-    />
-  );
+/**
+ * 卓報告カードの題名の大きさ。タイムラインで 4 割ほどに縮んでも読めるよう大きく。
+ * 1 行に収まるなら 1 行で（文節で 2 行に折ると、短い語だけが次の行に残りやすい）、収まらなければ 2 行で
+ */
+const REPORT_TITLE_WIDTH = 1000;
+function reportTitleSize(title: string): number {
+  const n = Math.max(Array.from(title).length, 1);
+  const oneLine = Math.floor(REPORT_TITLE_WIDTH / n);
+  if (oneLine >= 64) return Math.min(104, oneLine);
+  return Math.max(48, Math.min(76, Math.floor(REPORT_TITLE_WIDTH / Math.ceil(n * 0.6))));
 }
 
-/** PC の立ち絵・顔。角丸の枠で、主役として大きく */
-function ReportPortrait({
-  p,
-  kind,
-  size,
-}: {
-  p: ReportCardPerson;
-  kind: "user" | "character";
-  size: number;
-}) {
+/** 役割の札（KP・PL）。左の列にそろえる */
+function RoleLabel({ children }: { children: string }) {
   return (
     <div
       style={{
         display: "flex",
-        width: size,
-        height: size,
+        width: 96,
         flexShrink: 0,
-        overflow: "hidden",
-        borderRadius: 22,
-        border: `2px solid ${C.line}`,
-        background: "#fff",
+        paddingTop: 4,
+        fontSize: 26,
+        fontWeight: 800,
+        color: C.field,
+        letterSpacing: "0.04em",
       }}
     >
-      {/* oxlint-disable-next-line nextjs/no-img-element -- satori は <img> で描く */}
-      <img
-        src={p.image ?? identiconDataUri(p.seed, kind)}
-        width={size}
-        height={size}
-        style={{ objectFit: "cover" }}
-      />
+      {children}
+    </div>
+  );
+}
+
+/** 顔ぶれの 1 人。画像は使わず、キャラクターの色の印と名前で示す */
+function Member({ m, width, plLabel }: { m: ReportCardMember; width: number; plLabel: string }) {
+  const main = m.pc ?? m.pl ?? "";
+  const sub = m.pc && m.pl ? `${plLabel} ${m.pl}` : undefined;
+  return (
+    <div style={row({ width, height: 50, gap: 14, overflow: "hidden", flexShrink: 0 })}>
+      <div style={{ width: 14, height: 32, borderRadius: 4, flexShrink: 0, background: m.color ?? C.line }} />
+      <span
+        style={{
+          display: "block",
+          lineClamp: 1,
+          maxWidth: width - 28,
+          fontSize: 36,
+          fontWeight: 800,
+          color: C.ink,
+          flexShrink: 0,
+        }}
+      >
+        {main}
+      </span>
+      {sub && (
+        <span
+          style={{
+            display: "block",
+            lineClamp: 1,
+            flex: 1,
+            minWidth: 0,
+            fontSize: 26,
+            fontWeight: 500,
+            color: C.ink2,
+          }}
+        >
+          {sub}
+        </span>
+      )}
     </div>
   );
 }
 
 /**
- * 卓報告カード。遊んだ人が「自分の卓の記念」として貼る 1 枚にする: 卓譜の名前は小さく右下だけ、
- * 色はシステムの色の帯だけ、主役は題名と PC の顔ぶれ。GM は顔ぶれと格を分けて題名の下に置く
+ * 卓報告カード。X の卓報告の並び（システム『題名』作者 / 日付 / KP / PL・PC）をそのまま 1 枚にする。
+ * 人の画像は載せない。色はシステムの色の帯とキャラクターの色の印だけ、卓譜の名前は右上に小さく
  */
 function ReportCardImage({ card }: { card: ReportCard }) {
-  const meta = [card.when, card.duration, card.table].filter(Boolean).join(" / ");
-  /* 顔ぶれは札の幅いっぱいに。人数が少ないほど大きく（縦は題名の下に収まる 196px まで） */
-  const n = Math.max(card.cast.length, 1);
-  const gap = 24;
-  const col = Math.min(300, Math.floor((1072 - gap * (n - 1)) / n));
-  const size = Math.min(196, col);
+  const meta = [card.author && `作 ${card.author}`, card.when, card.duration, card.table].filter(Boolean);
   const accent = card.system?.color ?? C.field;
+  /* 収まらない分は、最後の枠を「ほか N 人」にする */
+  const shown = card.more ? card.members.slice(0, REPORT_CAST_MAX - 1) : card.members;
+  const rest = card.members.length - shown.length + (card.more ?? 0);
+  const slots = shown.length + (rest > 0 ? 1 : 0);
+  const cols = slots <= 1 ? 1 : slots <= 4 ? 2 : 3;
+  const rosterWidth = 1200 - 96 - 72 - 96;
+  const gap = 28;
+  const colWidth = Math.floor((rosterWidth - gap * (cols - 1)) / cols);
+  const hasPlayers = card.members.length > 0 || card.players > 0;
+  const hasRoster = Boolean(card.gm) || hasPlayers;
+  /* PC を載せるなら列の名前は PC（PL は名前の後ろに小さく）。載せないなら PL */
+  const castLabel = card.members.some((m) => m.pc) ? "PC" : card.plLabel;
   return (
     <div
       style={{
         display: "flex",
-        flexDirection: "column",
         position: "relative",
+        overflow: "hidden",
         width: "100%",
         height: "100%",
         background: C.paper,
@@ -453,65 +485,115 @@ function ReportCardImage({ card }: { card: ReportCard }) {
         fontFamily: "Noto Sans JP",
       }}
     >
-      <div style={{ display: "flex", height: 14, background: accent }} />
-      <div style={{ display: "flex", flexDirection: "column", flex: 1, padding: "40px 64px 36px" }}>
-        <div style={row({ gap: 14, fontSize: 24, fontWeight: 800 })}>
-          <span style={{ color: C.field }}>#卓報告</span>
+      <div style={{ display: "flex", width: 24, height: "100%", background: accent, flexShrink: 0 }} />
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, padding: "52px 72px 52px 72px" }}>
+        <div style={row({ gap: 14, fontSize: 28, fontWeight: 800, color: C.ink2 })}>
           {card.system && (
-            <span style={{ display: "block", lineClamp: 1, maxWidth: 760, color: C.ink2 }}>
-              {card.system.name}
-            </span>
+            <div style={row({ gap: 14 })}>
+              <div
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: 999,
+                  background: card.system.color,
+                  flexShrink: 0,
+                }}
+              />
+              <span style={{ display: "block", lineClamp: 1, maxWidth: 760 }}>{card.system.name}</span>
+            </div>
           )}
-          <div style={row({ marginLeft: "auto", gap: 8, fontSize: 20, color: C.ink2 })}>
-            <Mark size={26} tile={C.ink2} on={C.paper} />
+          <div style={row({ marginLeft: "auto", gap: 10, fontSize: 24, color: C.ink2 })}>
+            <Mark size={30} tile={C.field} on={C.paper} />
             卓譜
           </div>
         </div>
-        <div style={{ display: "flex", marginTop: 16 }}>
-          <Phrases
-            text={card.title}
-            size={Math.round(titleSize(card.title) * 1.05)}
-            lineHeight={1.18}
-            display
-          />
-        </div>
-        <div style={row({ marginTop: 14, gap: 28, fontSize: 24, fontWeight: 500, color: C.ink2 })}>
-          <span>{meta}</span>
-          {card.gm && (
-            <div style={row({ gap: 10 })}>
-              <ReportFace p={card.gm.person} kind="user" size={40} />
-              <span style={{ fontWeight: 800, color: C.field }}>{card.gm.label}</span>
-              <span style={{ fontWeight: 800, color: C.ink }}>{card.gm.person.name}</span>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            // 題名は、上の段と顔ぶれの間の真ん中に
+            flex: 1,
+            justifyContent: "center",
+            paddingBottom: 12,
+          }}
+        >
+          <Phrases text={card.title} size={reportTitleSize(card.title)} lineHeight={1.2} display />
+          {meta.length > 0 && (
+            <div
+              style={row({
+                flexWrap: "wrap",
+                marginTop: 18,
+                columnGap: 28,
+                rowGap: 4,
+                fontSize: 30,
+                fontWeight: 500,
+                color: C.ink2,
+              })}
+            >
+              {meta.map((t) => (
+                <span key={t}>{t}</span>
+              ))}
             </div>
           )}
         </div>
-        <div style={row({ marginTop: "auto", gap, alignItems: "flex-start" })}>
-          {card.cast.map((c, i) => {
-            const who = c.pc ?? c.pl;
-            return (
-              <div key={i} style={{ display: "flex", flexDirection: "column", width: col }}>
-                <ReportPortrait p={who} kind={c.pc ? "character" : "user"} size={size} />
-                <span
-                  style={{ display: "block", marginTop: 12, lineClamp: 1, fontSize: 28, fontWeight: 800 }}
-                >
-                  {who.name}
-                </span>
-                {c.pc?.note && (
-                  <span
-                    style={{ display: "block", lineClamp: 1, fontSize: 19, fontWeight: 500, color: C.ink2 }}
-                  >
-                    {c.pc.note}
-                  </span>
-                )}
-                <span
-                  style={{ display: "block", lineClamp: 1, fontSize: 19, fontWeight: 500, color: C.ink2 }}
-                >
-                  {c.pc ? `PL ${c.pl.name}` : "PL"}
+        {hasRoster && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 18,
+              marginTop: "auto",
+              paddingTop: 26,
+              borderTop: `2px solid ${C.line}`,
+            }}
+          >
+            {card.gm && (
+              <div style={row({ alignItems: "flex-start" })}>
+                <RoleLabel>{card.gm.label}</RoleLabel>
+                <span style={{ display: "block", lineClamp: 1, fontSize: 36, fontWeight: 800 }}>
+                  {card.gm.name}
                 </span>
               </div>
-            );
-          })}
-        </div>
+            )}
+            {hasPlayers && (
+              <div style={row({ alignItems: "flex-start" })}>
+                <RoleLabel>{castLabel}</RoleLabel>
+                {card.members.length > 0 ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      columnGap: gap,
+                      rowGap: 14,
+                      width: rosterWidth,
+                    }}
+                  >
+                    {shown.map((m, i) => (
+                      <Member key={i} m={m} width={colWidth} plLabel={card.plLabel} />
+                    ))}
+                    {rest > 0 && (
+                      <span
+                        style={row({
+                          width: colWidth,
+                          height: 50,
+                          fontSize: 30,
+                          fontWeight: 500,
+                          color: C.ink2,
+                        })}
+                      >
+                        {`ほか${rest}人`}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span
+                    style={{ display: "block", fontSize: 36, fontWeight: 800 }}
+                  >{`${card.players}人`}</span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
