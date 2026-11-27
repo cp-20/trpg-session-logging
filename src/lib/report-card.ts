@@ -17,12 +17,10 @@ import { roleLabel } from "./roles";
 import { sessionTitle } from "./session-scenario";
 import { sessionDays, sittingsMinutes } from "./sittings";
 
-/** 顔ぶれの 1 行。名前を載せない項目は無し（PC も PL も無ければ、人数だけ数える） */
+/** 顔ぶれの 1 行。名前を載せない項目は無し（PC も PL も無ければ、その人は載せない）。人ごとの色は付けない */
 export interface ReportCardMember {
   /** PC の名前 */
   pc?: string;
-  /** PC の色（キャラクターの色。名前の前の印に使う） */
-  color?: string;
   /** PL の名前 */
   pl?: string;
 }
@@ -42,8 +40,6 @@ export interface ReportCard {
   gm?: { label: string; name: string };
   /** 遊び手の呼び方（PL） */
   plLabel: string;
-  /** 遊び手の人数（顔ぶれに載せない人も数える。非表示の人は数えない） */
-  players: number;
   members: ReportCardMember[];
   /** 札に収まらず載せなかった顔ぶれの数（「ほか N 人」） */
   more?: number;
@@ -108,6 +104,13 @@ function nameVisible(log: Log, state: State, uid: string): boolean {
   return !(state.prefs.hideSelfOnShare && uid === state.me);
 }
 
+/** 投稿文に添える遊び手の人数（進行役と、共有ページで非表示の人は数えない）。カードには載せない */
+export function reportPlayerCount(log: Log, state: State): number {
+  return Object.entries(log.players).filter(
+    ([uid, link]) => uid !== log.ownerId && !link.hidden && Boolean(state.users[uid]),
+  ).length;
+}
+
 /** 記録した人の手元の記録から、卓報告カードの中身を作る */
 export function reportCardFromSession(
   log: Log,
@@ -123,12 +126,10 @@ export function reportCardFromSession(
   const gmName = gmUser && options.names && nameVisible(log, state, log.ownerId) ? gmUser.name : undefined;
 
   const members: ReportCardMember[] = [];
-  let players = 0;
   for (const [uid, link] of Object.entries(log.players)) {
     if (uid === log.ownerId || link.hidden) continue;
     const user = state.users[uid];
     if (!user) continue;
-    players += 1;
     // 名前を隠すにした自分は、PC も含めて載せない（PC から人が分かるため）
     if (!nameVisible(log, state, uid)) continue;
     const pl = options.names ? short(user.name, LIMIT.name) : undefined;
@@ -136,13 +137,12 @@ export function reportCardFromSession(
       ? link.characterIds.map((id) => state.characters[id]).filter((c) => c !== undefined)
       : [];
     if (chars.length === 0) {
-      if (pl) members.push({ pl, ...(HEX.test(user.color) ? { color: user.color } : {}) });
+      if (pl) members.push({ pl });
       continue;
     }
     for (const c of chars)
       members.push({
         pc: short(c.name, LIMIT.name),
-        ...(HEX.test(c.color) ? { color: c.color } : {}),
         ...(pl ? { pl } : {}),
       });
   }
@@ -156,7 +156,6 @@ export function reportCardFromSession(
     ...(options.table && table ? { table: short(table, LIMIT.table) } : {}),
     ...(gmName ? { gm: { label: roleLabel(log.systemId, "GM"), name: short(gmName, LIMIT.name) } } : {}),
     plLabel: roleLabel(log.systemId, "PL"),
-    players,
     members: members.slice(0, REPORT_CAST_MAX),
     ...(members.length > REPORT_CAST_MAX ? { more: members.length - REPORT_CAST_MAX } : {}),
   };
@@ -189,8 +188,7 @@ export function parseReportCard(body: unknown): ReportCard | null {
       const pc = text(x?.pc, LIMIT.name);
       const pl = text(x?.pl, LIMIT.name);
       if (!pc && !pl) return [];
-      const c = color(x?.color);
-      return [{ ...(pc ? { pc } : {}), ...(c ? { color: c } : {}), ...(pl ? { pl } : {}) }];
+      return [{ ...(pc ? { pc } : {}), ...(pl ? { pl } : {}) }];
     });
   const count = (v: unknown) =>
     typeof v === "number" && Number.isInteger(v) ? Math.min(Math.max(v, 0), 99) : 0;
@@ -208,7 +206,6 @@ export function parseReportCard(body: unknown): ReportCard | null {
     ...optional("table", r.table),
     ...(gmLabel && gmName ? { gm: { label: gmLabel, name: gmName } } : {}),
     plLabel: text(r.plLabel, LIMIT.label) ?? "PL",
-    players: count(r.players),
     members,
     ...(more > 0 ? { more } : {}),
   };

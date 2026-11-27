@@ -9,6 +9,7 @@ import {
   REPORT_DEFAULTS,
   reportCardChoices,
   reportCardFromSession,
+  reportPlayerCount,
   type ReportCardOptions,
 } from "@shared/lib/report-card";
 import { createSharedInvite, fetchSharedLog, revokeSharedMember } from "@shared/lib/cloud-state";
@@ -993,8 +994,8 @@ function ReportCardSheet({ log, onClose }: { log: Log; onClose: () => void }) {
   const card = useMemo(() => reportCardFromSession(log, state, options), [log, state, options]);
   const choices = useMemo(() => reportCardChoices(log, state), [log, state]);
   const tweet = useMemo(
-    () => ({ title: card.title, playerCount: card.players, shareUrl }),
-    [card.title, card.players, shareUrl],
+    () => ({ title: card.title, playerCount: reportPlayerCount(log, state), shareUrl }),
+    [card.title, log, state, shareUrl],
   );
   const [uri, setUri] = useState<string | null>(null);
 

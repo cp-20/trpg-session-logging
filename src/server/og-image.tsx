@@ -420,12 +420,11 @@ function Member({ m, width, plLabel }: { m: ReportCardMember; width: number; plL
   const sub = m.pc && m.pl ? `${plLabel} ${m.pl}` : undefined;
   return (
     <div style={row({ width, height: 50, gap: 14, overflow: "hidden", flexShrink: 0 })}>
-      <div style={{ width: 14, height: 32, borderRadius: 4, flexShrink: 0, background: m.color ?? C.line }} />
       <span
         style={{
           display: "block",
           lineClamp: 1,
-          maxWidth: width - 28,
+          maxWidth: width,
           fontSize: 36,
           fontWeight: 800,
           color: C.ink,
@@ -455,7 +454,7 @@ function Member({ m, width, plLabel }: { m: ReportCardMember; width: number; plL
 
 /**
  * 卓報告カード。X の卓報告の並び（システム『題名』作者 / 日付 / KP / PL・PC）をそのまま 1 枚にする。
- * 人の画像は載せない。色はシステムの色の帯とキャラクターの色の印だけ、卓譜の名前は右上に小さく
+ * 人の画像は載せない。色は左端のシステムの色の帯だけ（人ごとの色は付けない）、卓譜の名前は右上に小さく
  */
 function ReportCardImage({ card }: { card: ReportCard }) {
   const meta = [card.author && `作 ${card.author}`, card.when, card.duration, card.table].filter(Boolean);
@@ -468,7 +467,8 @@ function ReportCardImage({ card }: { card: ReportCard }) {
   const rosterWidth = 1200 - 96 - 72 - 96;
   const gap = 28;
   const colWidth = Math.floor((rosterWidth - gap * (cols - 1)) / cols);
-  const hasPlayers = card.members.length > 0 || card.players > 0;
+  /* 名前を 1 人も載せないなら、顔ぶれの段ごと出さない（人数だけを出しても読む人の役に立たない） */
+  const hasPlayers = card.members.length > 0;
   const hasRoster = Boolean(card.gm) || hasPlayers;
   /* PC を載せるなら列の名前は PC（PL は名前の後ろに小さく）。載せないなら PL */
   const castLabel = card.members.some((m) => m.pc) ? "PC" : card.plLabel;
@@ -489,18 +489,7 @@ function ReportCardImage({ card }: { card: ReportCard }) {
       <div style={{ display: "flex", flexDirection: "column", flex: 1, padding: "52px 72px 52px 72px" }}>
         <div style={row({ gap: 14, fontSize: 28, fontWeight: 800, color: C.ink2 })}>
           {card.system && (
-            <div style={row({ gap: 14 })}>
-              <div
-                style={{
-                  width: 18,
-                  height: 18,
-                  borderRadius: 999,
-                  background: card.system.color,
-                  flexShrink: 0,
-                }}
-              />
-              <span style={{ display: "block", lineClamp: 1, maxWidth: 760 }}>{card.system.name}</span>
-            </div>
+            <span style={{ display: "block", lineClamp: 1, maxWidth: 760 }}>{card.system.name}</span>
           )}
           <div style={row({ marginLeft: "auto", gap: 10, fontSize: 24, color: C.ink2 })}>
             <Mark size={30} tile={C.field} on={C.paper} />
@@ -558,38 +547,32 @@ function ReportCardImage({ card }: { card: ReportCard }) {
             {hasPlayers && (
               <div style={row({ alignItems: "flex-start" })}>
                 <RoleLabel>{castLabel}</RoleLabel>
-                {card.members.length > 0 ? (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      columnGap: gap,
-                      rowGap: 14,
-                      width: rosterWidth,
-                    }}
-                  >
-                    {shown.map((m, i) => (
-                      <Member key={i} m={m} width={colWidth} plLabel={card.plLabel} />
-                    ))}
-                    {rest > 0 && (
-                      <span
-                        style={row({
-                          width: colWidth,
-                          height: 50,
-                          fontSize: 30,
-                          fontWeight: 500,
-                          color: C.ink2,
-                        })}
-                      >
-                        {`ほか${rest}人`}
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <span
-                    style={{ display: "block", fontSize: 36, fontWeight: 800 }}
-                  >{`${card.players}人`}</span>
-                )}
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    columnGap: gap,
+                    rowGap: 14,
+                    width: rosterWidth,
+                  }}
+                >
+                  {shown.map((m, i) => (
+                    <Member key={i} m={m} width={colWidth} plLabel={card.plLabel} />
+                  ))}
+                  {rest > 0 && (
+                    <span
+                      style={row({
+                        width: colWidth,
+                        height: 50,
+                        fontSize: 30,
+                        fontWeight: 500,
+                        color: C.ink2,
+                      })}
+                    >
+                      {`ほか${rest}人`}
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>

@@ -93,12 +93,12 @@ describe("卓報告カードの中身", () => {
     expect(card.duration).toBe("3時間2分");
     expect(card.table).toBeUndefined();
     expect(card.gm).toEqual({ label: "KP", name: "みかん" });
-    expect(card.players).toBe(3);
+    expect(card).not.toHaveProperty("players");
     expect(card.members).toEqual([
-      { pc: "九条 灯", color: "#aa5522", pl: "ゆう" },
-      { pc: "九条 澪", color: "#aa5522", pl: "ゆう" },
-      { pc: "真壁 透", color: "#aa5522", pl: "たろう" },
-      { pl: "はな", color: "#3366cc" },
+      { pc: "九条 灯", pl: "ゆう" },
+      { pc: "九条 澪", pl: "ゆう" },
+      { pc: "真壁 透", pl: "たろう" },
+      { pl: "はな" },
     ]);
     // ネタバレになるもの・人の画像は載せない
     expect(JSON.stringify(card)).not.toMatch(/SAN|HP|data:|image/);
@@ -142,8 +142,9 @@ describe("卓報告カードの中身", () => {
     expect(JSON.stringify(noNames)).not.toMatch(/みかん|ゆう|たろう|はな/);
 
     const nobody = reportCardFromSession(log, state, opts({ pc: false, names: false }));
+    // 名前を 1 人も載せないなら、人数も載せない（カードは顔ぶれの段ごと出さない）
     expect(nobody.members).toEqual([]);
-    expect(nobody.players).toBe(3);
+    expect(nobody).not.toHaveProperty("players");
   });
 
   it("作者・日付・時間・卓の名前も選べる", () => {
@@ -159,22 +160,21 @@ describe("卓報告カードの中身", () => {
     expect(card.table).toBe("金曜の卓");
   });
 
-  it("共有ページで非表示の参加者は、名前を載せる設定でも載せず、数えもしない", () => {
+  it("共有ページで非表示の参加者は、名前を載せる設定でも載せない", () => {
     const { state, log } = fixture();
     log.players.p2!.hidden = true;
     log.players.kp!.hidden = true;
     const card = reportCardFromSession(log, state);
     expect(card.gm).toBeUndefined();
     expect(JSON.stringify(card)).not.toMatch(/みかん|たろう|真壁/);
-    expect(card.players).toBe(2);
+    expect(card.members.map((m) => m.pl)).toEqual(["ゆう", "ゆう", "はな"]);
   });
 
-  it("「共有ページで名前を隠す」にした自分は、名前も PC も載せない（人数には数える）", () => {
+  it("「共有ページで名前を隠す」にした自分は、名前も PC も載せない", () => {
     const { state, log } = fixture();
     state.prefs.hideSelfOnShare = true;
     const card = reportCardFromSession(log, state);
     expect(JSON.stringify(card)).not.toMatch(/ゆう|九条/);
-    expect(card.players).toBe(3);
     // 自分が KP のときも
     log.ownerId = "me";
     expect(reportCardFromSession(log, state).gm).toBeUndefined();
@@ -229,7 +229,7 @@ describe("送られてきた卓報告カードの確かめ", () => {
     expect(parseReportCard({ title: "x", members: [] })).toMatchObject({
       title: "x",
       plLabel: "PL",
-      players: 0,
+      members: [],
     });
   });
 });

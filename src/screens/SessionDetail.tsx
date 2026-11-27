@@ -62,6 +62,7 @@ import {
   REPORT_OPTIONS_KEY,
   reportCardChoices,
   reportCardFromSession,
+  reportPlayerCount,
   type ReportCard,
   type ReportCardOptions,
 } from "../lib/report-card";
@@ -1292,8 +1293,8 @@ export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => voi
   const card = useMemo(() => reportCardFromSession(log, state, options), [log, state, options]);
   const choices = useMemo(() => reportCardChoices(log, state), [log, state]);
   const tweet = useMemo(
-    () => ({ title: card.title, playerCount: card.players, shareUrl }),
-    [card.title, card.players, shareUrl],
+    () => ({ title: card.title, playerCount: reportPlayerCount(log, state), shareUrl }),
+    [card.title, log, state, shareUrl],
   );
   /* 描き終えた画像と、どの中身から描いたか。いまの中身と違えば描き直し中 */
   const [image, setImage] = useState<{ url: string; file: File } | null>(null);
