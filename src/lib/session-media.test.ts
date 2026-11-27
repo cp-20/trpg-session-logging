@@ -15,8 +15,8 @@ import {
   needsConsentCheck,
   normalizeMediaUrl,
   embedAt,
+  playerSrc,
   formatClock,
-  mediaOffsetAt,
   parseChapters,
   parseClock,
   parseTimeParam,
@@ -140,11 +140,7 @@ describe("目次と時刻", () => {
     expect(parseChapters(formatChapters(chapters))).toEqual(chapters);
   });
 
-  it("ログの発言時刻から録画の位置を出し、その位置で開く URL を作る", () => {
-    const m = { ...base, startedAt: 1_000_000 };
-    expect(mediaOffsetAt(m, 1_000_754)).toBe(754);
-    expect(mediaOffsetAt(m, 999_999)).toBeNull();
-    expect(mediaOffsetAt(base, 1_000_754)).toBeNull();
+  it("録画の位置で開く URL を作る", () => {
     expect(urlAt("https://youtu.be/abcdefghijk", 754)).toBe("https://youtu.be/abcdefghijk?t=754s");
     expect(urlAt("https://drive.google.com/file/d/x", 754)).toBe("https://drive.google.com/file/d/x");
   });
@@ -275,5 +271,28 @@ describe("追加の流れ", () => {
     expect(needsConsentCheck("recording", "self")).toBe(false);
     expect(needsConsentCheck("replay", "public")).toBe(false);
     expect(needsConsentCheck("impression", "members")).toBe(false);
+  });
+});
+
+describe("playerSrc（ログと並べて再生する埋め込み）", () => {
+  const page = { origin: "https://takufu.app", host: "takufu.app" };
+  it("YouTube は位置を知らせる設定と開始位置", () => {
+    const u = new URL(playerSrc("https://www.youtube-nocookie.com/embed/abc", 754, page));
+    expect(Object.fromEntries(u.searchParams)).toEqual({
+      start: "754",
+      autoplay: "1",
+      enablejsapi: "1",
+      origin: "https://takufu.app",
+      playsinline: "1",
+    });
+  });
+  it("ニコニコは jsapi、Twitch は埋め込む側のホスト", () => {
+    const n = new URL(playerSrc("https://embed.nicovideo.jp/watch/sm9", 61, page));
+    expect(n.searchParams.get("from")).toBe("61");
+    expect(n.searchParams.get("jsapi")).toBe("1");
+    const t = new URL(playerSrc("https://player.twitch.tv/?video=v1&autoplay=false", 3723, page));
+    expect(t.searchParams.get("time")).toBe("1h2m3s");
+    expect(t.searchParams.get("parent")).toBe("takufu.app");
+    expect(t.searchParams.get("autoplay")).toBe("true");
   });
 });

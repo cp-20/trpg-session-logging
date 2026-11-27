@@ -6,6 +6,8 @@
  * - X は公式の oEmbed（widgets.js は読まない）。返る blockquote から本文を文字にする
  * - ふせったーは公開の部分（turnContent。伏せ字は伏せたまま）だけ。追記（additionalContent）と伏せる前の本文（rawContent）は読まない
  * - ニコニコは getthumbinfo。サムネイルはサービス自身の CDN のものだけ返す
+ * - YouTube は oEmbed に加えて動画のページの頭（構造化データ）から、配信の開始時刻と長さを読む。ログと録画を時刻で
+ *   合わせるのに使う（src/lib/recording-sync.ts）
  */
 
 export type PreviewService = "youtube" | "niconico" | "fusetter" | "x";
@@ -19,6 +21,10 @@ export interface MediaPreview {
   excerpt?: string;
   /** サービス自身の CDN の画像だけ */
   thumbnail?: string;
+  /** 配信のアーカイブなら、配信を始めた時刻（epoch 秒）。動画の 0 秒の時刻 */
+  startedAt?: number;
+  /** 動画の長さ（秒） */
+  durationSec?: number;
 }
 
 export interface PreviewTarget {
@@ -27,6 +33,8 @@ export interface PreviewTarget {
   fetchUrl: string;
   /** 本来の URL から取り出した ID（応答が別のものを指していないか確かめる） */
   id: string;
+  /** 開始時刻・長さを読む先（固定の一覧のホストだけ）。読めなくても題名は返す */
+  timingUrl?: string;
 }
 
 /** サーバーが問い合わせてよいホスト。これ以外へは出ない */
@@ -80,6 +88,7 @@ export function previewTarget(rawUrl: string): PreviewTarget | null {
       service: "youtube",
       id,
       fetchUrl: `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(watch)}`,
+      timingUrl: watch,
     };
   }
 
@@ -295,11 +304,62 @@ export function parseNicoThumbInfo(xml: string, id: string): MediaPreview | null
   if (!title) return null;
   const author = oneLine(xmlText(xml, "user_nickname") ?? xmlText(xml, "ch_name"), 50);
   const thumbnail = safeThumbnail("niconico", xmlText(xml, "thumbnail_url"));
+  const length = xmlText(xml, "length")?.match(/^(?:(\d+):)?(\d+):(\d{2})$/);
+  const durationSec = length ? Number(length[1] ?? 0) * 3600 + Number(length[2]) * 60 + Number(length[3]) : 0;
   return {
     service: "niconico",
     title,
     ...(author ? { author } : {}),
     ...(thumbnail ? { thumbnail } : {}),
+    ...(durationSec > 0 ? { durationSec } : {}),
+  };
+}
+
+/** ISO 8601 の期間（PT1H2M3S）を秒に */
+export function parseIsoDuration(raw: string | undefined): number | undefined {
+  const m = raw?.match(/^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
+  if (!m || raw === "P" || raw === "PT") return undefined;
+  const sec =
+    Number(m[1] ?? 0) * 86400 + Number(m[2] ?? 0) * 3600 + Number(m[3] ?? 0) * 60 + Number(m[4] ?? 0);
+  return sec > 0 ? sec : undefined;
+}
+
+function isoEpoch(raw: string | undefined): number | undefined {
+  // 時差の書かれていない日時は読まない（どこの時刻か分からない）
+  if (!raw || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/.test(raw))
+    return undefined;
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
+}
+
+/** 動画のページの頭で、構造化データ（itemprop）を読み終えたか。そこで読むのをやめてよい */
+export function youtubeTimingComplete(html: string): boolean {
+  const genre = html.indexOf('itemprop="genre"');
+  return genre >= 0 && html.length - genre > 1500;
+}
+
+/**
+ * YouTube の動画のページの構造化データから、配信の開始時刻と長さを読む。
+ *   <meta itemprop="duration" content="PT3H2M1S">
+ *   <span itemprop="publication" …BroadcastEvent><meta itemprop="startDate" content="2026-11-27T12:00:56+00:00">
+ *     <meta itemprop="endDate" …>
+ * 配信でない動画は startDate がないので、開始時刻は返さない（投稿日時は録画の 0 秒ではない）。
+ * 長さが載っていない（配信直後）ときは、配信の終了 − 開始
+ */
+export function parseYoutubeWatchTiming(html: string): { startedAt?: number; durationSec?: number } {
+  const meta = (prop: string) =>
+    html.match(new RegExp(`<meta\\s+itemprop="${prop}"\\s+content="([^"]*)"`))?.[1]?.trim();
+  const live = /^true$/i.test(meta("isLiveBroadcast") ?? "");
+  const startedAt = live ? isoEpoch(meta("startDate")) : undefined;
+  const endedAt = live ? isoEpoch(meta("endDate")) : undefined;
+  const durationSec =
+    parseIsoDuration(meta("duration")) ??
+    (startedAt !== undefined && endedAt !== undefined && endedAt > startedAt
+      ? endedAt - startedAt
+      : undefined);
+  return {
+    ...(startedAt !== undefined ? { startedAt } : {}),
+    ...(durationSec !== undefined ? { durationSec } : {}),
   };
 }
 
@@ -333,12 +393,19 @@ export function readPreviewJson(json: unknown): MediaPreview | null {
   const author = oneLine(o.author, 60);
   const excerpt = str(o.excerpt) ? clip(String(o.excerpt), EXCERPT_MAX) : undefined;
   const thumbnail = safeThumbnail(service, o.thumbnail);
+  const count = (v: unknown, max: number) =>
+    typeof v === "number" && Number.isInteger(v) && v > 0 && v <= max ? v : undefined;
+  // 2000 年〜2100 年の時刻、長さは 2 日まで
+  const startedAt = count(o.startedAt, 4_102_444_800);
+  const durationSec = count(o.durationSec, 2 * 86400);
   return {
     service,
     title,
     ...(author ? { author } : {}),
     ...(excerpt ? { excerpt } : {}),
     ...(thumbnail ? { thumbnail } : {}),
+    ...(startedAt !== undefined && startedAt >= 946_684_800 ? { startedAt } : {}),
+    ...(durationSec !== undefined ? { durationSec } : {}),
   };
 }
 

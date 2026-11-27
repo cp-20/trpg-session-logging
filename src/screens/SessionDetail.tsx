@@ -25,8 +25,9 @@ import {
   cx,
 } from "../components/ui";
 import { Avatar, CharAvatar, PlayerPicker, SpeakerConfigGrid } from "../components/identity";
-import { LogReaderBar, SessionTimeline, TimelineFilter, RecordingLinkContext } from "../components/timeline";
-import { SessionMediaSection, recordingLinksAt } from "../components/media";
+import { LogReaderBar, SessionTimeline, TimelineFilter } from "../components/timeline";
+import { SessionMediaSection } from "../components/media";
+import { RecordingLogView } from "../components/recording-dock";
 import { SYSTEMS } from "../data/systems";
 import { roleLabel } from "../lib/roles";
 import { isGoodRoll, rollOutcomes, rollTone } from "../lib/roll-tone";
@@ -34,6 +35,7 @@ import { userHref } from "../lib/people";
 import { fmtDates, fmtDur, fmtSessionWhen, sessionDays, sessionPlayMinutes, uid } from "../lib/time";
 import { sittingToFields, sittingsFromFields, type SittingFields } from "../lib/sittings";
 import type { Character, Log, MsgKind, Scope, SecretTabsScope } from "../types";
+import type { SessionMedia } from "../lib/session-media";
 import {
   IconBooks,
   IconBrandX,
@@ -147,6 +149,15 @@ export default function SessionDetail() {
   const totalMsgs = useMemo(() => log.channels.reduce((n, c) => n + c.msgs.length, 0), [log.channels]);
   const secretChannels = useMemo(() => log.channels.filter((c) => c.secret), [log.channels]);
   const canRead = isParticipant || timelineRevealed;
+  const mediaViewer = useMemo(
+    () => ({ viewerId: state.me, isMember: isParticipant, hasPassed: isParticipant }),
+    [state.me, isParticipant],
+  );
+  const setMedia = (media: SessionMedia[]) =>
+    update((s) => {
+      const target = s.logs[log.id];
+      if (target) target.media = media;
+    });
 
   const { previewLog, hasRolls } = useMemo(() => {
     const mainChannel =
@@ -316,13 +327,9 @@ export default function SessionDetail() {
                   log={log}
                   state={state}
                   editable={isParticipant}
-                  viewer={{ viewerId: state.me, isMember: isParticipant, hasPassed: isParticipant }}
-                  onChange={(media) =>
-                    update((s) => {
-                      const target = s.logs[log.id];
-                      if (target) target.media = media;
-                    })
-                  }
+                  viewer={mediaViewer}
+                  onChange={setMedia}
+                  onReadWithLog={log.hasLog && canRead ? openTimeline : undefined}
                 />
 
                 <ImpressionsSection log={log} isParticipant={isParticipant} />
@@ -364,7 +371,13 @@ export default function SessionDetail() {
                   </EmptyState>
                 </div>
               ) : (
-                <>
+                <RecordingLogView
+                  log={log}
+                  state={state}
+                  viewer={mediaViewer}
+                  canEdit={(m) => isParticipant && (m.addedBy === state.me || log.ownerId === state.me)}
+                  onMediaChange={setMedia}
+                >
                   <LogReaderBar
                     log={log}
                     state={state}
@@ -423,22 +436,12 @@ export default function SessionDetail() {
                     </section>
                   )}
                   <div className="surface px-1 py-2 sm:px-3 sm:py-3">
-                    <RecordingLinkContext.Provider
-                      value={(ts) =>
-                        recordingLinksAt(log, ts, {
-                          viewerId: state.me,
-                          isMember: isParticipant,
-                          hasPassed: isParticipant,
-                        })[0]?.href
-                      }
-                    >
-                      <SessionTimeline log={log} state={state} mode="own" filter={filter} />
-                    </RecordingLinkContext.Provider>
+                    <SessionTimeline log={log} state={state} mode="own" filter={filter} />
                   </div>
                   {log.importedFrom && (
                     <p className="mt-3 text-xs text-ink3">取り込んだファイル: {log.importedFrom}</p>
                   )}
-                </>
+                </RecordingLogView>
               )
             ) : (
               <div className="surface">

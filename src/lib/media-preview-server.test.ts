@@ -116,3 +116,61 @@ describe("handleMediaPreview", () => {
     expect(calls).toHaveLength(5);
   });
 });
+
+describe("YouTube の配信の開始時刻と長さ", () => {
+  const watchHtml = (meta: string) =>
+    `<html><body>${"x".repeat(50_000)}<meta itemprop="genre" content="Gaming">` +
+    `<span itemprop="publication" itemscope itemtype="http://schema.org/BroadcastEvent">${meta}</span>` +
+    `${"y".repeat(3000)}<script>${"z".repeat(500_000)}</script></body></html>`;
+  const oembedYt = JSON.stringify({ title: "【CoC】深淵の呼び声", author_name: "みかん" });
+
+  it("oEmbed の題名に、動画のページから読んだ開始時刻と長さを足す", async () => {
+    const { fn, calls } = fakeFetch((url) =>
+      url.includes("/oembed")
+        ? new Response(oembedYt)
+        : new Response(
+            watchHtml(
+              '<meta itemprop="isLiveBroadcast" content="True"><meta itemprop="startDate" content="2026-11-20T12:00:56+00:00"><meta itemprop="endDate" content="2026-11-20T15:00:56+00:00">',
+            ),
+          ),
+    );
+    const r = await handleMediaPreview("https://youtu.be/abcdefghijk", { fetchFn: fn, cache: new Map() });
+    expect(r).toEqual({
+      ok: true,
+      preview: {
+        service: "youtube",
+        title: "【CoC】深淵の呼び声",
+        author: "みかん",
+        startedAt: Math.floor(Date.parse("2026-11-20T12:00:56Z") / 1000),
+        durationSec: 3 * 3600,
+      },
+    });
+    expect(calls.map((c) => new URL(c.url).hostname)).toEqual(["www.youtube.com", "www.youtube.com"]);
+    expect(calls[1]!.url).toBe("https://www.youtube.com/watch?v=abcdefghijk");
+    expect(calls[1]!.init.redirect).toBe("manual");
+  });
+
+  it("動画のページが読めなくても題名は返す", async () => {
+    const { fn } = fakeFetch((url) =>
+      url.includes("/oembed") ? new Response(oembedYt) : new Response("", { status: 500 }),
+    );
+    const r = await handleMediaPreview("https://youtu.be/abcdefghijk", { fetchFn: fn, cache: new Map() });
+    expect(r).toEqual({
+      ok: true,
+      preview: { service: "youtube", title: "【CoC】深淵の呼び声", author: "みかん" },
+    });
+  });
+
+  it("上限まで読んでも構造化データがなければ何も足さない", async () => {
+    const { fn } = fakeFetch((url) =>
+      url.includes("/oembed") ? new Response(oembedYt) : new Response("a".repeat(100_000)),
+    );
+    const r = await handleMediaPreview("https://youtu.be/abcdefghijk", {
+      fetchFn: fn,
+      cache: new Map(),
+      timingMaxBytes: 10_000,
+    });
+    expect(r).toMatchObject({ ok: true, preview: { title: "【CoC】深淵の呼び声" } });
+    expect((r as { preview: object }).preview).not.toHaveProperty("startedAt");
+  });
+});

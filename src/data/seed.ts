@@ -1,6 +1,6 @@
 import type { State, User, Table, Character, Scenario, Log, Channel, Provider, TableEvent } from "../types";
 import generated from "./generated.json";
-import { sessionStart, uid } from "../lib/time";
+import { uid } from "../lib/time";
 import { DEMO_SHEETS } from "./demo-sheets";
 
 /** generated.json の logs はオブジェクト（Record）なので正しく扱う */
@@ -52,18 +52,17 @@ export function seedState(): State {
       {
         id: "md_s02_rec",
         kind: "recording",
-        title: "第一夜 録画",
+        title: "セッション録画",
+        // 夜ごとに 1 本。各夜の最初の発言の少し前から回し始めた録画で、開始時刻はログと合わせてある。
+        // 目次は書かず、ログの場面の見出しから作る
         url: "https://www.youtube.com/watch?v=takufuDemo1",
-        parts: [{ url: "https://www.youtube.com/watch?v=takufuDemo2", label: "Part2（休憩後）" }],
+        startedAt: s02.sittings[0]!.start - 300,
+        parts: s02.sittings.slice(1).map((sit, i) => ({
+          url: `https://www.youtube.com/watch?v=takufuDemo${i + 2}`,
+          startedAt: sit.start - 240,
+        })),
         spoiler: true,
         scope: "members",
-        startedAt: sessionStart(s02),
-        chapters: [
-          { at: 0, label: "導入・自己紹介" },
-          { at: 1520, label: "漁村に到着" },
-          { at: 5400, label: "灯台の地下" },
-          { at: 600, label: "クライマックス", part: 2 },
-        ],
         consent: true,
         addedBy: "u_mikan",
         createdAt: "2026-09-27T10:00:00Z",

@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams } from "../lib/router";
 import { IconBooks, IconExternal, IconLock, IconTrendingUp } from "../components/icons";
-import { LogReaderBar, RecordingLinkContext, SessionTimeline, TimelineFilter } from "../components/timeline";
+import { LogReaderBar, SessionTimeline, TimelineFilter } from "../components/timeline";
 import { EmptyState, LegalLinks, LogoMark, StatChange, SysBadge, cx } from "../components/ui";
 import { Avatar, CharAvatar, GoogleSignInButton } from "../components/identity";
-import { SessionMediaSection, recordingLinksAt } from "../components/media";
+import { SessionMediaSection } from "../components/media";
+import { RecordingLogView } from "../components/recording-dock";
+import { visibleMedia } from "../lib/session-media";
+import { recordingVideos } from "../lib/recording-sync";
 import { SYSTEMS } from "../data/systems";
 import { carriedDeltas } from "../lib/character-growth";
 import { statusSheet } from "../lib/character-status";
@@ -33,15 +36,18 @@ function ShareFrame({
   children,
   action,
   narrow,
+  wide,
   systemIds,
 }: {
   children: ReactNode;
   action?: ReactNode;
   narrow?: boolean;
+  /** ログの横に録画を並べるとき */
+  wide?: boolean;
   /** 本文で扱うシステム。二次創作物である旨をフッターに出す */
   systemIds?: string[];
 }) {
-  const width = narrow ? "max-w-2xl" : "max-w-4xl";
+  const width = narrow ? "max-w-2xl" : wide ? "max-w-6xl" : "max-w-4xl";
   return (
     <div className="min-h-screen bg-base-200">
       <header className="border-b border-base-300 bg-base-100">
@@ -255,12 +261,14 @@ function ShareLogView({
   const gateResult = evaluateShareGate(log, viewerId, { asPassed });
   const gate = serverAuthorized || gateResult.visible ? null : gateResult.reason;
   const visibleMembers = visibleShareMembers(log, { hideSelfOnShare: state.prefs.hideSelfOnShare, viewerId });
-  const mediaViewer = {
-    viewerId,
-    isMember: Boolean(viewerId && (viewerId === log.ownerId || log.players[viewerId])),
-    hasPassed: asPassed || Boolean(serverAuthorized),
-  };
+  const isMember = Boolean(viewerId && (viewerId === log.ownerId || log.players[viewerId]));
+  const hasPassed = asPassed || Boolean(serverAuthorized);
+  const mediaViewer = useMemo(() => ({ viewerId, isMember, hasPassed }), [viewerId, isMember, hasPassed]);
   const channels = log.channels;
+  const hasRecording = useMemo(
+    () => visibleMedia(log.media, mediaViewer).some((m) => recordingVideos(m).length > 0),
+    [log.media, mediaViewer],
+  );
   const kpUser = state.users[log.ownerId];
   const kpLink = log.players[log.ownerId];
   const kpChar =
@@ -285,7 +293,7 @@ function ShareLogView({
   );
 
   return (
-    <ShareFrame systemIds={[log.systemId]}>
+    <ShareFrame systemIds={[log.systemId]} wide={!gate && channels.length > 0 && hasRecording}>
       <header>
         <div className="meta">
           <SysBadge sys={sys} />
@@ -387,34 +395,43 @@ function ShareLogView({
               </section>
             )}
 
+            {/* 録画はログの横で再生するので、ログがあるときはここに並べない */}
             <SessionMediaSection
               className="mb-8"
               log={log}
               state={state}
               editable={false}
               viewer={mediaViewer}
+              hidePlayable={channels.length > 0}
             />
 
             <section aria-label="ログ">
-              <LogReaderBar
-                log={log}
-                state={state}
-                filter={filter}
-                onChange={setFilter}
-                stickyClassName="sticky top-0 z-20 -mx-4 px-4 sm:-mx-6 sm:px-6"
-              />
               {channels.length === 0 ? (
-                <div className="surface">
-                  <EmptyState kind="permission" title="表示できるログがありません" />
-                </div>
+                <>
+                  <LogReaderBar
+                    log={log}
+                    state={state}
+                    filter={filter}
+                    onChange={setFilter}
+                    stickyClassName="sticky top-0 z-20 -mx-4 px-4 sm:-mx-6 sm:px-6"
+                  />
+                  <div className="surface">
+                    <EmptyState kind="permission" title="表示できるログがありません" />
+                  </div>
+                </>
               ) : (
-                <div className="surface px-1 py-2 sm:px-3 sm:py-3">
-                  <RecordingLinkContext.Provider
-                    value={(ts) => recordingLinksAt(log, ts, mediaViewer)[0]?.href}
-                  >
+                <RecordingLogView log={log} state={state} viewer={mediaViewer}>
+                  <LogReaderBar
+                    log={log}
+                    state={state}
+                    filter={filter}
+                    onChange={setFilter}
+                    stickyClassName="sticky top-0 z-20 -mx-4 px-4 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0"
+                  />
+                  <div className="surface px-1 py-2 sm:px-3 sm:py-3">
                     <SessionTimeline log={log} state={state} mode="share" filter={filter} />
-                  </RecordingLinkContext.Provider>
-                </div>
+                  </div>
+                </RecordingLogView>
               )}
             </section>
           </>

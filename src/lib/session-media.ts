@@ -32,6 +32,8 @@ export type MediaScope = "self" | "people" | "members" | "passed" | "public";
 export interface MediaPart {
   url: string;
   label?: string;
+  /** このパートの動画の 0 秒の時刻（epoch 秒）。ログと合わせたときに入る（src/lib/recording-sync.ts） */
+  startedAt?: number;
 }
 
 export interface MediaChapter {
@@ -364,13 +366,6 @@ export function formatChapters(chapters: readonly MediaChapter[] | undefined): s
   return lines.join("\n");
 }
 
-/** 録画の開始時刻から、ログの発言時刻（epoch 秒）が録画の何秒目かを出す。録画の外なら null */
-export function mediaOffsetAt(m: SessionMedia, epochSec: number, maxLengthSec = 16 * 3600): number | null {
-  if (m.startedAt === undefined) return null;
-  const off = epochSec - m.startedAt;
-  return off >= 0 && off <= maxLengthSec ? off : null;
-}
-
 /** 秒数付きで開ける URL（YouTube・ニコニコ・Twitch）。開けないサービスは元の URL */
 export function urlAt(rawUrl: string, sec: number): string {
   const d = detectMediaLink(rawUrl);
@@ -446,6 +441,30 @@ export function embedAt(embedUrl: string, sec: number): string {
       "time",
       `${Math.floor(sec / 3600)}h${Math.floor((sec % 3600) / 60)}m${Math.floor(sec % 60)}s`,
     );
+  }
+  return u.toString();
+}
+
+/**
+ * ログと並べて再生する埋め込みの URL。再生位置を受け取り・動かせるように、サービスの埋め込みの決まりで開く。
+ * - YouTube: enablejsapi（postMessage で位置を知らせ、seekTo を受ける）と origin
+ * - ニコニコ: jsapi と playerId（playerMetadataChange で位置を知らせ、seek を受ける）
+ * - Twitch: 埋め込む側のホスト（parent）が要る。位置は受け取れないので、動かすときは開き直す
+ */
+export function playerSrc(embedUrl: string, at: number, page: { origin: string; host: string }): string {
+  const u = new URL(embedAt(embedUrl, at));
+  const host = u.hostname;
+  if (host.includes("youtube")) {
+    u.searchParams.set("enablejsapi", "1");
+    u.searchParams.set("origin", page.origin);
+    u.searchParams.set("playsinline", "1");
+  } else if (host.includes("nicovideo")) {
+    u.searchParams.set("jsapi", "1");
+    u.searchParams.set("playerId", "1");
+    u.searchParams.set("autoplay", "1");
+  } else if (host.includes("twitch")) {
+    u.searchParams.set("parent", page.host);
+    u.searchParams.set("autoplay", "true");
   }
   return u.toString();
 }
