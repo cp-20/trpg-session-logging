@@ -2,7 +2,7 @@
  * つなぐ処理:
  * - 卓譜の利用者 ↔ Discord の利用者: Discord の OAuth2（scope は identify だけ）。合言葉（state）は一回きり・10 分で、
  *   始めたブラウザの Cookie と照らす。Discord のトークンは名前を読んだらすぐ取り消し、保存しない。
- * - 卓 ↔ チャンネル: `/卓譜 つなぐ` が出す一回きりのコード（10 分）を、卓を作った人が卓譜で開いて卓を選ぶ。
+ * - 卓 ↔ チャンネル: `/connect` が出す一回きりのコード（10 分）を、卓を作った人が卓譜で開いて卓を選ぶ。
  * 人や卓を名前で探させない（P14）。
  */
 import { botInstallUrl } from "./config";
@@ -150,7 +150,7 @@ export async function completeChannelLink(
     return {
       ok: false,
       status: 410,
-      error: "リンクの期限が切れています。Discord でもう一度 /卓譜 つなぐ を送ってください。",
+      error: "リンクの期限が切れています。Discord でもう一度 /connect を送ってください。",
     };
   // 1 つのチャンネルには 1 つの卓だけ。前につないでいた卓は外す
   const previous = await ctx.store.findTableLinkByChannel(data.channelId);

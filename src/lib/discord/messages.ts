@@ -220,7 +220,7 @@ export function pollAnswerMessage(poll: PollDoc, uid: string, page: number): Dis
   };
 }
 
-/** `/卓譜 日程`: このチャンネルの卓の、回答を受け付けている日程調整 */
+/** `/schedule`: このチャンネルの卓の、回答を受け付けている日程調整 */
 export function openPollsMessage(polls: PollDoc[], link: TableLink, baseUrl: string): DiscordMessage {
   if (polls.length === 0)
     return notice(`「${plain(link.tableName)}」に回答を受け付けている日程調整はありません。`, [

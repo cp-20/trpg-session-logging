@@ -1,7 +1,7 @@
 /**
  * Discord 連携の通し確認（pnpm run test:e2e:discord）。本物の Discord もブラウザ操作も要らない。
  * 偽の Discord（e2e/support/fake-discord.ts）が REST の呼び出しを記録し、署名つき Interaction はテスト鍵で自分で送る。
- * 流れ: ログイン → 卓 → /卓譜 つなぐ → チャンネルと卓をつなぐ → Discord の利用者をつなぐ（OAuth）→ 日程調整
+ * 流れ: ログイン → 卓 → /connect → チャンネルと卓をつなぐ → Discord の利用者をつなぐ（OAuth）→ 日程調整
  *  → Discord のボタンで回答 → 確定（予定とお知らせは 1 つずつ）→ 記録を Discord に投稿。
  */
 import { expect, test, type Page } from "@playwright/test";
@@ -77,9 +77,9 @@ test("Discord 連携: つなぐ → 日程調整 → ボタンで回答 → 確�
   await tableDialog.getByRole("button", { name: "作成する" }).click();
   await expect(page).toHaveURL(/\/tables\/t_/);
 
-  // 2. /卓譜 つなぐ（署名つき）→ 返事を書き換える先に出るリンクを取る
+  // 2. /connect（署名つき）→ 返事を書き換える先に出るリンクを取る
   discord.reset();
-  const link = await sendInteraction(baseURL!, slashCommand("つなぐ"));
+  const link = await sendInteraction(baseURL!, slashCommand("connect"));
   expect(link.status).toBe(200);
   expect(link.body.type).toBe(5); // 遅らせた返事
   await expect

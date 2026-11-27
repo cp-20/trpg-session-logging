@@ -5,7 +5,7 @@
  * - `discordLinks/{discordUserId}`: Discord の利用者 → 卓譜の uid
  * - `userDiscord/{uid}`: 卓譜の uid → Discord の利用者（設定に出す名前）
  * - `discordOAuthStates/{state}`: Discord とつなぐ途中の一回きりの合言葉（10 分）
- * - `discordLinkCodes/{code}`: `/卓譜 つなぐ` が出す、チャンネルと卓を結ぶ一回きりのコード（10 分）
+ * - `discordLinkCodes/{code}`: `/connect` が出す、チャンネルと卓を結ぶ一回きりのコード（10 分）
  * - `tableDiscord/{tableId}`: 卓とつないだチャンネル
  * - `discordEvents/{eventId}`: 予定・日程調整ごとに Discord へ出したメッセージとイベント
  * - `discordReminders/{key}`: 前日のお知らせを送ったかの印（何度調べても・サーバーが複数でも 1 回だけ。src/lib/discord/scheduler.ts）

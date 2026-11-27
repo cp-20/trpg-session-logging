@@ -32,7 +32,7 @@ export const BOT_PERMISSIONS = {
   CREATE_EVENTS: 1n << 44n,
 } as const;
 
-/** `/卓譜 つなぐ` を使える人の権限（チャンネルの管理） */
+/** `/connect` を使える人の権限（チャンネルの管理） */
 export const MANAGE_CHANNELS = 1n << 4n;
 
 export function botPermissionBits(): bigint {

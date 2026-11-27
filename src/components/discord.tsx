@@ -3,7 +3,7 @@
  *
  * - DiscordAccountRow: 設定の「Discord」の行（つなぐ・外す）
  * - TableDiscordPanel: 卓の画面のメンバー欄の下（つないだチャンネル・ボットの追加）
- * - DiscordChannelLink: `/卓譜 つなぐ` が出したリンク（/tables/discord?code=…）で卓を選ぶ
+ * - DiscordChannelLink: `/connect` が出したリンク（/tables/discord?code=…）で卓を選ぶ
  * - DiscordSync: 卓譜で日程調整・予定を変えたら、つないだチャンネルに映す（画面には何も出さない）
  * - useTableDiscord: 記録の完了で「Discord に投稿」を出すか
  */
@@ -182,7 +182,7 @@ export function TableDiscordPanel({ table }: { table: Table }) {
       ) : (
         <>
           <p className="text-sm text-ink2">
-            チャンネルで /卓譜 つなぐ を送ると、日程調整と予定がそこにも届きます。
+            チャンネルで /connect を送ると、日程調整と予定がそこにも届きます。
           </p>
           <a className="btn btn-sm mt-2" href={status.installUrl} target="_blank" rel="noreferrer">
             <IconDiscord width={16} height={16} aria-hidden /> ボットを追加
@@ -272,7 +272,7 @@ export function DiscordChannelLink() {
         {head}
         <div className="surface">
           <EmptyState kind="permission" title="リンクの期限が切れています">
-            Discord でもう一度 /卓譜 つなぐ を送ってください。
+            Discord でもう一度 /connect を送ってください。
           </EmptyState>
         </div>
       </div>

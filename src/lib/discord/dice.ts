@@ -3,7 +3,7 @@
  * 卓とつないでいないチャンネルでも使える（ダイスは卓譜の記録とは別）。
  */
 import { choiceLine, cryptoRandomInt, DiceError, rollCommand, splitChoices, type Render } from "../dice";
-import { CHOICE_COMMAND, DICE_OPTION } from "./commands";
+import { CMD, DICE_OPTION } from "./commands";
 import type { DiscordContext } from "./context";
 import { EPHEMERAL, notice, plain, type DiscordMessage } from "./messages";
 
@@ -43,7 +43,7 @@ export function diceMessage(ctx: DiscordContext, command: string, options: Optio
   try {
     let lines: string[];
     let comment = "";
-    if (command === CHOICE_COMMAND) {
+    if (command === CMD.CHOICE) {
       const count = get(DICE_OPTION.COUNT);
       const items = splitChoices(String(get(DICE_OPTION.ITEMS) ?? ""));
       lines = [choiceLine(items, typeof count === "number" ? count : 1, rnd, DISCORD_RENDER).text];

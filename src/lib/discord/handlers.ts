@@ -216,7 +216,7 @@ export function table(req: Request, deps: HandlerDeps): Promise<Response> {
       case "preview": {
         const preview = await previewChannelLink(ctx, body.code);
         if (!preview)
-          return fail(410, "リンクの期限が切れています。Discord でもう一度 /卓譜 つなぐ を送ってください。");
+          return fail(410, "リンクの期限が切れています。Discord でもう一度 /connect を送ってください。");
         return json({ ok: true, ...preview });
       }
       case "link": {

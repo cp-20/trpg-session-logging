@@ -143,12 +143,13 @@ const GUILD_FIELDS = {
   app_permissions: APP_PERMISSIONS,
 };
 
-export function slashCommand(sub: string, options: unknown[] = []): Record<string, unknown> {
+/** チャンネルの管理の権限がある人が送るコマンド（/connect など） */
+export function slashCommand(name: string, options: unknown[] = []): Record<string, unknown> {
   return {
     type: 2,
     ...GUILD_FIELDS,
     member: { user: FAKE_DISCORD_USER, permissions: MEMBER_PERMISSIONS },
-    data: { name: "卓譜", options: [{ type: 1, name: sub, options }] },
+    data: { name, options },
   };
 }
 

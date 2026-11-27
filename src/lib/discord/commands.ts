@@ -1,64 +1,59 @@
 /**
  * Discord に登録するスラッシュコマンド（scripts/discord.ts register が送る）。
- * scripts から node で直に読むので、ほかのモジュールを読み込まない
+ * scripts から node で直に読むので、ほかのモジュールを読み込まない。
+ * 名前は英字で、何をするかを表す（親の「/卓譜」の下にまとめると、何ができるのか名前から分からない）。
+ * 打つときに日本語入力へ切り替えずに済む。説明と項目名は日本語
  */
-export const COMMAND_NAME = "卓譜";
-export const SUB = { LINK: "つなぐ", UNLINK: "はずす", POLLS: "日程", CHARACTERS: "キャラ" } as const;
+export const CMD = {
+  LINK: "connect",
+  UNLINK: "disconnect",
+  POLLS: "schedule",
+  CHARACTERS: "characters",
+  ROLL: "roll",
+  CHOICE: "choice",
+} as const;
 export const VOICE_OPTION = "ボイス";
 export const SHOW_OPTION = "みんなに見せる";
-/** ダイスは打つ回数が多いので、日本語入力に切り替えずに打てる名前にする（BCDice の書き方に合わせる） */
-export const ROLL_COMMAND = "roll";
-export const CHOICE_COMMAND = "choice";
 export const DICE_OPTION = { EXPR: "式", ITEMS: "候補", COUNT: "個数", SECRET: "自分だけ" } as const;
 
-const SUBCOMMAND = 1;
 const BOOLEAN = 5;
 const INTEGER = 4;
 const CHANNEL = 7;
 const STRING = 3;
 const GUILD_VOICE = 2;
 
+/** サーバーに入れたときだけ（DM では使わない） */
+const IN_GUILD = { type: 1, contexts: [0], integration_types: [0] } as const;
+
 export const COMMANDS = [
   {
-    name: COMMAND_NAME,
-    type: 1,
-    description: "卓譜の日程調整・予定・キャラクター",
-    // サーバーに入れたときだけ（DM では使わない）
-    contexts: [0],
-    integration_types: [0],
+    ...IN_GUILD,
+    name: CMD.LINK,
+    description: "このチャンネルを卓譜の卓とつなぎます（チャンネルの管理の権限が要ります）",
     options: [
       {
-        type: SUBCOMMAND,
-        name: SUB.LINK,
-        description: "このチャンネルを卓譜の卓とつなぎます（チャンネルの管理の権限が要ります）",
-        options: [
-          {
-            type: CHANNEL,
-            name: VOICE_OPTION,
-            description: "予定を Discord のイベントにするときのボイスチャンネル",
-            channel_types: [GUILD_VOICE],
-            required: false,
-          },
-        ],
-      },
-      { type: SUBCOMMAND, name: SUB.UNLINK, description: "このチャンネルと卓のつながりを外します" },
-      { type: SUBCOMMAND, name: SUB.POLLS, description: "この卓の回答を受け付けている日程調整" },
-      {
-        type: SUBCOMMAND,
-        name: SUB.CHARACTERS,
-        description: "自分が公開しているキャラクター",
-        options: [
-          { type: BOOLEAN, name: SHOW_OPTION, description: "チャンネルのみんなに見せます", required: false },
-        ],
+        type: CHANNEL,
+        name: VOICE_OPTION,
+        description: "予定を Discord のイベントにするときのボイスチャンネル",
+        channel_types: [GUILD_VOICE],
+        required: false,
       },
     ],
   },
+  { ...IN_GUILD, name: CMD.UNLINK, description: "このチャンネルと卓譜の卓のつながりを外します" },
+  { ...IN_GUILD, name: CMD.POLLS, description: "この卓の、回答を受け付けている日程調整" },
   {
-    name: ROLL_COMMAND,
-    type: 1,
+    ...IN_GUILD,
+    name: CMD.CHARACTERS,
+    description: "卓譜で自分が公開しているキャラクター",
+    options: [
+      { type: BOOLEAN, name: SHOW_OPTION, description: "チャンネルのみんなに見せます", required: false },
+    ],
+  },
+  {
+    ...IN_GUILD,
+    name: CMD.ROLL,
     description: "ダイスを振ります（2d6+3、1d100<=60 目星、4d6kh3、x3 2d6、choice[A,B,C]）",
-    contexts: [0],
-    integration_types: [0],
     options: [
       {
         type: STRING,
@@ -71,11 +66,9 @@ export const COMMANDS = [
     ],
   },
   {
-    name: CHOICE_COMMAND,
-    type: 1,
+    ...IN_GUILD,
+    name: CMD.CHOICE,
     description: "候補から選びます",
-    contexts: [0],
-    integration_types: [0],
     options: [
       {
         type: STRING,

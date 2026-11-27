@@ -44,7 +44,7 @@ import type { Log, State, Table, TableEvent } from "../types";
 import { EventDetailModal, EventRow, PollDetailModal } from "./Calendar";
 import { TableDiscordPanel } from "../components/discord";
 
-/** `/卓譜 つなぐ` のリンク（/tables/discord?code=…）で、Discord のチャンネルと卓をつなぐ */
+/** `/connect` のリンク（/tables/discord?code=…）で、Discord のチャンネルと卓をつなぐ */
 export { DiscordChannelLink as TableDiscordLink } from "../components/discord";
 import { SessionRow } from "./Sessions";
 import { sessionTitle } from "../lib/session-scenario";

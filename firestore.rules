@@ -383,7 +383,7 @@ service cloud.firestore {
 
     match /sharedCharacters/{characterId} {
       allow get: if true;
-      // Discord 連携のボット: 本人の公開中のキャラクターを並べる（`/卓譜 キャラクター`。問い合わせに enabled == true が要る）
+      // Discord 連携のボット: 本人の公開中のキャラクターを並べる（`/characters`。問い合わせに enabled == true が要る）
       allow list: if isBot() && resource.data.enabled == true;
       allow delete: if false;
       allow create, update: if signedIn()

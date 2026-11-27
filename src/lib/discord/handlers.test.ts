@@ -47,7 +47,7 @@ describe("POST /api/discord/interactions", () => {
       guild_id: "g",
       channel_id: "c",
       member: { user: { id: "d" } },
-      data: { name: "卓譜", options: [{ name: "日程", type: 1 }] },
+      data: { name: "schedule" },
     });
     const { d, after } = deps(t);
     const res = await interactions(

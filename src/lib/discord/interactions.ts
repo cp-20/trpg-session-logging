@@ -4,7 +4,7 @@
  * 続き（work）を返事のあとで行い、最初の返事を書き換える。
  */
 import { botInstallUrl, hasPermissions, MANAGE_CHANNELS, POST_PERMISSIONS } from "./config";
-import { CHOICE_COMMAND, COMMAND_NAME, ROLL_COMMAND, SHOW_OPTION, SUB, VOICE_OPTION } from "./commands";
+import { CMD, SHOW_OPTION, VOICE_OPTION } from "./commands";
 import type { DiscordContext } from "./context";
 import { diceMessage } from "./dice";
 import { channelLinkUrl, createChannelLinkCode } from "./links";
@@ -113,42 +113,55 @@ async function finish(
   await ctx.rest.editOriginal(i.token, edit);
 }
 
-function subcommand(i: Interaction): { name: string; options: CommandOption[] } | null {
-  const sub = i.data?.options?.find((o) => o.type === 1);
-  return sub ? { name: sub.name, options: sub.options ?? [] } : null;
-}
-
 function caller(i: Interaction): DiscordUser | null {
   return i.member?.user ?? i.user ?? null;
 }
 
-export function handleInteraction(ctx: DiscordContext, i: Interaction): InteractionOutcome {
+/**
+ * 以前の「/卓譜 つなぐ」などを、今の名前のコマンドとして読む。
+ * 登録を変えたあとも、Discord の画面が古い一覧を持っている間は古い形で届くため
+ */
+const LEGACY_GROUP = "卓譜";
+const LEGACY_SUB: Record<string, string> = {
+  つなぐ: CMD.LINK,
+  はずす: CMD.UNLINK,
+  日程: CMD.POLLS,
+  キャラ: CMD.CHARACTERS,
+};
+
+function unwrapLegacy(i: Interaction): Interaction {
+  if (i.type !== InteractionType.COMMAND || i.data?.name !== LEGACY_GROUP) return i;
+  const sub = i.data.options?.find((o) => o.type === 1);
+  const name = sub ? LEGACY_SUB[sub.name] : undefined;
+  return name ? { ...i, data: { ...i.data, name, options: sub?.options ?? [] } } : i;
+}
+
+export function handleInteraction(ctx: DiscordContext, interaction: Interaction): InteractionOutcome {
+  const i = unwrapLegacy(interaction);
   if (i.type === InteractionType.PING) return { body: { type: ResponseType.PONG } };
-  if (i.type === InteractionType.COMMAND && i.data?.name === COMMAND_NAME) return handleCommand(ctx, i);
-  if (
-    i.type === InteractionType.COMMAND &&
-    (i.data?.name === ROLL_COMMAND || i.data?.name === CHOICE_COMMAND)
-  )
+  if (i.type === InteractionType.COMMAND && (i.data?.name === CMD.ROLL || i.data?.name === CMD.CHOICE))
     return reply(diceMessage(ctx, i.data.name, i.data.options ?? []));
+  if (i.type === InteractionType.COMMAND) return handleCommand(ctx, i);
   if (i.type === InteractionType.COMPONENT) return handleComponent(ctx, i);
   return reply(notice("このコマンドには対応していません。"));
 }
 
 function handleCommand(ctx: DiscordContext, i: Interaction): InteractionOutcome {
-  const sub = subcommand(i);
+  const name = i.data?.name;
+  const options = i.data?.options ?? [];
   const user = caller(i);
-  if (!sub || !user) return reply(notice("このコマンドには対応していません。"));
+  if (!name || !user) return reply(notice("このコマンドには対応していません。"));
   if (!i.guild_id || !i.channel_id) return reply(notice("サーバーのチャンネルで使ってください。"));
   const guildId = i.guild_id;
   const channelId = i.channel_id;
 
-  switch (sub.name) {
-    case SUB.LINK: {
+  switch (name) {
+    case CMD.LINK: {
       if (!hasPermissions(i.member?.permissions, MANAGE_CHANNELS))
         return reply(notice("チャンネルの管理の権限がある人だけが、卓とつなげます。"));
       if (!hasPermissions(i.app_permissions, POST_PERMISSIONS))
         return reply(installNotice(botInstallUrl(ctx.config.applicationId)));
-      const voiceId = sub.options.find((o) => o.name === VOICE_OPTION)?.value;
+      const voiceId = options.find((o) => o.name === VOICE_OPTION)?.value;
       const voice = typeof voiceId === "string" ? i.data?.resolved?.channels?.[voiceId] : undefined;
       return deferEphemeral(ctx, i, async () => {
         const guildName = await ctx.rest.getGuildName(guildId);
@@ -163,7 +176,7 @@ function handleCommand(ctx: DiscordContext, i: Interaction): InteractionOutcome 
         return channelLinkNotice(channelLinkUrl(ctx.config.publicUrl, code));
       });
     }
-    case SUB.UNLINK: {
+    case CMD.UNLINK: {
       if (!hasPermissions(i.member?.permissions, MANAGE_CHANNELS))
         return reply(notice("チャンネルの管理の権限がある人だけが、つながりを外せます。"));
       return deferEphemeral(ctx, i, async () => {
@@ -173,15 +186,15 @@ function handleCommand(ctx: DiscordContext, i: Interaction): InteractionOutcome 
         return notice(`このチャンネルと「${plain(link.tableName)}」のつながりを外しました。`);
       });
     }
-    case SUB.POLLS:
+    case CMD.POLLS:
       return deferEphemeral(ctx, i, async () => {
         const link = await ctx.store.findTableLinkByChannel(channelId);
         if (!link) return notice("このチャンネルは卓とつながっていません。");
         const polls = await ctx.store.listOpenPolls(link.tableId);
         return openPollsMessage(polls, link, ctx.config.publicUrl);
       });
-    case SUB.CHARACTERS: {
-      const show = sub.options.find((o) => o.name === SHOW_OPTION)?.value === true;
+    case CMD.CHARACTERS: {
+      const show = options.find((o) => o.name === SHOW_OPTION)?.value === true;
       const run = async () => {
         const uid = await ctx.store.getUidForDiscordUser(user.id);
         if (!uid) return linkAccountNotice(ctx.config.publicUrl);

@@ -17,7 +17,7 @@ function command(sub: string, over: Partial<Interaction> = {}, options: unknown[
     channel: { id: "ch1", name: "卓" },
     member: { user: { id: "d_owner" }, permissions: MANAGE },
     app_permissions: BOT_OK,
-    data: { name: "卓譜", options: [{ name: sub, type: 1, options: options as never }] },
+    data: { name: sub, options: options as never },
     ...over,
   };
 }
@@ -55,31 +55,31 @@ describe("handleInteraction", () => {
     });
   });
 
-  it("/卓譜 つなぐ: チャンネルの管理の権限がなければ断る", () => {
+  it("/connect: チャンネルの管理の権限がなければ断る", () => {
     const t = makeCtx();
     const out = handleInteraction(
       t.ctx,
-      command("つなぐ", { member: { user: { id: "d" }, permissions: "0" } }),
+      command("connect", { member: { user: { id: "d" }, permissions: "0" } }),
     );
     expect(out.work).toBeUndefined();
     expect((out.body as { data: DiscordMessage }).data.flags).toBe(EPHEMERAL);
   });
 
-  it("/卓譜 つなぐ: ボットが投稿できないチャンネルではボットの追加を案内する", () => {
+  it("/connect: ボットが投稿できないチャンネルではボットの追加を案内する", () => {
     const t = makeCtx();
-    const out = handleInteraction(t.ctx, command("つなぐ", { app_permissions: "0" }));
+    const out = handleInteraction(t.ctx, command("connect", { app_permissions: "0" }));
     const data = (out.body as { data: DiscordMessage }).data;
     expect(data.components?.[0]?.components[0]?.url).toContain("scope=bot+applications.commands");
   });
 
-  it("/卓譜 つなぐ: 自分だけに見える返事を遅らせ、10 分のコードを作ってリンクを返す", async () => {
+  it("/connect: 自分だけに見える返事を遅らせ、10 分のコードを作ってリンクを返す", async () => {
     const t = makeCtx();
     const { body, edited } = await run(
       t,
-      command("つなぐ", {
+      command("connect", {
         data: {
-          name: "卓譜",
-          options: [{ name: "つなぐ", type: 1, options: [{ name: "ボイス", type: 7, value: "vc1" }] }],
+          name: "connect",
+          options: [{ name: "ボイス", type: 7, value: "vc1" }],
           resolved: { channels: { vc1: { id: "vc1", name: "雑談" } } },
         },
       }),
@@ -99,44 +99,53 @@ describe("handleInteraction", () => {
     );
   });
 
+  it("以前の「/卓譜 日程」も今の /schedule として受ける", async () => {
+    const t = makeCtx();
+    const { edited } = await run(
+      t,
+      command("x", { data: { name: "卓譜", options: [{ name: "日程", type: 1, options: [] }] } }),
+    );
+    expect(edited?.content).toContain("つながっていません");
+  });
+
   it("サーバーの外（DM）では使えない", () => {
     const t = makeCtx();
-    const out = handleInteraction(t.ctx, command("日程", { guild_id: undefined }));
+    const out = handleInteraction(t.ctx, command("schedule", { guild_id: undefined }));
     expect(out.work).toBeUndefined();
   });
 
-  it("/卓譜 日程: つないだ卓の、回答を受け付けている日程調整だけを並べる", async () => {
+  it("/schedule: つないだ卓の、回答を受け付けている日程調整だけを並べる", async () => {
     const t = makeCtx();
     linkTable(t.store);
     t.store.data.polls.set("ev1", samplePoll());
     t.store.data.polls.set("ev2", samplePoll({ id: "ev2", status: "confirmed", confirmedCandidateId: "c1" }));
     t.store.data.polls.set("ev3", samplePoll({ id: "ev3", tableId: "t9" }));
-    const { edited } = await run(t, command("日程"));
+    const { edited } = await run(t, command("schedule"));
     expect(edited?.components).toHaveLength(1);
     expect(edited?.components?.[0]?.components[0]?.custom_id).toBe("po:ev1:0");
   });
 
-  it("/卓譜 日程: つないでいないチャンネルではそう伝える", async () => {
+  it("/schedule: つないでいないチャンネルではそう伝える", async () => {
     const t = makeCtx();
-    const { edited } = await run(t, command("日程"));
+    const { edited } = await run(t, command("schedule"));
     expect(edited?.content).toContain("つながっていません");
   });
 
-  it("/卓譜 はずす: チャンネルと卓のつながりを外す", async () => {
+  it("/disconnect: チャンネルと卓のつながりを外す", async () => {
     const t = makeCtx();
     linkTable(t.store);
-    await run(t, command("はずす"));
+    await run(t, command("disconnect"));
     expect(t.store.data.tables.size).toBe(0);
   });
 
-  it("/卓譜 キャラ: 公開しているキャラクターだけを、既定では自分だけに見せる", async () => {
+  it("/characters: 公開しているキャラクターだけを、既定では自分だけに見せる", async () => {
     const t = makeCtx();
     await t.store.linkAccount("u_owner", { discordUserId: "d_owner", username: "u_owner", linkedAt: "" });
     t.store.data.characters.set("u_owner", [{ id: "c_1", name: "ミカ", systemId: "coc7" }]);
-    const { body, edited } = await run(t, command("キャラ"));
+    const { body, edited } = await run(t, command("characters"));
     expect(body.data?.flags).toBe(EPHEMERAL);
     expect(edited?.embeds?.[0]?.description).toContain("https://takufu.test/share/c/c_1");
-    const shown = await run(t, command("キャラ", {}, [{ name: "みんなに見せる", type: 5, value: true }]));
+    const shown = await run(t, command("characters", {}, [{ name: "みんなに見せる", type: 5, value: true }]));
     expect(shown.body).toEqual({ type: ResponseType.DEFERRED_MESSAGE });
   });
 
