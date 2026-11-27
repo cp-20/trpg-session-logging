@@ -108,8 +108,8 @@ p { margin: 36px 0 0; font-size: 34px; font-weight: 700; color: ${POSTER.tint}; 
 </style></head><body><div class="og">
 <svg class="watermark" viewBox="0 0 32 32" aria-hidden="true"><path d="${MARK_BODY}" fill="none" stroke="${POSTER.paper}" stroke-opacity="0.16" stroke-width="0.5"/>${MARK_PIPS.map((p, i) => `<circle cx="${p.cx}" cy="${p.cy}" r="${MARK_PIP_R}" ${i === 1 ? `fill="${POSTER.yellow}"` : `fill="${POSTER.paper}" fill-opacity="0.16"`}/>`).join("")}</svg>
 <div class="brand">${ogMark}<span>卓譜</span></div>
-<h1>卓のログを、<br>消えない形に。</h1>
-<p>CCFOLIA のログを、スマホで読める 1 ページに</p>
+<h1>卓が終わったら、<br>ぜんぶここ。</h1>
+<p>ログも録画も、キャラも感想も。TRPG のセッション記録</p>
 </div></body></html>`;
 const ogFile = path.join(ROOT, "node_modules/.cache/takufu-og.html");
 mkdirSync(path.dirname(ogFile), { recursive: true });
@@ -120,8 +120,53 @@ await page.evaluate(() => document.fonts.ready);
 writeFileSync(out("src/app/opengraph-image.png"), await page.screenshot({ type: "png" }));
 writeFileSync(
   out("src/app/opengraph-image.alt.txt"),
-  "卓譜「卓のログを、消えない形に。」CCFOLIA のログを、スマホで読める 1 ページに\n",
+  "卓譜「卓が終わったら、ぜんぶここ。」ログも録画も、キャラも感想も。TRPG のセッション記録\n",
 );
+
+// --- 外部サービス（Discord のアプリ・ボット、X のアプリ）の表示用。docs/DEPLOYMENT.md「外部サービスの見た目」 ---
+// 横長の帯は OG 画像と同じ地・書体で、大きさだけを変える。アイコンは角丸なし（相手が円や角丸で切る）
+writeFileSync(out("public/brand/icon-1024.png"), await rasterSvg(page, markSvg({ radius: 0 }), 1024, false));
+async function banner(
+  file: string,
+  width: number,
+  height: number,
+  scale: number,
+  opts: { withLead: boolean },
+): Promise<void> {
+  // Discord の帯: 左下にアイコンが重なり、アイコンがブランドを示すので、ロゴと下の 1 行を外し、見出しを右寄りの中央に置く
+  const base = opts.withLead
+    ? ogHtml
+    : ogHtml
+        .replace(/<p>[^<]*<\/p>/, "")
+        .replace(/<div class="brand">[\s\S]*?<\/div>/, "")
+        .replace("h1 { margin: auto 0 0;", "h1 { margin: auto 0 auto 140px;");
+  const html = base
+    .replace(
+      "width: 1200px; height: 630px; padding: 72px 88px;",
+      `width: ${width}px; height: ${height}px; padding: ${Math.round(56 * scale)}px ${Math.round(72 * scale)}px;`,
+    )
+    .replace("font-size: 104px;", `font-size: ${Math.round(104 * scale)}px;`)
+    .replace("font-size: 44px;", `font-size: ${Math.round(44 * scale)}px;`)
+    .replace(
+      "margin: 36px 0 0; font-size: 34px;",
+      `margin: ${Math.round(24 * scale)}px 0 0; font-size: ${Math.round(34 * scale)}px;`,
+    )
+    .replace('width="64" height="64"', `width="${Math.round(64 * scale)}" height="${Math.round(64 * scale)}"`)
+    .replace(
+      "right: -150px; top: -40px; width: 640px; height: 640px;",
+      `right: ${Math.round(-150 * scale)}px; top: ${Math.round(-40 * scale)}px; width: ${Math.round(640 * scale)}px; height: ${Math.round(640 * scale)}px;`,
+    );
+  const f = path.join(ROOT, "node_modules/.cache/takufu-banner.html");
+  writeFileSync(f, html);
+  await page.setViewportSize({ width, height });
+  await page.goto(pathToFileURL(f).href);
+  await page.evaluate(() => document.fonts.ready);
+  writeFileSync(out(file), await page.screenshot({ type: "png" }));
+}
+// Discord のボットのバナー（プロフィールの上の帯。680×240）と、アプリの表紙（16:9）
+// Discord のプロフィールでは帯の左下にアイコンが重なるので、下の 1 行を出さない
+await banner("public/brand/discord-banner.png", 680, 240, 0.42, { withLead: false });
+await banner("public/brand/cover-1920x1080.png", 1920, 1080, 1.6, { withLead: true });
 
 await browser.close();
 console.log(`Generated brand assets (tile ${BRAND_COLORS.tile})`);

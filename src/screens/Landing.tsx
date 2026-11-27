@@ -309,13 +309,13 @@ export default function Landing() {
         <div className="pst-hero-grid mx-auto max-w-6xl px-4 sm:px-6">
           <div className="pst-hero-copy">
             <h1 id="lp-title" className="pst-display pst-h1">
-              <span className="whitespace-nowrap">卓のログを、</span>
+              <span className="whitespace-nowrap">卓が終わったら、</span>
               <br />
-              <span className="whitespace-nowrap">消えない形に。</span>
+              <span className="whitespace-nowrap">ぜんぶここ。</span>
             </h1>
             <p className="pst-lead">
-              卓が終わったら、CCFOLIA のログを入れるだけです。録画や感想、継続探索者の歩みまで 1
-              ページにまとまり、同卓者にはリンクひとつで、未通過の人には伏せたまま渡せます。
+              CCFOLIA
+              のログを入れるだけです。ダイスも秘匿タブも、録画や感想、継続探索者の歩みまで集まります。同卓者にはリンクひとつで、未通過の人には伏せたまま渡せます。
             </p>
             <StartLinks />
             <p className="pst-assure">

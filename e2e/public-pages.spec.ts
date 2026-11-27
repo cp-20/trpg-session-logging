@@ -32,7 +32,7 @@ test("LP はサーバーで描画し、絞った書体を先に読み、Web フ�
 }) => {
   const html = await (await request.get("/")).text();
   // JS を待たずに本文が出る
-  expect(html).toContain("卓のログを");
+  expect(html).toContain("卓が終わったら");
   // 書体の指定も HTML に入っている（CSS を待たずに書体を読み始める）。先読みの link は本番ビルドで head に出る
   expect(html).toMatch(/src:url\(\/fonts\/lp-sans\.[0-9a-f]{8}\.woff2\)/);
   expect(html).toMatch(/src:url\(\/fonts\/lp-display\.[0-9a-f]{8}\.woff2\)/);
