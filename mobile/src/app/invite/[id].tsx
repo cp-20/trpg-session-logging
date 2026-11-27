@@ -3,6 +3,7 @@ import { Pressable, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SYSTEMS } from "@shared/data/systems";
 import { acceptSharedInvite, getSharedInvite, type SharedInvite } from "@shared/lib/cloud-state";
+import { mergeAcceptedShare } from "@shared/lib/accept-share";
 import { fmtDates, sessionDays } from "@shared/lib/time";
 import type { Msg } from "@shared/types";
 import { ScreenShell } from "../../components/ScreenShell";
@@ -37,7 +38,7 @@ export default function ClaimInviteScreen() {
 
 function RemoteClaimInvite({ token }: { token: string }) {
   const { tokens } = useTheme();
-  const { update } = useMobileStore();
+  const { state, update } = useMobileStore();
   const router = useRouter();
   const [invite, setInvite] = useState<SharedInvite | null>(null);
   const [loading, setLoading] = useState(true);
@@ -108,22 +109,12 @@ function RemoteClaimInvite({ token }: { token: string }) {
             setBusy(true);
             setError(null);
             try {
-              const shared = await acceptSharedInvite(token);
-              update((s) => {
-                const me = s.users[s.me];
-                Object.assign(s.users, shared.users);
-                if (me) s.users[s.me] = me;
-                s.logs[shared.log.id] = {
-                  ...shared.log,
-                  players: {
-                    ...shared.log.players,
-                    [s.me]: { linked: true, hidden: s.prefs.hideSelfOnShare, characterIds: [] },
-                  },
-                };
-                if (shared.scenario) s.scenarios[shared.scenario.id] = shared.scenario;
-              });
+              const { share, slug, ownerId } = await acceptSharedInvite(token);
+              // 自分の記録や、知っている人・シナリオは上書きしない。入れられなければ何も変えずに知らせる（Web と同じ）
+              mergeAcceptedShare(structuredClone(state), share, { slug, ownerId });
+              update((s) => mergeAcceptedShare(s, share, { slug, ownerId }));
               hapticSuccess();
-              router.replace(`/sessions/${shared.log.id}` as never);
+              router.replace(`/sessions/${share.log.id}` as never);
             } catch (cause) {
               setError(mobileAuthErrorMessage(cause));
             } finally {
