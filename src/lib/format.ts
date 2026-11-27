@@ -87,7 +87,13 @@ export function fmtDates(dates: string[]): string {
 }
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-export const uid = (p = "") => p + Math.random().toString(36).slice(2, 8);
+const ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
+/**
+ * 記録の ID。キャラクターの「リンクを知っている人に公開」の URL などにそのまま出るので、
+ * 推測されないよう暗号の乱数で 16 文字（80 ビット）にする。英小文字と数字だけ
+ */
+export const uid = (p = "") =>
+  p + Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => ID_ALPHABET[b & 31]).join("");
 
 export function download(name: string, text: string, mime = "application/json") {
   const a = document.createElement("a");

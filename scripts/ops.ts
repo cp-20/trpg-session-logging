@@ -178,12 +178,13 @@ async function cmdDeploy(args: string[]): Promise<void> {
       }
     }
   }
-  const files = execFileSync("git", ["ls-files", "-co", "--exclude-standard"], {
+  // Git が追跡しているファイルだけを送る（作業中の資料や手元の秘密を送らない）。.env* はどの階層でも送らない
+  const files = execFileSync("git", ["ls-files", "-c"], {
     cwd: ROOT,
     encoding: "utf8",
   })
     .split("\n")
-    .filter((f) => f && !f.startsWith(".env") && !f.startsWith("mobile/") && existsSync(join(ROOT, f)));
+    .filter((f) => f && !/(^|\/)\.env/.test(f) && !f.startsWith("mobile/") && existsSync(join(ROOT, f)));
   const staging = mkdtempSync(join(tmpdir(), "takufu-deploy-"));
   try {
     for (const f of files) cpSync(join(ROOT, f), join(staging, f), { recursive: true });
