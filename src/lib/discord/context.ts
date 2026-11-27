@@ -1,3 +1,4 @@
+import type { RandomInt } from "../dice";
 import type { DiscordConfig } from "./config";
 import type { DiscordRest, FetchFn } from "./rest";
 import type { DiscordStore } from "./types";
@@ -12,6 +13,8 @@ export interface DiscordContext {
   fetchFn: FetchFn;
   /** 推測できない文字列（OAuth の合言葉・チャンネルを結ぶコード） */
   randomToken: () => string;
+  /** ダイスの乱数（既定は crypto。テストでは出目を決める） */
+  randomInt?: RandomInt;
   log?: (message: string, error?: unknown) => void;
   /** 確定した予定を書いた・消したあと（前日のお知らせの時計を合わせ直す。scheduler.ts） */
   onEventsChanged?: () => void;

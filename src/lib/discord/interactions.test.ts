@@ -217,3 +217,87 @@ describe("handleInteraction", () => {
     });
   });
 });
+
+describe("/roll・/choice", () => {
+  function slash(name: string, options: { name: string; type: number; value: unknown }[]): Interaction {
+    return { ...command("x"), data: { name, options: options as never } };
+  }
+  /** 出目・選ぶ位置を順に返す（値 - 1 を返す） */
+  function fixed(t: ReturnType<typeof makeCtx>, ...values: number[]) {
+    t.ctx.randomInt = () => values.shift()! - 1;
+  }
+
+  it("/roll: 遅らせずにチャンネルへ出し、言葉を先に添える。メンションは効かせない", () => {
+    const t = makeCtx();
+    fixed(t, 42);
+    const out = handleInteraction(
+      t.ctx,
+      slash("roll", [{ name: "式", type: 3, value: "1d100<=60 @everyone 目星" }]),
+    );
+    expect(out.work).toBeUndefined();
+    expect(out.body).toEqual({
+      type: ResponseType.MESSAGE,
+      data: {
+        content: "@​everyone 目星\n(1D100<=60) ＞ 42 ＞ **成功**",
+        allowed_mentions: { parse: [] },
+      },
+    });
+  });
+
+  it("/roll: 捨てた目は打ち消し線、掛け算の「*」は書式にしない", () => {
+    const t = makeCtx();
+    fixed(t, 1, 5);
+    const out = handleInteraction(t.ctx, slash("roll", [{ name: "式", type: 3, value: "2d6kh1*2" }]));
+    expect((out.body as { data: DiscordMessage }).data.content).toBe(
+      "(2D6KH1\\*2) ＞ 5[~~1~~,5]\\*2 ＞ **10**",
+    );
+  });
+
+  it("/roll 自分だけ: 結果を自分だけに見せる", () => {
+    const t = makeCtx();
+    fixed(t, 3);
+    const out = handleInteraction(
+      t.ctx,
+      slash("roll", [
+        { name: "式", type: 3, value: "1d6" },
+        { name: "自分だけ", type: 5, value: true },
+      ]),
+    );
+    expect((out.body as { data: DiscordMessage }).data.flags).toBe(EPHEMERAL);
+  });
+
+  it("/roll: 読めない式は、例を添えて自分だけに伝える", () => {
+    const t = makeCtx();
+    const out = handleInteraction(t.ctx, slash("roll", [{ name: "式", type: 3, value: "2d" }]));
+    const data = (out.body as { data: DiscordMessage }).data;
+    expect(data.flags).toBe(EPHEMERAL);
+    expect(data.content).toContain("例: 2d6+3");
+  });
+
+  it("/choice: 候補から個数だけ重ならないよう選び、候補の書式は効かせない", () => {
+    const t = makeCtx();
+    fixed(t, 3, 1);
+    const out = handleInteraction(
+      t.ctx,
+      slash("choice", [
+        { name: "候補", type: 3, value: "**東**, 西, 南" },
+        { name: "個数", type: 4, value: 2 },
+      ]),
+    );
+    expect((out.body as { data: DiscordMessage }).data.content).toBe(
+      "(CHOICE2[\\*\\*東\\*\\*,西,南]) ＞ **南, \\*\\*東\\*\\***",
+    );
+  });
+
+  it("/choice: 個数が候補より多ければ断る", () => {
+    const t = makeCtx();
+    const out = handleInteraction(
+      t.ctx,
+      slash("choice", [
+        { name: "候補", type: 3, value: "A B" },
+        { name: "個数", type: 4, value: 3 },
+      ]),
+    );
+    expect((out.body as { data: DiscordMessage }).data.flags).toBe(EPHEMERAL);
+  });
+});

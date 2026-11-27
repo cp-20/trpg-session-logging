@@ -152,6 +152,16 @@ export function slashCommand(sub: string, options: unknown[] = []): Record<strin
   };
 }
 
+/** /roll・/choice のような、サブコマンドの無いコマンド */
+export function topCommand(name: string, options: unknown[] = []): Record<string, unknown> {
+  return {
+    type: 2,
+    ...GUILD_FIELDS,
+    member: { user: FAKE_DISCORD_USER, permissions: "0" },
+    data: { name, options },
+  };
+}
+
 export function buttonPress(customId: string, ephemeral = false): Record<string, unknown> {
   return {
     type: 3,

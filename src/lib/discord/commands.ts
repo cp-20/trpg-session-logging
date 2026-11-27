@@ -6,10 +6,16 @@ export const COMMAND_NAME = "卓譜";
 export const SUB = { LINK: "つなぐ", UNLINK: "はずす", POLLS: "日程", CHARACTERS: "キャラ" } as const;
 export const VOICE_OPTION = "ボイス";
 export const SHOW_OPTION = "みんなに見せる";
+/** ダイスは打つ回数が多いので、日本語入力に切り替えずに打てる名前にする（BCDice の書き方に合わせる） */
+export const ROLL_COMMAND = "roll";
+export const CHOICE_COMMAND = "choice";
+export const DICE_OPTION = { EXPR: "式", ITEMS: "候補", COUNT: "個数", SECRET: "自分だけ" } as const;
 
 const SUBCOMMAND = 1;
 const BOOLEAN = 5;
+const INTEGER = 4;
 const CHANNEL = 7;
+const STRING = 3;
 const GUILD_VOICE = 2;
 
 export const COMMANDS = [
@@ -45,6 +51,48 @@ export const COMMANDS = [
           { type: BOOLEAN, name: SHOW_OPTION, description: "チャンネルのみんなに見せます", required: false },
         ],
       },
+    ],
+  },
+  {
+    name: ROLL_COMMAND,
+    type: 1,
+    description: "ダイスを振ります（2d6+3、1d100<=60 目星、4d6kh3、x3 2d6、choice[A,B,C]）",
+    contexts: [0],
+    integration_types: [0],
+    options: [
+      {
+        type: STRING,
+        name: DICE_OPTION.EXPR,
+        description: "例: 2d6+3、1d100<=60 目星",
+        required: true,
+        max_length: 200,
+      },
+      { type: BOOLEAN, name: DICE_OPTION.SECRET, description: "結果を自分だけに見せます", required: false },
+    ],
+  },
+  {
+    name: CHOICE_COMMAND,
+    type: 1,
+    description: "候補から選びます",
+    contexts: [0],
+    integration_types: [0],
+    options: [
+      {
+        type: STRING,
+        name: DICE_OPTION.ITEMS,
+        description: "「,」か空白で区切った候補（例: 東 西 南 北）",
+        required: true,
+        max_length: 1000,
+      },
+      {
+        type: INTEGER,
+        name: DICE_OPTION.COUNT,
+        description: "重ならないように選ぶ数（既定は 1）",
+        required: false,
+        min_value: 1,
+        max_value: 100,
+      },
+      { type: BOOLEAN, name: DICE_OPTION.SECRET, description: "結果を自分だけに見せます", required: false },
     ],
   },
 ] as const;

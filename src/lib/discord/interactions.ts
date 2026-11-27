@@ -4,8 +4,9 @@
  * 続き（work）を返事のあとで行い、最初の返事を書き換える。
  */
 import { botInstallUrl, hasPermissions, MANAGE_CHANNELS, POST_PERMISSIONS } from "./config";
-import { COMMAND_NAME, SHOW_OPTION, SUB, VOICE_OPTION } from "./commands";
+import { CHOICE_COMMAND, COMMAND_NAME, ROLL_COMMAND, SHOW_OPTION, SUB, VOICE_OPTION } from "./commands";
 import type { DiscordContext } from "./context";
+import { diceMessage } from "./dice";
 import { channelLinkUrl, createChannelLinkCode } from "./links";
 import {
   channelLinkNotice,
@@ -124,6 +125,11 @@ function caller(i: Interaction): DiscordUser | null {
 export function handleInteraction(ctx: DiscordContext, i: Interaction): InteractionOutcome {
   if (i.type === InteractionType.PING) return { body: { type: ResponseType.PONG } };
   if (i.type === InteractionType.COMMAND && i.data?.name === COMMAND_NAME) return handleCommand(ctx, i);
+  if (
+    i.type === InteractionType.COMMAND &&
+    (i.data?.name === ROLL_COMMAND || i.data?.name === CHOICE_COMMAND)
+  )
+    return reply(diceMessage(ctx, i.data.name, i.data.options ?? []));
   if (i.type === InteractionType.COMPONENT) return handleComponent(ctx, i);
   return reply(notice("このコマンドには対応していません。"));
 }

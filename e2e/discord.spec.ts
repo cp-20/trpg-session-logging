@@ -14,6 +14,7 @@ import {
   sendInteraction,
   slashCommand,
   startFakeDiscord,
+  topCommand,
   type FakeDiscord,
 } from "./support/fake-discord";
 
@@ -199,4 +200,20 @@ test("Discord 連携: つなぐ → 日程調整 → ボタンで回答 → 確�
   expect(posted).toContain("/share/l/");
   expect(posted).toContain("メンバーだけ");
   expect(posted).not.toContain(sessionTitle);
+});
+
+test("Discord のダイス: /roll と /choice は署名を確かめて、その場でチャンネルに返す", async ({ baseURL }) => {
+  const roll = await sendInteraction(
+    baseURL!,
+    topCommand("roll", [{ type: 3, name: "式", value: "2d6+3 回避" }]),
+  );
+  expect(roll.status).toBe(200);
+  expect(roll.body.type).toBe(4);
+  expect(roll.body.data.content).toMatch(/^回避\n\(2D6\+3\) ＞ \d+\[\d,\d\]\+3 ＞ \*\*\d+\*\*$/);
+
+  const choice = await sendInteraction(
+    baseURL!,
+    topCommand("choice", [{ type: 3, name: "候補", value: "東 西" }]),
+  );
+  expect(choice.body.data.content).toMatch(/^\(CHOICE\[東,西\]\) ＞ \*\*(東|西)\*\*$/);
 });
