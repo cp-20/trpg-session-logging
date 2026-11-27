@@ -421,6 +421,98 @@ async function cmdReview(args: string[]): Promise<void> {
   process.exit(issues === 0 ? 0 : 1);
 }
 
+/**
+ * 消し残った切れ端を探して消す（既定は数えるだけ。--apply で消す）。
+ * どこからも指されず 24 時間より古い世代が対象（src/lib/chunk-gc.ts）。取り消した共有（revision が revoked）の本文も消える
+ */
+async function cmdGc(args: string[]): Promise<void> {
+  const { orphanRevisions, workspaceRevisions } = await import("../src/lib/chunk-gc.ts");
+  type Found = import("../src/lib/chunk-gc.ts").FoundRevision;
+  const project = assertProjectId();
+  const headers = gcloudHeaders(project);
+  const base = `https://firestore.googleapis.com/v1/projects/${project}/databases/${FIRESTORE_DB}/documents`;
+  type Doc = { name: string; updateTime?: string; fields?: Record<string, { stringValue?: string }> };
+  const list = async (path: string, extra = ""): Promise<Doc[]> => {
+    const out: Doc[] = [];
+    let token = "";
+    do {
+      const page = await apiJson<{ documents?: Doc[]; nextPageToken?: string }>(
+        "GET",
+        `${base}/${path}?pageSize=300${extra}${token ? `&pageToken=${encodeURIComponent(token)}` : ""}`,
+        headers,
+      );
+      out.push(...(page.documents ?? []));
+      token = page.nextPageToken ?? "";
+    } while (token);
+    return out;
+  };
+  const rel = (name: string) => name.split("/documents/")[1]!;
+  const found: Found[] = [];
+  const referenced = new Map<string, Set<string>>();
+  const collect = async (parent: string) => {
+    for (const r of await list(`${parent}/revisions`, "&showMissing=true&mask.fieldPaths=_")) {
+      const revision = rel(r.name).split("/").pop()!;
+      const chunks = await list(`${parent}/revisions/${revision}/chunks`, "&mask.fieldPaths=_");
+      if (chunks.length === 0) continue;
+      found.push({
+        parent,
+        revision,
+        newestWriteMs: Math.max(...chunks.map((c) => Date.parse(c.updateTime ?? "") || Date.now())),
+        chunkNames: chunks.map((c) => c.name),
+      });
+    }
+  };
+  for (const u of await list("users", "&showMissing=true&mask.fieldPaths=_")) {
+    const parent = rel(u.name);
+    const manifest = await apiJson<{ fields?: Record<string, unknown> }>(
+      "GET",
+      `${base}/${parent}/workspace/manifest`,
+      headers,
+    ).catch(() => null);
+    // REST の値（mapValue/stringValue）を、見出しの parts の形に読み替える
+    const parts = (manifest?.fields?.parts as { mapValue?: { fields?: Record<string, unknown> } } | undefined)
+      ?.mapValue?.fields;
+    const plain = parts
+      ? {
+          parts: Object.fromEntries(
+            Object.entries(parts).map(([k, v]) => [
+              k,
+              {
+                revision: (v as { mapValue?: { fields?: { revision?: { stringValue?: string } } } }).mapValue
+                  ?.fields?.revision?.stringValue,
+              },
+            ]),
+          ),
+        }
+      : null;
+    referenced.set(parent, workspaceRevisions(plain));
+    await collect(parent);
+  }
+  for (const col of ["sharedLogs", "sharedCharacters"]) {
+    for (const d of await list(col, "&showMissing=true&mask.fieldPaths=revision")) {
+      const parent = rel(d.name);
+      const current = d.fields?.revision?.stringValue;
+      referenced.set(parent, new Set(current ? [current] : []));
+      await collect(parent);
+    }
+  }
+  const orphans = orphanRevisions(found, referenced, Date.now());
+  const chunkCount = orphans.reduce((n, o) => n + o.chunkNames.length, 0);
+  console.log(`revisions: ${found.length}, orphaned: ${orphans.length} (${chunkCount} chunks)`);
+  for (const o of orphans) console.log(`  ${o.parent} ${o.revision} (${o.chunkNames.length})`);
+  if (!args.includes("--apply")) {
+    console.log("dry run. Pass --apply to delete them.");
+    return;
+  }
+  const names = orphans.flatMap((o) => o.chunkNames);
+  for (let i = 0; i < names.length; i += 400) {
+    await apiJson("POST", `${base}:commit`, headers, {
+      writes: names.slice(i, i + 400).map((name) => ({ delete: name })),
+    });
+  }
+  console.log(`deleted ${names.length} chunks`);
+}
+
 const [subcmd, ...rest] = process.argv.slice(2);
 switch (subcmd) {
   case "deploy":
@@ -438,6 +530,11 @@ switch (subcmd) {
   case "standalone":
     cmdStandalone();
     break;
+  case "gc":
+    await cmdGc(rest);
+    break;
   default:
-    throw new Error("Usage: node scripts/ops.ts <deploy [--setup]|rules|firebase|review|standalone>");
+    throw new Error(
+      "Usage: node scripts/ops.ts <deploy [--setup]|rules|firebase|review|standalone|gc [--apply]>",
+    );
 }

@@ -34,6 +34,10 @@ Static pages revalidate every 5 minutes (`revalidate` in `src/app/layout.tsx`) a
 
 Firestore `takufu` has point-in-time recovery (7 days, 1-minute granularity) and delete protection. The project is on Blaze with a ¥100/month budget alert (50% / 90% / 100% actual and 100% forecast; e-mails billing admins, does not cap spending). Restore by cloning to a new database: `gcloud firestore databases clone --source-database=projects/takufu-app/databases/takufu --snapshot-time=<RFC3339, whole minute> --destination-database=<new-id>`.
 
+## Storage hygiene
+
+Clients delete a record's or share's old chunks after writing a new revision, but a closed tab can leave them behind, and stopped shares keep their last chunks. `node scripts/ops.ts gc` lists revisions that no manifest points to and that are older than 24 hours (`src/lib/chunk-gc.ts`); `--apply` deletes them. It uses your `gcloud` login. Writes are capped by the rules (chunks `0000`–`0199`, 120k characters each); there is no per-user total quota, so watch the ¥100 budget alert and run `gc` when storage grows.
+
 ## Feedback form
 
 `/feedback` posts to `/api/feedback`, which validates the input (`src/lib/feedback.ts`), drops honeypot submissions, limits each IP to 5 posts per 10 minutes (in memory), and forwards the message to a Discord webhook with all mentions disabled. The webhook URL lives only in the server-side environment variable `DISCORD_FEEDBACK_WEBHOOK_URL` on Deploy Now (never `NEXT_PUBLIC_*`, never in the repository). Without it the form answers 503. Set it with `lolipop env create DISCORD_FEEDBACK_WEBHOOK_URL --value-stdin --sensitive --project <id> < file` (the value then never appears in shell history or listings), then redeploy.
