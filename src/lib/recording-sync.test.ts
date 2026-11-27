@@ -9,8 +9,8 @@ import {
   positionAt,
   readPlayerMessage,
   recordingVideos,
-  shiftStart,
   timeAt,
+  videoLabels,
   videoChapters,
   withVideoStart,
   type LogLine,
@@ -141,11 +141,12 @@ describe("1 か所だけ合わせる・ずれの補正", () => {
     expect(offsetIn(v, jst("2026-11-20T21:06:15"))).toBe(0);
   });
 
-  it("動画がログより 3 秒先に進んで見えるなら、補正で位置を 3 秒進める", () => {
-    const start = 1_000_000;
-    const fixed = shiftStart(start, 3);
-    expect(offsetIn(video({ startedAt: fixed }), 1_000_100)).toBe(103);
-    expect(shiftStart(fixed, -3)).toBe(start);
+  it("ずれていたら、別の発言で合わせ直すと開始時刻ごと置き換わる", () => {
+    // 最初は 21:00:00 の発言を 0:00 に合わせたが、実は動画では 0:03 だった
+    const first = anchorStart(jst("2026-11-20T21:00:00"), 0);
+    const fixed = anchorStart(jst("2026-11-20T22:00:00"), 3603);
+    expect(fixed).toBe(first - 3);
+    expect(offsetIn(video({ startedAt: fixed }), jst("2026-11-20T21:00:00"))).toBe(3);
   });
 
   it("合わせ直しは 1 本目・パートのどちらにも書き、消すこともできる", () => {
@@ -260,5 +261,24 @@ describe("readPlayerMessage（埋め込みの再生面の知らせ）", () => {
       duration: 3600,
     });
     expect(readPlayerMessage("niconico", "https://www.youtube.com", msg)).toBeNull();
+  });
+});
+
+describe("videoLabels（パートの呼び名）", () => {
+  it("書いた名前、なければ録画した日（深夜 2 時は前の日の集まり）", () => {
+    const vs = [
+      video({ part: 0, startedAt: jst("2026-11-20T21:00:00") }),
+      video({ part: 1, startedAt: jst("2026-11-28T02:00:00") }),
+      video({ part: 2, startedAt: jst("2026-12-04T21:00:00"), label: "最終夜" }),
+    ];
+    expect(videoLabels(vs)).toEqual(["11/20", "11/27", "最終夜"]);
+  });
+  it("同じ日に何本もある・日が分からないなら Part 番号", () => {
+    const night = jst("2026-11-20T21:00:00");
+    expect(videoLabels([video({ startedAt: night }), video({ part: 1, startedAt: night + 7200 })])).toEqual([
+      "Part1",
+      "Part2",
+    ]);
+    expect(videoLabels([video(), video({ part: 1, startedAt: night })])).toEqual(["Part1", "Part2"]);
   });
 });

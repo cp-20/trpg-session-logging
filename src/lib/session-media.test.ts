@@ -15,6 +15,7 @@ import {
   needsConsentCheck,
   normalizeMediaUrl,
   embedAt,
+  playerSrc,
   formatClock,
   parseChapters,
   parseClock,
@@ -270,5 +271,28 @@ describe("追加の流れ", () => {
     expect(needsConsentCheck("recording", "self")).toBe(false);
     expect(needsConsentCheck("replay", "public")).toBe(false);
     expect(needsConsentCheck("impression", "members")).toBe(false);
+  });
+});
+
+describe("playerSrc（ログと並べて再生する埋め込み）", () => {
+  const page = { origin: "https://takufu.app", host: "takufu.app" };
+  it("YouTube は位置を知らせる設定と開始位置", () => {
+    const u = new URL(playerSrc("https://www.youtube-nocookie.com/embed/abc", 754, page));
+    expect(Object.fromEntries(u.searchParams)).toEqual({
+      start: "754",
+      autoplay: "1",
+      enablejsapi: "1",
+      origin: "https://takufu.app",
+      playsinline: "1",
+    });
+  });
+  it("ニコニコは jsapi、Twitch は埋め込む側のホスト", () => {
+    const n = new URL(playerSrc("https://embed.nicovideo.jp/watch/sm9", 61, page));
+    expect(n.searchParams.get("from")).toBe("61");
+    expect(n.searchParams.get("jsapi")).toBe("1");
+    const t = new URL(playerSrc("https://player.twitch.tv/?video=v1&autoplay=false", 3723, page));
+    expect(t.searchParams.get("time")).toBe("1h2m3s");
+    expect(t.searchParams.get("parent")).toBe("takufu.app");
+    expect(t.searchParams.get("autoplay")).toBe("true");
   });
 });

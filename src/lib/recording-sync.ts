@@ -12,7 +12,7 @@
  */
 import type { MediaChapter, SessionMedia } from "./session-media";
 import { MEDIA_KIND_MAP } from "./session-media";
-import type { Sitting } from "./sittings";
+import { sittingDay, type Sitting } from "./sittings";
 
 /** 長さが分からない録画を、開始からどこまでとみなすか */
 export const MAX_RECORDING_SECONDS = 16 * 3600;
@@ -67,6 +67,22 @@ export function recordingVideos(
   });
 }
 
+/**
+ * パートの呼び名。書いた名前がなければ、録画した日（夜ごとに録ったもの）。日付が分からない・同じ日に何本もあるなら Part1・Part2
+ */
+export function videoLabels(videos: readonly RecordingVideo[]): string[] {
+  const day = (v: RecordingVideo) => (v.startedAt !== undefined ? sittingDay(v.startedAt) : undefined);
+  const days = videos.map(day);
+  const byDate = days.every((d, i) => d !== undefined && days.indexOf(d) === i);
+  return videos.map((v, i) => {
+    if (v.label) return v.label;
+    const d = days[i];
+    if (!byDate || !d) return `Part${v.part + 1}`;
+    const [, mm, dd] = d.split("-");
+    return `${Number(mm)}/${Number(dd)}`;
+  });
+}
+
 /** その動画が時刻 ts を映しているなら、動画の何秒目か。映していなければ null */
 export function offsetIn(v: RecordingVideo, ts: number): number | null {
   if (v.startedAt === undefined || !(ts > 0)) return null;
@@ -96,17 +112,12 @@ export function timeAt(v: RecordingVideo, sec: number): number | null {
   return v.startedAt === undefined ? null : v.startedAt + Math.max(0, sec);
 }
 
-/** 「この発言は動画の sec 秒目」から開始時刻を決める（1 か所だけ合わせる） */
+/**
+ * 「この発言は動画の sec 秒目」から開始時刻を決める（1 か所だけ合わせる）。ずれていたら、別の発言でもう一度合わせれば
+ * 開始時刻ごと置き換わる（ずれの補正も同じ操作）
+ */
 export function anchorStart(msgTs: number, videoSec: number): number {
   return Math.round(msgTs - videoSec);
-}
-
-/**
- * 開始時刻をずらす（ずれの補正）。動画がログより delta 秒遅れて見えるなら、開始時刻を delta 秒早める。
- * delta が正なら「動画の位置を delta 秒進める」
- */
-export function shiftStart(startedAt: number, delta: number): number {
-  return Math.round(startedAt - delta);
 }
 
 /** SessionMedia の part 本目の開始時刻を変えたもの（undefined で消す）。他の値はそのまま */

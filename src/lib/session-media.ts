@@ -445,6 +445,30 @@ export function embedAt(embedUrl: string, sec: number): string {
   return u.toString();
 }
 
+/**
+ * ログと並べて再生する埋め込みの URL。再生位置を受け取り・動かせるように、サービスの埋め込みの決まりで開く。
+ * - YouTube: enablejsapi（postMessage で位置を知らせ、seekTo を受ける）と origin
+ * - ニコニコ: jsapi と playerId（playerMetadataChange で位置を知らせ、seek を受ける）
+ * - Twitch: 埋め込む側のホスト（parent）が要る。位置は受け取れないので、動かすときは開き直す
+ */
+export function playerSrc(embedUrl: string, at: number, page: { origin: string; host: string }): string {
+  const u = new URL(embedAt(embedUrl, at));
+  const host = u.hostname;
+  if (host.includes("youtube")) {
+    u.searchParams.set("enablejsapi", "1");
+    u.searchParams.set("origin", page.origin);
+    u.searchParams.set("playsinline", "1");
+  } else if (host.includes("nicovideo")) {
+    u.searchParams.set("jsapi", "1");
+    u.searchParams.set("playerId", "1");
+    u.searchParams.set("autoplay", "1");
+  } else if (host.includes("twitch")) {
+    u.searchParams.set("parent", page.host);
+    u.searchParams.set("autoplay", "true");
+  }
+  return u.toString();
+}
+
 /* ---------- 追加・編集の流れ ---------- */
 
 /**
