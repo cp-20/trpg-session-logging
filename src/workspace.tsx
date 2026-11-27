@@ -4,6 +4,7 @@ import type { State } from "./types";
 import { StoreProvider, emptyState, type RestoreIssue } from "./store";
 import { observeAuth, firebaseUserProfile, signOutAccount } from "./lib/auth";
 import { idbGet, idbSet, LOCAL_STORAGE_MAX_CHARS } from "./lib/local-db";
+import { forgetLocalCopy } from "./lib/local-copy";
 import { parseSavedState, validateSavedState } from "./lib/state-schema";
 import { download, todayStr } from "./lib/time";
 import { userFacingError } from "./lib/user-error";
@@ -63,11 +64,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     let alive = true;
     let generation = 0;
     let previouslySignedIn = false;
+    let lastUid: string | null = null;
     const unsubscribe = observeAuth(
       async (user) => {
         const run = ++generation;
         setError(null);
         if (!user) {
+          // ログアウトした人の控えは、記録の画面が外れて最後の書き出しを終えたあとに消す（送り終えた分だけ。src/lib/local-copy.ts）
+          const signedOutUid = previouslySignedIn ? lastUid : null;
+          lastUid = null;
+          const forgetAfterUnmount = () => {
+            if (signedOutUid)
+              window.setTimeout(() => void forgetLocalCopy(localStorage, signedOutUid).catch(() => {}), 0);
+          };
           if (previouslySignedIn) {
             try {
               const snap = await readLocalSnapshot("takufu-state-v4");
@@ -92,6 +101,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           if (!alive || run !== generation) return;
           if (demoSnap.state) {
             setSession({ user: null, state: demoSnap.state, issue: "none" });
+            forgetAfterUnmount();
             return;
           }
           const { seedState } = await import("./data/seed");
@@ -101,10 +111,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             state: seedState(),
             issue: demoSnap.corrupt ? "corrupt" : "missing",
           });
+          forgetAfterUnmount();
           return;
         }
 
         previouslySignedIn = true;
+        lastUid = user.uid;
         setSession(null);
         try {
           const key = `takufu-cloud-${user.uid}`;

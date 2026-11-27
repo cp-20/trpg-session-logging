@@ -1,5 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { download, todayStr } from "../lib/time";
+import { getTakufuAuth } from "../lib/auth";
+import { backupLocalCopy } from "../lib/local-copy";
 
 interface Props {
   children: ReactNode;
@@ -47,11 +49,8 @@ export class ErrorBoundary extends Component<Props, State> {
               className="btn btn-sm"
               onClick={() => {
                 try {
-                  const backup = Object.fromEntries(
-                    Object.keys(localStorage)
-                      .filter((key) => key === "takufu-state-v4" || key.startsWith("takufu-cloud-"))
-                      .map((key) => [key, localStorage.getItem(key)]),
-                  );
+                  // 今の人の控えだけ（共用の端末で、ほかのアカウントの記録まで書き出さない）
+                  const backup = backupLocalCopy(localStorage, getTakufuAuth()?.currentUser?.uid ?? null);
                   download(`takufu-backup-${todayStr()}.json`, JSON.stringify(backup, null, 2));
                 } catch {
                   /* noop */
