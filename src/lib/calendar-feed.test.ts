@@ -3,14 +3,14 @@ import { seedState } from "../data/seed";
 
 const docMock = vi.fn((db: unknown, col: string, id: string) => ({ db, col, id }));
 const setDocMock = vi.fn(async () => {});
-const deleteDocMock = vi.fn(async () => {});
+const getDocMock = vi.fn(async () => ({ exists: () => true, data: () => ({ ownerId: "u1", ics: "X" }) }));
 const serverTimestampMock = vi.fn(() => "SERVER_TS");
 const getCloudFirestoreMock = vi.fn<() => unknown>(() => ({ projectId: "mock-db" }));
 
 vi.mock("firebase/firestore", () => ({
   doc: docMock,
   setDoc: setDocMock,
-  deleteDoc: deleteDocMock,
+  getDoc: getDocMock,
   serverTimestamp: serverTimestampMock,
 }));
 
@@ -149,10 +149,22 @@ describe("calendar feed", () => {
     );
 
     await revokeFeed("tok_2");
-    expect(deleteDocMock).toHaveBeenCalledWith({
-      db: { projectId: "mock-db" },
-      col: "calendarFeeds",
-      id: "tok_2",
-    });
+    // 消さずに失効の印へ置き換える（同じトークンを別の人に取り直させない）
+    expect(setDocMock).toHaveBeenLastCalledWith(
+      { db: { projectId: "mock-db" }, col: "calendarFeeds", id: "tok_2" },
+      { ownerId: "u1", revokedAt: "SERVER_TS" },
+    );
+  });
+
+  it("すでに止めた購読をもう一度止めても、書き込まない", async () => {
+    getDocMock.mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({ ownerId: "u1", revokedAt: "T" }),
+    } as never);
+    setDocMock.mockClear();
+
+    await revokeFeed("tok_3");
+
+    expect(setDocMock).not.toHaveBeenCalled();
   });
 });
