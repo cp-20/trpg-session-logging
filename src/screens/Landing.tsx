@@ -1,3 +1,4 @@
+"use client";
 /**
  * ログインしていなくても開ける公開ページ: LP（/）・ライセンス（/licenses）・利用規約（/terms）・プライバシーポリシー（/privacy）・ご意見（/feedback）。
  * 記録（ストア）と Firebase は読み込まない（サーバーで描画し、JS を軽く保つ）。ログイン・サンプル開始は Entry.tsx。
@@ -14,6 +15,7 @@ import {
   IconDiscord,
   IconEye,
   IconEyeOff,
+  IconLink,
   IconLock,
   IconPlayerPlay,
   IconUsers,
@@ -314,8 +316,10 @@ export default function Landing() {
               <span className="whitespace-nowrap">ぜんぶここ。</span>
             </h1>
             <p className="pst-lead">
-              CCFOLIA
-              のログを入れるだけです。ダイスも秘匿タブも、録画や感想、継続探索者の歩みまで集まります。同卓者にはリンクひとつで、未通過の人には伏せたまま渡せます。
+              CCFOLIA やユドナリウムのログを入れるだけで、TRPG
+              のセッションがダイスも秘匿タブも、録画や感想まで{" "}
+              <span className="whitespace-nowrap">1 ページに</span>
+              まとまります。同卓者にはリンクひとつで渡せます。
             </p>
             <StartLinks />
             <p className="pst-assure">
@@ -358,6 +362,11 @@ export default function Landing() {
               </p>
             </div>
           </div>
+          <p className="pst-try">
+            <Link prefetch={false} to="/demo" className="pst-try-link">
+              ログインせずに、サンプルの卓で触ってみる
+            </Link>
+          </p>
         </div>
       </section>
 
@@ -406,7 +415,7 @@ export default function Landing() {
                 </p>
                 <h3 className="pst-h3-lg">未通過の人には、伏せたまま</h3>
                 <p className="pst-body">
-                  共有範囲を「通過した人」にすると、開く前に通過済みかを確かめます。未通過の人には、題名のほかは見せません。
+                  共有範囲を「通過した人」にすると、リンクを開いた人に通過済みかを尋ねます。ログインして通過済みと答えるまで、題名もシステムも見せません。
                 </p>
               </div>
               <div className="pst-mat">
@@ -436,7 +445,7 @@ export default function Landing() {
                 <h3 className="pst-h3-lg">日程調整も Discord への告知も、卓の中で</h3>
                 <p className="pst-body">
                   候補日にメンバーが ◯ △ × で答えます。決まった予定と前日のお知らせは、卓とつないだ Discord
-                  チャンネルに届きます。Google カレンダーの空き時間との照らし合わせも、実装予定です。
+                  チャンネルに届きます。返事も、Discord の ◯ △ × のボタンから送れます。
                 </p>
               </div>
               <div className="pst-mat">
@@ -810,33 +819,67 @@ function SessionSheet() {
 
 /* ---------- 3 つの仕事の作例 ---------- */
 
+/**
+ * 同じ共有リンクを、通過した人と未通過の人が開いたときの見え方。
+ * 未通過の人の側は、共有ページ（ShareLog.tsx の RemoteShare）が出す鍵の案内そのまま: 題名・システムも出さない
+ */
 function ScopeFigure() {
   return (
-    <div className="pst-split" aria-hidden="true">
-      <div className="pst-figure">
-        <div className="pst-pane-label">
-          <IconEye width={14} height={14} /> 通過した人が開くと
+    <div className="pst-scope" aria-hidden="true">
+      <div className="pst-scope-url">
+        <IconLink width={14} height={14} />
+        <span className="min-w-0 truncate">takufu.app/share/l/…</span>
+        <span className="pst-scope-same">同じリンク</span>
+      </div>
+      <div className="pst-split">
+        <div>
+          <div className="pst-pane-label">
+            <IconEye width={14} height={14} /> 通過した人が開くと
+          </div>
+          <div className="pst-figure pst-share">
+            <div className="pst-tile-meta pst-sys">クトゥルフ神話TRPG 7版</div>
+            <div className="pst-mini-title mt-1">深淵の呼び声</div>
+            <div className="pst-tile-meta">9月26日（土）・4時間23分</div>
+            <div className="pst-share-cast">
+              <Portrait name="" file="mikan" size={24} />
+              <Portrait name="" file="rei" size={24} />
+              <Portrait name="" file="mio" size={24} />
+              <Portrait name="" file="natsu" size={24} />
+            </div>
+            <div className="pst-mini-line">
+              <Portrait name="" file="mio" size={24} />
+              <span>「……この扉、内側から開けられてる」</span>
+            </div>
+            <div className="pst-mini-line">
+              <Portrait name="" file="rei" size={24} />
+              <span>
+                <DiceRoll cmd="CC<=70" skill="目星" value="04" result="クリティカル" tone="crit" />
+              </span>
+            </div>
+          </div>
         </div>
-        <div className="pst-mini-title">深淵の呼び声</div>
-        <div className="pst-mini-line">
-          <Portrait name="" file="mio" size={26} />
-          <span>「……この扉、内側から開けられてる」</span>
-        </div>
-        <div className="pst-mini-line">
-          <Portrait name="" file="rei" size={26} />
-          <span>「鐘の音が、三度」</span>
+        <div>
+          <div className="pst-pane-label">
+            <IconEyeOff width={14} height={14} /> 未通過の人には
+          </div>
+          <div className="pst-figure pst-share is-gated">
+            <IconLock width={22} height={22} />
+            <b>通過した人に共有された記録です</b>
+            <span>このシナリオを通過済みなら、記録を開けます。</span>
+            <span className="pst-gate-btn">通過済みなので開く</span>
+          </div>
         </div>
       </div>
-      <div className="pst-figure">
-        <div className="pst-pane-label">
-          <IconEyeOff width={14} height={14} /> 未通過の人には
+      <dl className="pst-scope-legend">
+        <div>
+          <dt>未通過の人に見えないもの</dt>
+          <dd>題名・システム・日付・顔ぶれ・ログ・録画・感想</dd>
         </div>
-        <div className="pst-mini-title">深淵の呼び声</div>
-        <div className="pst-gate">
-          <IconLock width={18} height={18} />
-          <span>シナリオを通過した人だけが読めます</span>
+        <div>
+          <dt>X や Discord に貼ったとき</dt>
+          <dd>リンクの見出しにも、題名は出ません</dd>
         </div>
-      </div>
+      </dl>
     </div>
   );
 }

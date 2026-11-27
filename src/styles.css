@@ -1633,6 +1633,105 @@ main#main-content:focus {
   font-size: 0.875rem;
   color: var(--pst-fg-2);
 }
+/* 共有範囲の作例: 同じリンクを開く 2 人の見え方 */
+.pst-scope-url {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--pst-line);
+  border-radius: 999px;
+  background-color: var(--pst-surface);
+  padding: 0.5rem 0.5rem 0.5rem 0.875rem;
+  font-size: 0.8125rem;
+  color: var(--pst-fg-2);
+}
+.pst-scope-same {
+  margin-left: auto;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background-color: var(--pst-tint);
+  padding: 0.125rem 0.625rem;
+  font-weight: 700;
+  color: var(--pst-fg);
+}
+.pst-scope .pst-split > div {
+  display: flex;
+  flex-direction: column;
+}
+.pst-share {
+  flex: 1;
+  min-height: 15.5rem;
+}
+.pst-share .pst-roll {
+  font-size: 0.8125rem;
+}
+.pst-share-cast {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.75rem;
+  border-bottom: 1px solid var(--pst-line);
+  padding-bottom: 0.75rem;
+}
+.pst-share.is-gated {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-align: center;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--pst-fg-2);
+}
+.pst-share.is-gated b {
+  color: var(--pst-fg);
+}
+.pst-gate-btn {
+  margin-top: 0.5rem;
+  border-radius: 0.625rem;
+  background-color: var(--pst-accent);
+  padding: 0.5rem 1rem;
+  font-weight: 700;
+  color: var(--pst-surface);
+}
+.pst-scope-legend {
+  padding: 0 0.375rem;
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.pst-scope-legend > div {
+  display: grid;
+  gap: 0.125rem 1rem;
+}
+@media (min-width: 640px) {
+  .pst-scope-legend > div {
+    grid-template-columns: 11rem minmax(0, 1fr);
+  }
+}
+.pst-scope-legend dt {
+  font-weight: 700;
+}
+.pst-scope-legend dd {
+  color: var(--pst-fg-2);
+}
+/* 作例の下から、サンプルの卓へ（主ボタンはヒーローと締めだけ） */
+.pst-try {
+  margin-top: -2rem;
+  padding-bottom: 4.5rem;
+}
+.pst-try-link {
+  font-weight: 700;
+  color: var(--pst-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+.pst-try-link::after {
+  content: " →";
+}
 .pst-karte-head {
   display: flex;
   align-items: center;
