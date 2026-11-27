@@ -1,11 +1,14 @@
 import { handleExternalImport } from "../../../../lib/external-import-server";
 
+import { BodyTooLargeError, readJsonWithLimit } from "../../../../lib/http-limit";
 import { clientIp, createRateLimiter } from "../../../../lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
 // 1 つの送り元から 1 分に 20 件まで（1 回の取り込みで外部へは数回までしか出ない）
 const allow = createRateLimiter(20, 60 * 1000);
+/** 本文は取り込む URL だけ（{ url }）。それより大きいものは読まない */
+const BODY_MAX = 8 * 1024;
 
 export async function POST(req: Request): Promise<Response> {
   if (!allow(clientIp(req))) {
@@ -16,8 +19,11 @@ export async function POST(req: Request): Promise<Response> {
   }
   let body: unknown;
   try {
-    body = await req.json();
-  } catch {
+    body = await readJsonWithLimit(req, BODY_MAX);
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) {
+      return Response.json({ ok: false, error: "リクエストが大きすぎます。" }, { status: 413 });
+    }
     return Response.json({ ok: false, error: "リクエスト形式が正しくありません。" }, { status: 400 });
   }
 

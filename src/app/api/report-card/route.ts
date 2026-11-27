@@ -1,3 +1,4 @@
+import { BodyTooLargeError, readJsonWithLimit } from "../../../lib/http-limit";
 import { parseReportCard } from "../../../lib/report-card";
 import { clientIp, createRateLimiter } from "../../../lib/rate-limit";
 import { renderReportCard } from "../../../server/og-image";
@@ -20,14 +21,13 @@ export async function POST(req: Request): Promise<Response> {
       { status: 429 },
     );
   }
-  const raw = await req.text();
-  if (raw.length > BODY_MAX) {
-    return Response.json({ ok: false, error: "画像が大きすぎます。" }, { status: 413 });
-  }
   let body: unknown;
   try {
-    body = JSON.parse(raw);
-  } catch {
+    body = await readJsonWithLimit(req, BODY_MAX);
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) {
+      return Response.json({ ok: false, error: "画像が大きすぎます。" }, { status: 413 });
+    }
     return Response.json({ ok: false, error: "リクエスト形式が正しくありません。" }, { status: 400 });
   }
   const card = parseReportCard(body);
