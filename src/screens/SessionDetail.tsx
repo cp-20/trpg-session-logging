@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { carriedDeltas } from "../lib/character-growth";
 import { Link, useNavigate, useParams, useSearchParam } from "../lib/router";
 import { useStore } from "../store";
@@ -54,7 +54,15 @@ import {
   IconX,
 } from "../components/icons";
 import { reportTweetText, xIntentUrl } from "../external";
-import { reportCardFromSession } from "../lib/report-card";
+import {
+  parseReportOptions,
+  REPORT_DEFAULTS,
+  REPORT_OPTIONS_KEY,
+  reportCardChoices,
+  reportCardFromSession,
+  type ReportCard,
+  type ReportCardOptions,
+} from "../lib/report-card";
 import {
   createSharedInvite,
   fetchSharedLog,
@@ -1262,42 +1270,79 @@ function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
 export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => void }) {
   const { state } = useStore();
   const shareUrl = `${location.origin}/share/l/${log.slug}`;
-  const card = useMemo(() => reportCardFromSession(log, state), [log, state]);
+  const [options, setOptions] = useState<ReportCardOptions>(() => {
+    try {
+      return parseReportOptions(localStorage.getItem(REPORT_OPTIONS_KEY));
+    } catch {
+      return REPORT_DEFAULTS;
+    }
+  });
+  const choose = (key: keyof ReportCardOptions, on: boolean) => {
+    const next = { ...options, [key]: on };
+    setOptions(next);
+    try {
+      localStorage.setItem(REPORT_OPTIONS_KEY, JSON.stringify(next));
+    } catch {
+      // 覚えられなくても、この場の選択は効く
+    }
+  };
+  const card = useMemo(() => reportCardFromSession(log, state, options), [log, state, options]);
+  const choices = useMemo(() => reportCardChoices(log, state), [log, state]);
   const tweet = useMemo(
-    () => ({ title: card.title, playerCount: card.cast.length, shareUrl }),
-    [card.title, card.cast.length, shareUrl],
+    () => ({ title: card.title, playerCount: card.players, shareUrl }),
+    [card.title, card.players, shareUrl],
   );
+  /* 描き終えた画像と、どの中身から描いたか。いまの中身と違えば描き直し中 */
   const [image, setImage] = useState<{ url: string; file: File } | null>(null);
-  const [imageError, setImageError] = useState<string | null>(null);
+  const [done, setDone] = useState<{ card: ReportCard; error: string | null } | null>(null);
+  const loading = done?.card !== card;
+  const imageError = loading ? null : (done?.error ?? null);
 
   useEffect(() => {
-    let url: string | null = null;
     let cancelled = false;
-    setImage(null);
-    setImageError(null);
-    fetch("/api/report-card", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(card),
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(String(res.status));
-        const blob = await res.blob();
-        if (cancelled) return;
-        url = URL.createObjectURL(blob);
-        setImage({ url, file: new File([blob], `takufu-report-${log.id}.png`, { type: "image/png" }) });
+    // 続けて切り替えたときは、最後の選択だけ描く
+    const timer = setTimeout(() => {
+      fetch("/api/report-card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(card),
       })
-      .catch(() => {
-        if (!cancelled) setImageError("画像を作れませんでした。時間をおいてもう一度お試しください。");
-      });
+        .then(async (res) => {
+          if (!res.ok) throw new Error(String(res.status));
+          const blob = await res.blob();
+          if (cancelled) return;
+          const url = URL.createObjectURL(blob);
+          setImage((prev) => {
+            if (prev) URL.revokeObjectURL(prev.url);
+            return { url, file: new File([blob], `takufu-report-${log.id}.png`, { type: "image/png" }) };
+          });
+          setDone({ card, error: null });
+        })
+        .catch(() => {
+          if (!cancelled)
+            setDone({ card, error: "画像を作れませんでした。時間をおいてもう一度お試しください。" });
+        });
+    }, 250);
     return () => {
       cancelled = true;
-      if (url) URL.revokeObjectURL(url);
+      clearTimeout(timer);
     };
   }, [card, log.id]);
+  // 閉じたら最後の画像を手放す
+  const lastUrl = useRef<string | null>(null);
+  useEffect(() => {
+    lastUrl.current = image?.url ?? null;
+  }, [image]);
+  useEffect(
+    () => () => {
+      if (lastUrl.current) URL.revokeObjectURL(lastUrl.current);
+    },
+    [],
+  );
 
+  const ready = image !== null && !loading;
   const canShareFile =
-    image !== null && typeof navigator.canShare === "function" && navigator.canShare({ files: [image.file] });
+    ready && typeof navigator.canShare === "function" && navigator.canShare({ files: [image.file] });
 
   return (
     <Modal
@@ -1318,10 +1363,10 @@ export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => voi
             </button>
           ) : (
             <a
-              className={cx("btn", !image && "btn-disabled")}
-              href={image?.url}
+              className={cx("btn", !ready && "btn-disabled")}
+              href={ready ? image.url : undefined}
               download={image?.file.name}
-              aria-disabled={!image}
+              aria-disabled={!ready}
             >
               画像を保存
             </a>
@@ -1332,17 +1377,33 @@ export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => voi
         </>
       }
     >
-      <div className="aspect-[16/9] w-full overflow-hidden rounded-xl border border-base-300 bg-base-200">
-        {image ? (
-          <img src={image.url} alt="卓報告カード" className="h-full w-full object-cover motion-fade" />
-        ) : (
-          !imageError && (
-            <div className="flex h-full items-center justify-center">
-              <span className="loading loading-spinner loading-sm" aria-label="画像を作っています" />
-            </div>
-          )
+      <div className="relative aspect-[16/9] w-full overflow-hidden rounded-xl border border-base-300 bg-base-200">
+        {image && (
+          <img
+            src={image.url}
+            alt="卓報告カード"
+            className={cx("h-full w-full object-cover motion-fade", loading && "opacity-60")}
+          />
+        )}
+        {loading && !imageError && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="loading loading-spinner loading-sm" aria-label="画像を作っています" />
+          </div>
         )}
       </div>
+      {choices.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2" role="group" aria-label="カードに載せるもの">
+          {choices.map((c) => (
+            <Toggle
+              key={c.key}
+              label={c.label}
+              showLabel
+              on={options[c.key]}
+              onChange={(v) => choose(c.key, v)}
+            />
+          ))}
+        </div>
+      )}
       <div className="mt-3">
         <CopyBox text={shareUrl} />
       </div>
