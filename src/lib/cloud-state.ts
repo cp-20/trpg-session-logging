@@ -468,6 +468,8 @@ export async function publishSharedLog(log: Log, state: State): Promise<void> {
           memberIds: Object.entries(log.players)
             .filter(([, player]) => player.linked)
             .map(([id]) => id),
+          // 共有を止めたときの印はルールが消させない。持ち越す
+          ...(current.data()?.invitesSince ? { invitesSince: current.data()!.invitesSince } : {}),
         });
       });
     },
@@ -477,11 +479,10 @@ export async function publishSharedLog(log: Log, state: State): Promise<void> {
   if (oldRevision)
     void removeChunks(db, ["sharedLogs", log.slug, "revisions", oldRevision, "chunks"]).catch(() => {});
   const ownMemberRef = doc(db, "sharedLogs", log.slug, "members", state.me);
-  const ownMember = await getDocFromServer(ownMemberRef);
   const ownProfile = state.users[state.me];
   const profileBatch = writeBatch(db);
   profileBatch.set(ownMemberRef, {
-    inviteId: ownMember.data()?.inviteId || "",
+    inviteId: "",
     displayName: ownProfile.name,
     color: ownProfile.color,
     image: safeMemberImage(ownProfile.image),
@@ -504,6 +505,8 @@ export async function deleteSharedLog(slug: string): Promise<void> {
     memberIds: [],
     revision: "revoked",
     chunkCount: 1,
+    // 止める前に出した招待は、同じ記録をまた共有しても効かない（firestore.rules の validInvite）
+    invitesSince: serverTimestamp(),
   });
   await batch.commit();
   const { revision } = manifest.data();
@@ -682,6 +685,8 @@ export async function createSharedInvite(log: Log, state: State): Promise<string
     // 以前は名前とシナリオを別に持っていた。ルールが欄を求めるので空で書く
     scenarioTitle: "",
     expiresAt,
+    // 外された人が入り直せるのは、外したあとに出した招待だけ（firestore.rules の rejoinInvite）
+    createdAt: serverTimestamp(),
   });
   await batch.commit();
   return token;
@@ -737,6 +742,8 @@ export async function acceptSharedInvite(token: string, me?: User): Promise<Shar
       transaction.set(ref, { inviteId: token, hidden: false, linked: true, ...identity });
     else transaction.update(ref, { linked: true, inviteId: token, revoked: false, ...identity });
   });
+  // メンバーの文書は共有ページを読める人にも見える。入れたら招待の番号は消す（拾った人が入れないように）
+  await updateDoc(ref, { inviteId: "" });
   const shared = await fetchSharedLog(invite.slug);
   if (!shared) throw new Error("この記録は共有を終了しています。");
   return shared;
@@ -768,9 +775,12 @@ export async function updateSharedMembership(
 export async function revokeSharedMember(slug: string, uid: string): Promise<void> {
   const db = database();
   const ref = doc(db, "sharedLogs", slug, "members", uid);
+  // 持ち主が足しただけで本人がまだ開いていない人は文書がない。読める根拠は memberIds だけなので、
+  // 記録から外せば次の共有の更新（publishSharedLog）で memberIds から消える
+  if (!(await getDocFromServer(ref)).exists()) return;
   const batch = writeBatch(db);
   // revoked: 本人が自分で linked を戻せないようにする印（戻れるのは新しい招待で入り直すときだけ。firestore.rules）
-  batch.update(ref, { linked: false, revoked: true });
+  batch.update(ref, { linked: false, revoked: true, revokedAt: serverTimestamp() });
   await batch.commit();
 }
 

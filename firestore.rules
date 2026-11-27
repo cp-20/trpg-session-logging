@@ -49,23 +49,36 @@ service cloud.firestore {
     }
     function validMember() {
       let data = request.resource.data;
-      return data.keys().hasOnly(['inviteId', 'hidden', 'linked', 'displayName', 'color', 'image', 'revoked'])
+      return data.keys().hasOnly(['inviteId', 'hidden', 'linked', 'displayName', 'color', 'image', 'revoked', 'revokedAt'])
         && data.inviteId is string && data.hidden is bool && data.linked is bool
         && data.get('revoked', false) is bool
         && data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 100
         && data.color is string && data.color.matches('^#[0-9a-fA-F]{6}$')
         && data.image is string && data.image.size() <= 4096;
     }
-    // 期限内の、この共有の持ち主が出した招待か
+    // 共有中で、期限内の、この共有の持ち主が出した招待か。
+    // 共有を止める（invitesSince を進める）より前に出した招待は、同じ記録をまた共有しても効かない
     function validInvite(inviteId, slug) {
       let invite = get(/databases/$(database)/documents/sharedInvites/$(inviteId)).data;
-      return invite.slug == slug && invite.ownerId == share(slug).ownerId && invite.expiresAt > request.time;
+      let current = share(slug);
+      return invite.slug == slug && invite.ownerId == current.ownerId && invite.expiresAt > request.time
+        && current.revision != 'revoked'
+        && (!('invitesSince' in current) || ('createdAt' in invite && invite.createdAt > current.invitesSince));
+    }
+    // 持ち主に外された人が入り直せる招待: 外されたあとに出したもの
+    function rejoinInvite(inviteId, slug) {
+      let invite = get(/databases/$(database)/documents/sharedInvites/$(inviteId)).data;
+      return validInvite(inviteId, slug) && 'createdAt' in invite && 'revokedAt' in resource.data
+        && invite.createdAt > resource.data.revokedAt;
     }
     function validShare() {
       let data = request.resource.data;
       // scenarioPolicy は旧クライアントが書いていた欄。受け付けるだけで、読み書きの条件には使わない
-      return data.keys().hasOnly(['ownerId', 'scope', 'memberIds', 'scenarioPolicy', 'revision', 'chunkCount'])
+      return data.keys().hasOnly(['ownerId', 'scope', 'memberIds', 'scenarioPolicy', 'revision', 'chunkCount', 'invitesSince'])
         && data.ownerId == request.auth.uid
+        // invitesSince は進めるか（いまの時刻にする）、そのまま持ち越すだけ。消したり戻したりできない
+        && (data.get('invitesSince', null) == (resource == null ? null : resource.data.get('invitesSince', null))
+          || data.get('invitesSince', null) == request.time)
         && data.scope in ['members', 'passed', 'public']
         && data.memberIds is list && data.memberIds.size() <= 500
         && data.revision is string
@@ -99,7 +112,8 @@ service cloud.firestore {
       match /members/{userId} {
         allow get, list: if ownUser(userId) || owner(share(slug))
           || (resource.data.hidden == false && resource.data.linked == true && canReadShare(slug, share(slug).revision));
-        allow create: if ownUser(userId) && validMember() && request.resource.data.get('revoked', false) == false && (
+        allow create: if ownUser(userId) && validMember() && request.resource.data.get('revoked', false) == false
+          && !('revokedAt' in request.resource.data) && (
           owner(share(slug)) || userId in share(slug).memberIds || (
             request.resource.data.hidden == false && request.resource.data.linked == true
             && validInvite(request.resource.data.inviteId, slug)));
@@ -109,11 +123,14 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hidden', 'linked', 'displayName', 'color', 'image', 'inviteId', 'revoked'])
           && request.resource.data.get('revoked', false) == false
           // 招待の番号を書き換えられるのは、期限内の招待で入り直すときだけ
-          && (request.resource.data.inviteId == resource.data.inviteId || validInvite(request.resource.data.inviteId, slug))
+          // 招待の番号は、空にする（読める人に見せない）か、有効な招待で入り直すときだけ書き換えられる
+          && (request.resource.data.inviteId == resource.data.inviteId || request.resource.data.inviteId == ''
+            || validInvite(request.resource.data.inviteId, slug))
           && (resource.data.get('revoked', false) == false
-            || (request.resource.data.linked == true && validInvite(request.resource.data.inviteId, slug))))
-          || (owner(share(slug)) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linked', 'revoked'])
-            && request.resource.data.linked == false && request.resource.data.revoked == true);
+            || (request.resource.data.linked == true && rejoinInvite(request.resource.data.inviteId, slug))))
+          || (owner(share(slug)) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linked', 'revoked', 'revokedAt'])
+            && request.resource.data.linked == false && request.resource.data.revoked == true
+            && request.resource.data.revokedAt == request.time);
         allow delete: if false;
       }
     }
@@ -123,7 +140,8 @@ service cloud.firestore {
         && share(resource.data.slug).revision != 'revoked';
       allow list: if false;
       allow create: if signedIn()
-        && request.resource.data.keys().hasOnly(['slug', 'ownerId', 'title', 'systemId', 'scenarioTitle', 'expiresAt'])
+        && request.resource.data.keys().hasOnly(['slug', 'ownerId', 'title', 'systemId', 'scenarioTitle', 'expiresAt', 'createdAt'])
+        && request.resource.data.createdAt == request.time
         && request.resource.data.ownerId == request.auth.uid
         && owner(share(request.resource.data.slug))
         && token.size() >= 32

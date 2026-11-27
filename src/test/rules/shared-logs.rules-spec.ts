@@ -4,6 +4,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  serverTimestamp,
   getDoc,
   getDocs,
   setDoc,
@@ -42,6 +43,7 @@ function invite(overrides: Record<string, unknown> = {}) {
     systemId: "Cthulhu7th",
     scenarioTitle: "シナリオ",
     expiresAt: Timestamp.fromMillis(Date.now() + DAY),
+    createdAt: Timestamp.fromMillis(Date.now() - 60_000),
     ...overrides,
   };
 }
@@ -272,7 +274,7 @@ describe("sharedLogs/{slug}/members/{userId}", () => {
     await assertFails(setDoc(ref, member({ displayName: "" })));
   });
 
-  it("本人は表示名を変えられるが、inviteId は変えられない", async () => {
+  it("本人は表示名を変えられるが、inviteId は別の値に変えられない", async () => {
     await seedShare();
     await seed((db) => setDoc(doc(db, "sharedLogs", SLUG, "members", BOB), member()));
     const ref = doc(as(BOB), "sharedLogs", SLUG, "members", BOB);
@@ -281,13 +283,24 @@ describe("sharedLogs/{slug}/members/{userId}", () => {
     await assertFails(updateDoc(ref, { inviteId: "u".repeat(32) }));
   });
 
+  it("本人は inviteId を空にできる（読める人に招待の番号を見せないため）", async () => {
+    await seedShare();
+    await seed((db) => setDoc(doc(db, "sharedLogs", SLUG, "members", BOB), member()));
+
+    await assertSucceeds(updateDoc(doc(as(BOB), "sharedLogs", SLUG, "members", BOB), { inviteId: "" }));
+  });
+
   it("持ち主はメンバーを外せる（linked を外し revoked を付ける）が、表示名は変えられない", async () => {
     await seedShare();
     await seed((db) => setDoc(doc(db, "sharedLogs", SLUG, "members", BOB), member()));
     const ref = doc(as(ALICE), "sharedLogs", SLUG, "members", BOB);
 
     await assertFails(updateDoc(ref, { linked: false }));
-    await assertSucceeds(updateDoc(ref, { linked: false, revoked: true }));
+    await assertFails(updateDoc(ref, { linked: false, revoked: true }));
+    await assertFails(
+      updateDoc(ref, { linked: false, revoked: true, revokedAt: Timestamp.fromMillis(Date.now() - DAY) }),
+    );
+    await assertSucceeds(updateDoc(ref, { linked: false, revoked: true, revokedAt: serverTimestamp() }));
     await assertFails(updateDoc(ref, { displayName: "勝手な名前" }));
   });
 
@@ -301,7 +314,10 @@ describe("sharedLogs/{slug}/members/{userId}", () => {
   describe("持ち主に外されたメンバー", () => {
     const revoked = () =>
       seed((db) =>
-        setDoc(doc(db, "sharedLogs", SLUG, "members", BOB), member({ linked: false, revoked: true })),
+        setDoc(
+          doc(db, "sharedLogs", SLUG, "members", BOB),
+          member({ linked: false, revoked: true, revokedAt: Timestamp.fromMillis(Date.now() - 30_000) }),
+        ),
       );
     const bobRef = () => doc(as(BOB), "sharedLogs", SLUG, "members", BOB);
 
@@ -327,10 +343,27 @@ describe("sharedLogs/{slug}/members/{userId}", () => {
       await assertFails(updateDoc(bobRef(), { linked: true, revoked: false, inviteId: TOKEN2 }));
     });
 
-    it("持ち主が新しく出した期限内の招待でなら入り直せる", async () => {
+    it("外される前に出ていた招待では、期限内でも入り直せない", async () => {
       await seedShare();
       await revoked();
       await seed((db) => setDoc(doc(db, "sharedInvites", TOKEN2), invite()));
+
+      await assertFails(updateDoc(bobRef(), { linked: true, revoked: false, inviteId: TOKEN2 }));
+    });
+
+    it("外したあとに出した招待でも、外した印（revokedAt）は本人が書き換えられない", async () => {
+      await seedShare();
+      await revoked();
+
+      await assertFails(updateDoc(bobRef(), { revokedAt: Timestamp.fromMillis(0) }));
+    });
+
+    it("持ち主が外したあとに出した期限内の招待でなら入り直せる", async () => {
+      await seedShare();
+      await revoked();
+      await seed((db) =>
+        setDoc(doc(db, "sharedInvites", TOKEN2), invite({ createdAt: Timestamp.fromMillis(Date.now()) })),
+      );
 
       await assertSucceeds(updateDoc(bobRef(), { linked: true, revoked: false, inviteId: TOKEN2 }));
       await assertSucceeds(getDoc(chunkRef(as(BOB))));
@@ -361,31 +394,89 @@ describe("sharedLogs/{slug}/members/{userId}", () => {
   });
 });
 
-describe("sharedInvites/{token}", () => {
-  it("持ち主は自分の共有の招待を作れる", async () => {
-    await seedShare();
+describe("共有を止めたあとの招待", () => {
+  it("止めている間は、期限内の招待でも加われない", async () => {
+    await seedShare({ revision: "revoked" });
+    await seed((db) => setDoc(doc(db, "sharedInvites", TOKEN), invite()));
 
-    await assertSucceeds(setDoc(doc(as(ALICE), "sharedInvites", TOKEN), invite()));
+    await assertFails(
+      setDoc(doc(as(CAROL), "sharedLogs", SLUG, "members", CAROL), member({ displayName: "キャロル" })),
+    );
+  });
+
+  it("また共有しても、止める前に出した招待では加われない", async () => {
+    await seedShare({ invitesSince: Timestamp.fromMillis(Date.now() - 30_000) });
+    await seed((db) => setDoc(doc(db, "sharedInvites", TOKEN), invite()));
+
+    await assertFails(
+      setDoc(doc(as(CAROL), "sharedLogs", SLUG, "members", CAROL), member({ displayName: "キャロル" })),
+    );
+  });
+
+  it("また共有したあとに出した招待でなら加われる", async () => {
+    await seedShare({ invitesSince: Timestamp.fromMillis(Date.now() - 30_000) });
+    await seed((db) =>
+      setDoc(doc(db, "sharedInvites", TOKEN), invite({ createdAt: Timestamp.fromMillis(Date.now()) })),
+    );
+
+    await assertSucceeds(
+      setDoc(doc(as(CAROL), "sharedLogs", SLUG, "members", CAROL), member({ displayName: "キャロル" })),
+    );
+  });
+
+  it("持ち主は止めた印（invitesSince）を消したり戻したりできず、いまの時刻へ進めることだけできる", async () => {
+    const since = Timestamp.fromMillis(Date.now() - 30_000);
+    await seedShare({ invitesSince: since });
+    const ref = doc(as(ALICE), "sharedLogs", SLUG);
+
+    await assertFails(setDoc(ref, share()));
+    await assertFails(setDoc(ref, share({ invitesSince: Timestamp.fromMillis(0) })));
+    await assertSucceeds(setDoc(ref, share({ invitesSince: since, scope: "public" })));
+    await assertSucceeds(setDoc(ref, share({ revision: "revoked", invitesSince: serverTimestamp() })));
+  });
+});
+
+describe("sharedInvites/{token}", () => {
+  it("持ち主は自分の共有の招待を作れる（作った時刻はサーバーの時刻）", async () => {
+    await seedShare();
+    const ref = doc(as(ALICE), "sharedInvites", TOKEN);
+
+    await assertFails(setDoc(ref, invite({ createdAt: Timestamp.fromMillis(Date.now() + DAY) })));
+    await assertSucceeds(setDoc(ref, invite({ createdAt: serverTimestamp() })));
   });
 
   it("他人の共有の招待は作れない", async () => {
     await seedShare();
 
-    await assertFails(setDoc(doc(as(BOB), "sharedInvites", TOKEN), invite({ ownerId: BOB })));
+    await assertFails(
+      setDoc(doc(as(BOB), "sharedInvites", TOKEN), invite({ ownerId: BOB, createdAt: serverTimestamp() })),
+    );
   });
 
   it("推測できる短いトークンの招待は作れない", async () => {
     await seedShare();
 
-    await assertFails(setDoc(doc(as(ALICE), "sharedInvites", "short"), invite()));
+    await assertFails(
+      setDoc(doc(as(ALICE), "sharedInvites", "short"), invite({ createdAt: serverTimestamp() })),
+    );
   });
 
   it("期限が 31 日より先、または過去の招待は作れない", async () => {
     await seedShare();
     const ref = doc(as(ALICE), "sharedInvites", TOKEN);
 
-    await assertFails(setDoc(ref, invite({ expiresAt: Timestamp.fromMillis(Date.now() + 32 * DAY) })));
-    await assertFails(setDoc(ref, invite({ expiresAt: Timestamp.fromMillis(Date.now() - DAY) })));
+    await assertFails(
+      setDoc(
+        ref,
+        invite({ expiresAt: Timestamp.fromMillis(Date.now() + 32 * DAY), createdAt: serverTimestamp() }),
+      ),
+    );
+    await assertFails(
+      setDoc(
+        ref,
+        invite({ expiresAt: Timestamp.fromMillis(Date.now() - DAY), createdAt: serverTimestamp() }),
+      ),
+    );
   });
 
   it("有効な招待は、ログインしていない人でも 1 件ずつ読める", async () => {

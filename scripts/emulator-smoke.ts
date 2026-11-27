@@ -221,7 +221,23 @@ const invite = {
   scenarioTitle: "scenario",
   expiresAt: new Date(Date.now() + 86400000),
 };
-await check("owner can issue an expiring invitation", await fs("PATCH", invitePath, A.token, invite), 200);
+// 招待の createdAt はサーバーの時刻でなければならない（firestore.rules）。REST では REQUEST_TIME の変換で書く
+const issueInvite = (token: string, path: string, data: Record<string, unknown>) =>
+  req(
+    FIRESTORE_PORT,
+    `/v1/projects/${PROJECT}/databases/${DATABASE}/documents:commit`,
+    "POST",
+    {
+      writes: [
+        {
+          update: { name: `projects/${PROJECT}/databases/${DATABASE}/documents/${path}`, ...fields(data) },
+          updateTransforms: [{ fieldPath: "createdAt", setToServerValue: "REQUEST_TIME" }],
+        },
+      ],
+    },
+    token,
+  );
+await check("owner can issue an expiring invitation", await issueInvite(A.token, invitePath, invite), 200);
 await check("invitation link can show a safe overview", await fs("GET", invitePath), 200);
 await check(
   "outsider cannot read members payload before accepting",
