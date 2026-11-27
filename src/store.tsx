@@ -80,6 +80,26 @@ function restore(storageKey = KEY): RestoreResult {
   }
 }
 
+/**
+ * この端末が出した共有ページ（ログの slug・キャラクターの id）の控え。記録から消したのに共有を止める前に
+ * タブを閉じた分を、次に開いたときに止めるため（記録にはもう残っていないので、控えでしか分からない）
+ */
+function readPublishedIds(storageKey: string, kind: "logs" | "characters"): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`${storageKey}-published-${kind}`) ?? "[]");
+    return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function writePublishedIds(storageKey: string, kind: "logs" | "characters", ids: Iterable<string>): void {
+  try {
+    localStorage.setItem(`${storageKey}-published-${kind}`, JSON.stringify([...ids]));
+  } catch {
+    /* 控えは助け。書けなくても共有の同期は続ける */
+  }
+}
+
 function readPendingFlag(storageKey: string): boolean {
   try {
     return localStorage.getItem(`${storageKey}-pending`) === "true";
@@ -165,21 +185,27 @@ export function StoreProvider({
   const dirtyLocalRef = useRef(false);
 
   const published = useRef(
-    new Map(
-      Object.values(initial.state.logs)
+    new Map([
+      // 控えにあって記録にないもの（止める前に閉じた分）は、署名を空にして次の同期で止めさせる
+      ...(authUser ? readPublishedIds(storageKey, "logs") : []).map((slug): [string, string] => [slug, ""]),
+      ...Object.values(initial.state.logs)
         .filter((l) => l.ownerId === authUser?.uid)
-        .map((l) => [l.slug, needsInitialCloudSync ? "" : logPublishSignature(l, initial.state)]),
-    ),
+        .map((l): [string, string] => [
+          l.slug,
+          needsInitialCloudSync ? "" : logPublishSignature(l, initial.state),
+        ]),
+    ]),
   );
   const publishedCharacters = useRef(
-    new Map(
-      Object.values(initial.state.characters)
+    new Map([
+      ...(authUser ? readPublishedIds(storageKey, "characters") : []).map((id): [string, string] => [id, ""]),
+      ...Object.values(initial.state.characters)
         .filter((c) => c.ownerId === authUser?.uid)
-        .map((c) => [
+        .map((c): [string, string] => [
           c.id,
           needsInitialCloudSync ? "" : characterPublishSignature(c, initial.state, authUser!.uid),
         ]),
-    ),
+    ]),
   );
   /** 共有シナリオ一覧へ出した、自分が足したシナリオ（中身の署名） */
   const publishedScenarios = useRef(
@@ -331,6 +357,41 @@ export function StoreProvider({
             publishSharedScenario,
           } = await import("./lib/cloud-state");
 
+          // 共有ページ（ログ・キャラクター）は、記録を保存する前に合わせる。消した・範囲を狭めた記録を先に保存すると、
+          // その間にタブを閉じたとき、次に開いた端末は「もう合わせた」とみなして共有が開いたまま残るため。
+          // 共有の更新に失敗したら記録も保存せず、次の保存でやり直す
+          const owned = Object.values(state.logs).filter((l) => l.ownerId === authUser.uid);
+          const slugs = new Set(owned.map((l) => l.slug));
+          for (const slug of published.current.keys()) {
+            if (!slugs.has(slug)) {
+              await deleteSharedLog(slug);
+              published.current.delete(slug);
+            }
+          }
+          for (const log of owned) {
+            const signature = logPublishSignature(log, state);
+            if (published.current.get(log.slug) === signature) continue;
+            await publishSharedLog(log, state);
+            published.current.set(log.slug, signature);
+          }
+          writePublishedIds(storageKey, "logs", published.current.keys());
+
+          const characters = Object.values(state.characters).filter((c) => c.ownerId === authUser.uid);
+          const characterIds = new Set(characters.map((c) => c.id));
+          for (const id of publishedCharacters.current.keys()) {
+            if (!characterIds.has(id)) {
+              await deleteSharedCharacter(id);
+              publishedCharacters.current.delete(id);
+            }
+          }
+          for (const character of characters) {
+            const signature = characterPublishSignature(character, state, authUser.uid);
+            if (publishedCharacters.current.get(character.id) === signature) continue;
+            await publishSharedCharacter(character, state);
+            publishedCharacters.current.set(character.id, signature);
+          }
+          writePublishedIds(storageKey, "characters", publishedCharacters.current.keys());
+
           revision.current = await saveCloudState(authUser.uid, state, revision.current);
           lastSavedState.current = state;
           if (!alive.current) return;
@@ -347,21 +408,6 @@ export function StoreProvider({
             void persist();
           }
 
-          const owned = Object.values(state.logs).filter((l) => l.ownerId === authUser.uid);
-          const slugs = new Set(owned.map((l) => l.slug));
-          for (const slug of published.current.keys()) {
-            if (!slugs.has(slug)) {
-              await deleteSharedLog(slug);
-              published.current.delete(slug);
-            }
-          }
-          for (const log of owned) {
-            const signature = logPublishSignature(log, state);
-            if (published.current.get(log.slug) === signature) continue;
-            await publishSharedLog(log, state);
-            published.current.set(log.slug, signature);
-          }
-
           for (const log of Object.values(state.logs).filter((l) => l.ownerId !== authUser.uid)) {
             const membership = log.players[authUser.uid];
             if (!membership) continue;
@@ -372,21 +418,6 @@ export function StoreProvider({
               hidden: membership.hidden,
             });
             publishedMemberships.current.set(log.slug, memSig);
-          }
-
-          const characters = Object.values(state.characters).filter((c) => c.ownerId === authUser.uid);
-          const characterIds = new Set(characters.map((c) => c.id));
-          for (const id of publishedCharacters.current.keys()) {
-            if (!characterIds.has(id)) {
-              await deleteSharedCharacter(id);
-              publishedCharacters.current.delete(id);
-            }
-          }
-          for (const character of characters) {
-            const signature = characterPublishSignature(character, state, authUser.uid);
-            if (publishedCharacters.current.get(character.id) === signature) continue;
-            await publishSharedCharacter(character, state);
-            publishedCharacters.current.set(character.id, signature);
           }
 
           for (const sc of Object.values(state.scenarios)) {
