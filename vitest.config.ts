@@ -31,6 +31,8 @@ export default defineConfig({
           name: "node",
           environment: "node",
           include: ["src/**/*.test.ts", "mobile/src/**/*.test.ts"],
+          // 本物の外部サービスに繋ぐ確認は pnpm run test:live だけで動かす（vitest.live.config.ts）
+          exclude: ["**/node_modules/**", "**/*.live.test.ts"],
         },
       },
       {

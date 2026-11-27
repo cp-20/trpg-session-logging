@@ -13,9 +13,21 @@
 | Firestore ルール | `src/test/rules/*.rules-spec.ts`（`@firebase/rules-unit-testing`） | エミュレータ | `pnpm run test:rules` |
 | SDK とルールの通し | `*.emulator.test.ts` | エミュレータ | `pnpm run test:emulator` |
 | 画面の通し・デザイン検査 | `e2e/*.spec.ts` | ブラウザ | `pnpm run test:e2e` |
+| 外部サービスとの契約（本物） | `src/test/live/*.live.test.ts` | node・本物のネット | `pnpm run test:live` |
 | テストの強さ | `stryker.config.json` の `mutate` | node | `pnpm run test:mutation` |
 
 `*.emulator.test.ts` は `NEXT_PUBLIC_FIREBASE_USE_EMULATORS=true` のときだけ動き、`pnpm test` では skip になる（エミュレータが無いと接続待ちで止まるため）。`pnpm run test:emulator` がエミュレータを立ててこの変数を付けて動かす。
+
+## 本物の外部サービスでの確認（`pnpm run test:live`）
+
+キャラシ・シナリオ・関連するものの取り込みが、相手のサイトの今の形で動くかを本物に繋いで確かめる。`pnpm test`・`pnpm run check`・CI には入れない（相手の都合で落ちる・相手に問い合わせが行く）。取り込みの読み取りを直したとき、相手のサイトが変わった疑いがあるとき、リリースの前に手元で動かす。
+
+- **入口は画面と同じ。** キャラシ・シナリオは `handleExternalImport`（`parseExternalUrl` → `fetchUrls` → `parseExternalResponse`）、関連するものは `handleMediaPreview` を、本物の相手に対して呼ぶ。
+- **見本はその場で拾う。** 保管所・ゆとシート・倉庫はシステムごとの公開一覧、いあきゃらは公開のタグ一覧、キャラエノは開発者向け文書の出力例、BOOTH は検索、TALTO は公開 API の新着から拾う。拾えないもの（冒険窓口・ふせったー・動画・X・キャラッシュの公式見本）だけを `src/test/live/live-samples.ts` に置く。実在の名前や本文はリポジトリに入れない。
+- **書きかけの見本で落ちない。** 1 システムにつき候補を 3 件まで見て、期待を満たすものが 1 つあれば通す（`expectSomeCharacter`）。読み取りの誤りなら、どの候補でも落ちる。
+- **相手に迷惑をかけない。** 同じホストへは 1 本ずつ・1.2 秒あけて送り（`politely`）、ファイルも 1 つずつ動かす。User-Agent は `TakufuLiveTest/1.0 (+https://takufu.app)`。
+- **落ちたら根本の原因を直す。** サイトの形が変わった・システムの対応が違うなら読み取りを直し、その形を再現した **作った見本** で単体テスト（`pnpm test`）を足す。本物のキャラシは置かない。
+- 対象外: Discord（`pnpm run test:e2e:discord` の偽サーバー、本番の設定は `node scripts/discord.ts setup-check --url https://takufu.app`）、Firebase（`node scripts/ops.ts firebase`）、ココフォリア・ユドナリウム・Tekey のログ（ファイルの読み込みで通信しない。`src/lib/__fixtures__` の作った見本で確かめる）。
 
 ## 書き方
 

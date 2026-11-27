@@ -324,7 +324,7 @@ export function createTokenCache(): TokenCache {
  * 2. Firebase Authentication で ID トークン（1 時間有効）に替える。鍵はいあきゃらのウェブ版に載っている公開の値
  * 3. /v3/charasheet/{id} を Bearer で読む（URL の解析は external-sync.ts）
  */
-const IACHARA_FIREBASE_API_KEY = "AIzaSyBRP4ntIWd48qx6Liqk-1DnigSMM_xNLgs";
+export const IACHARA_FIREBASE_API_KEY = "AIzaSyBRP4ntIWd48qx6Liqk-1DnigSMM_xNLgs";
 const IACHARA_CONNECT_ERROR = "いあきゃらに接続できませんでした。時間をおいて、もう一度お試しください。";
 const defaultIacharaToken = createTokenCache();
 

@@ -13,6 +13,7 @@
     "gen:data": "node scripts/gen-data.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:live": "vitest run -c vitest.live.config.ts",
     "test:e2e": "playwright test",
     "test:e2e:discord": "playwright test -c playwright.discord.config.ts",
     "test:rules": "firebase emulators:exec --config src/test/rules/firebase.json --only firestore --project takufu-app \"vitest run -c vitest.rules.config.ts\"",

@@ -497,6 +497,32 @@ const CHARASHEET_SW_ABILITIES: [string, string][] = [
   ["NP6", "精神力"],
 ];
 
+/**
+ * 7 版の技能。保管所は 1 行ずつの配列で持つ: SKAN 技能名・SKAM 専門（先頭の * は自由記入の印）・SKAD 初期値・SKAP 合計。
+ * 初期値の欄が空の行は、専門を並べる見出し（近接戦闘・射撃など）なので読まない
+ */
+function charasheetCoc7Skills(r: Rec): (SheetEntry | null)[] {
+  const names = arr(r.SKAN);
+  const specs = arr(r.SKAM);
+  const bases = arr(r.SKAD);
+  const totals = arr(r.SKAP);
+  return names.map((raw, i) => {
+    const name = textOf(raw);
+    const base = numOf(bases[i]);
+    if (!name || base === undefined) return null;
+    const spec = textOf(specs[i])?.replace(/^\*/, "");
+    const label = skillName(name, spec);
+    const total = numOf(totals[i]) ?? base;
+    return entry(label, total, { base, grown: total > base || undefined, group: cocSkillGroup(label) });
+  });
+}
+
+/** 保管所のソード・ワールドの game → 表示名（卓譜の SW2.5 とは別のシステム） */
+const CHARASHEET_SW_LABEL: Record<string, string> = {
+  swordworld2: "ソード・ワールド2.0",
+  swordworld: "ソード・ワールドRPG",
+};
+
 /** 保管所の JSON からシートを作る（名前などは parseCharasheetJson が読む） */
 export function sheetFromCharasheet(root: unknown, url?: string): CharacterSheet | undefined {
   const r = rec(root);
@@ -539,6 +565,8 @@ export function sheetFromCharasheet(root: unknown, url?: string): CharacterSheet
           );
         });
       }
+    } else {
+      skills.push(...charasheetCoc7Skills(r));
     }
     return buildSheet("charasheet", {
       url,
@@ -555,15 +583,31 @@ export function sheetFromCharasheet(root: unknown, url?: string): CharacterSheet
           "abilities",
           COC_ABILITIES.map((k, i) => entry(k, r[`NP${i + 1}`])),
         ),
-        section("resources", "副能力値", "resources", [
-          entry("HP", r.NP9),
-          entry("MP", r.NP10),
-          entry("SAN", r.SAN_Left ?? r.NP11, { max: numOf(r.SAN_Max) }),
-          entry("アイデア", r.NP12),
-          entry("幸運", r.NP13),
-          entry("知識", r.NP14),
-          entry("DB", r.dmg_bonus),
-        ]),
+        section(
+          "resources",
+          "副能力値",
+          "resources",
+          game === "coc"
+            ? [
+                entry("HP", r.NP9),
+                entry("MP", r.NP10),
+                entry("SAN", r.SAN_Left ?? r.NP11, { max: numOf(r.SAN_Max) }),
+                entry("アイデア", r.NP12),
+                entry("幸運", r.NP13),
+                entry("知識", r.NP14),
+                entry("DB", r.dmg_bonus),
+              ]
+            : // 7 版の NP11 は MOV。幸運は Luck_Left、ビルドは build_bonus
+              [
+                entry("HP", r.NP9),
+                entry("MP", r.NP10),
+                entry("SAN", r.SAN_Left, { max: numOf(r.SAN_Max) }),
+                entry("幸運", r.Luck_Left),
+                entry("MOV", r.NP11),
+                entry("DB", r.dmg_bonus),
+                entry("ビルド", r.build_bonus),
+              ],
+        ),
         section("skills", "技能", "skills", skills),
         items,
         memo,
@@ -580,7 +624,7 @@ export function sheetFromCharasheet(root: unknown, url?: string): CharacterSheet
       });
     return buildSheet("charasheet", {
       url,
-      systemLabel: game.includes("2.0") ? "ソード・ワールド2.0" : undefined,
+      systemLabel: CHARASHEET_SW_LABEL[game],
       profile: [
         entry("種族", r.shuzoku_name),
         entry("生まれ", r.umare_name),

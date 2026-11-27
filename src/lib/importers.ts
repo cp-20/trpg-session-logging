@@ -76,6 +76,12 @@ async function readFileArrayBuffer(file: File): Promise<ArrayBuffer> {
    キャラクター保管所・ゆとシートⅡ。ファイルやコマの貼り付けからは読まない（P6）
    ============================================================ */
 
+/** キャラクター保管所のソード・ワールドの game → 卓譜のシステム（BCDice の ID） */
+const CHARASHEET_SWORD_WORLD: Record<string, string> = {
+  swordworld2: "SwordWorld2.0",
+  swordworld: "SwordWorld",
+};
+
 const CHARASHEET_NP_MAP: Record<string, string> = {
   NP1: "str",
   NP2: "con",
@@ -145,6 +151,28 @@ export function parseCharasheetJson(raw: string): ParsedCharacter | null {
       stats: reader.read(root).stats,
     };
   }
+  // ソード・ワールドは保管所の game が swordworld（無印）・swordworld2（2.0）。能力値の NP1〜NP6 は器用度〜精神力で、
+  // クトゥルフの STR〜SIZ とは別物なので、ソード・ワールドの続く値だけを持つ
+  const sw = CHARASHEET_SWORD_WORLD[game];
+  if (sw) {
+    const swStats: Record<string, number> = {};
+    const lv = num(root.lv);
+    const used = num(root.used_exp);
+    const left = num(root.now_exp);
+    const honor = num(root.total_honor_point);
+    const hp = num(root.HP);
+    if (lv !== undefined) swStats.lv = lv;
+    if (used !== undefined || left !== undefined) swStats.exp = (used ?? 0) + (left ?? 0);
+    if (honor !== undefined) swStats.honor = honor;
+    if (hp !== undefined) swStats.hp = hp;
+    const race = str(root.shuzoku_name)?.trim();
+    return {
+      name: pcName,
+      memo: [race ? `種族: ${race}` : "", makingMemo ?? ""].filter(Boolean).join("\n") || undefined,
+      systemId: sw,
+      stats: swStats,
+    };
+  }
   let systemId: string | undefined;
   if (game.includes("coc7") || game.includes("7")) systemId = "coc7";
   else if (game === "coc" || game.includes("coc6")) systemId = "coc6";
@@ -153,6 +181,14 @@ export function parseCharasheetJson(raw: string): ParsedCharacter | null {
   else if (shuzoku && stats.san === undefined) systemId = "sw25";
   else if (stats.san !== undefined || root.NP11 !== undefined) {
     systemId = (stats.str ?? 0) >= 25 || (stats.edu ?? 0) >= 25 ? "coc7" : "coc6";
+  }
+
+  if (game === "coc7") {
+    // 保管所の 7 版の NP11 は MOV、幸運は Luck_Left（6 版の NP13 は無い）
+    delete stats.luck;
+    if (num(root.SAN_Left) === undefined && num(root.SAN) === undefined) delete stats.san;
+    const luck = num(root.Luck_Left);
+    if (luck !== undefined) stats.luck = luck;
   }
 
   return {

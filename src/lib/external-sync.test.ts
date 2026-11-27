@@ -252,7 +252,7 @@ describe("parseExternalUrl", () => {
       provider: "talto",
       kind: "scenario",
       displayUrl: "https://talto.cc/projects/p-001",
-      fetchUrls: ["https://talto.cc/projects/p-001"],
+      fetchUrls: ["https://us-central1-talto-trpg.cloudfunctions.net/api/v1/projects/p-001"],
     });
   });
 
@@ -265,6 +265,25 @@ describe("parseExternalUrl", () => {
       fetchUrls: ["https://charasheet.vampire-blood.net/m4455.js"],
     });
   });
+
+  it("キャラクター保管所の一覧・共有の URL（/m＋32 桁の 16 進）も .js の取得候補を返す", () => {
+    const hash = "0123456789abcdef0123456789abcdef";
+
+    expect(parseExternalUrl(`https://charasheet.vampire-blood.net/m${hash}`)).toEqual({
+      ok: true,
+      provider: "charasheet",
+      kind: "character",
+      displayUrl: `https://charasheet.vampire-blood.net/m${hash}`,
+      fetchUrls: [`https://charasheet.vampire-blood.net/m${hash}.js`],
+    });
+  });
+
+  it.each(["mxyz", `m${"a".repeat(31)}`, `m${"a".repeat(33)}`])(
+    "キャラクター保管所の /%s は ID として受け付けない",
+    (path) => {
+      expect(parseExternalUrl(`https://charasheet.vampire-blood.net/${path}`).ok).toBe(false);
+    },
+  );
 
   it("ゆとシートの URL は id だけを残し、json モードで取得する", () => {
     const yt = parseExternalUrl("https://yutorize.2-d.jp/ytsheet/sw2.5/?id=abc_123&extra=1");

@@ -279,7 +279,7 @@ describe("parseExternalUrl のエラー文と正規化", () => {
         provider: "talto",
         kind: "scenario",
         displayUrl: "https://talto.cc/projects/AbC_1-2",
-        fetchUrls: ["https://talto.cc/projects/AbC_1-2"],
+        fetchUrls: ["https://us-central1-talto-trpg.cloudfunctions.net/api/v1/projects/AbC_1-2"],
       },
     ],
   ])("%s を正規化する", (url, expected) => {
@@ -515,6 +515,39 @@ describe("parseTaltoResponse", () => {
       tags: [],
       description: undefined,
     });
+  });
+
+  it("JSON: 作品ページが読む公開 API の形（name・author・tags・description）から題名・作者・タグ・システムを読む", () => {
+    const project = {
+      id: "p1",
+      category_id: 0,
+      name: "見本のシナリオ",
+      author: "見本の作者",
+      visibility: "public",
+      tags: ["新クトゥルフ神話TRPG", "初心者向け"],
+      description: "あらすじ",
+      players_min: 2,
+      players_max: 4,
+    };
+
+    expect(parseTaltoResponse(JSON.stringify(project), TALTO)).toStrictEqual({
+      title: "見本のシナリオ",
+      author: "見本の作者",
+      systemId: "coc7",
+      source: "talto",
+      sourceUrl: TALTO,
+      tags: ["新クトゥルフ神話TRPG", "初心者向け"],
+      description: "あらすじ",
+    });
+  });
+
+  it("HTML: どの作品ページにも出るサイト共通の題名（TALTO - …）は、作品の題名として読まない", () => {
+    const shell = html(
+      og("og:title", "TALTO - TRPGシナリオ専用投稿サイト") +
+        `<meta name="description" content="TRPG Online Scenario Storage" />`,
+    );
+
+    expect(parseTaltoResponse(shell, TALTO)).toBeNull();
   });
 
   it("JSON: タグは 8 件までにする", () => {

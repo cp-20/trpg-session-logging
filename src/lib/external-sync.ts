@@ -72,6 +72,9 @@ export type ParsedExternalUrlResult =
     }
   | { ok: false; error: string };
 
+/** TALTO の作品ページが読む公開 API */
+export const TALTO_API_ORIGIN = "https://us-central1-talto-trpg.cloudfunctions.net/api";
+
 /** いあきゃらの閲覧ページが読む API */
 export const IACHARA_API_ORIGIN = "https://apiv3.iachara.com";
 
@@ -264,9 +267,9 @@ export function parseExternalUrl(rawUrl: string): ParsedExternalUrlResult {
     };
   }
 
-  // 2. キャラクター保管所 (https://charasheet.vampire-blood.net/{id} or /m{id})
+  // 2. キャラクター保管所 (https://charasheet.vampire-blood.net/{id})。一覧・共有の URL は /m{32 桁の 16 進}（同じ .js で読める）
   if (host === "charasheet.vampire-blood.net") {
-    const m = u.pathname.match(/^\/(m?\d+)(?:\.js|\.html)?\/?$/);
+    const m = u.pathname.match(/^\/(m?\d+|m[0-9a-f]{32})(?:\.js|\.html)?\/?$/);
     if (!m) {
       return {
         ok: false,
@@ -429,7 +432,8 @@ export function parseExternalUrl(rawUrl: string): ParsedExternalUrlResult {
     };
   }
 
-  // 6. TALTO (https://talto.cc/projects/{id})
+  // 6. TALTO (https://talto.cc/projects/{id})。ページは画面側で組み立てる作りで、HTML には題名も作者も無い（どのページも
+  //    「TALTO - TRPGシナリオ専用投稿サイト」）。サイト自身が作品ページの表示に使う公開 API を読む
   if (host === "talto.cc" || host === "www.talto.cc") {
     const m = u.pathname.match(/^\/projects\/([a-zA-Z0-9_-]+)/);
     if (!m) {
@@ -441,7 +445,7 @@ export function parseExternalUrl(rawUrl: string): ParsedExternalUrlResult {
       provider: "talto",
       kind: "scenario",
       displayUrl,
-      fetchUrls: [displayUrl],
+      fetchUrls: [`${TALTO_API_ORIGIN}/v1/projects/${m[1]!}`],
     };
   }
 
@@ -653,7 +657,9 @@ export function parseTaltoResponse(raw: string, url: string): ImportedScenario |
       return {
         title,
         author,
-        systemId: inferScenarioSystemFromText(`${title} ${strVal(obj.system) ?? ""} ${desc ?? ""}`),
+        systemId: inferScenarioSystemFromText(
+          `${title} ${strVal(obj.system) ?? strVal(obj.category_name) ?? ""} ${tags.join(" ")} ${desc ?? ""}`,
+        ),
         source: "talto",
         sourceUrl: url,
         tags,
@@ -665,7 +671,9 @@ export function parseTaltoResponse(raw: string, url: string): ImportedScenario |
   }
 
   const metas = extractMetaTags(trimmed);
-  const stripSite = (t: string) => t.replace(/\s*[-|｜]\s*TALTO.*$/i, "").trim();
+  // 「題 | TALTO」の後ろを落とす。サイト共通の題名（「TALTO - …」）は作品の題名ではないので空にする
+  const stripSite = (t: string) =>
+    /^\s*TALTO(?:\s*[-|｜]|\s*$)/i.test(t) ? "" : t.replace(/\s*[-|｜]\s*TALTO.*$/i, "").trim();
   let title = stripSite(metas["og:title"] ?? metas.title ?? "");
 
   let author: string | undefined = metas.author;

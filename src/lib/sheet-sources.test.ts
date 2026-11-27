@@ -295,6 +295,115 @@ describe("キャラクター保管所", () => {
     });
   });
 
+  /* 保管所の 7 版は技能を SKAN（名前）・SKAM（専門。先頭の * は自由記入の印）・SKAD（初期値）・SKAP（合計）の配列で持つ */
+  describe("7 版の技能欄", () => {
+    const sheet = () =>
+      sheetFromCharasheet({
+        pc_name: "A",
+        game: "coc7",
+        NP9: "10",
+        NP10: "12",
+        NP11: "8",
+        SAN_Left: "55",
+        SAN_Max: "99",
+        Luck_Left: "45",
+        SKAN: ["回避", "運転", "近接戦闘", "芸術/製作", "科学"],
+        SKAM: ["", "自動車", "", "*ピアノ", "*"],
+        SKAD: ["30", "20", "", "5", "1"],
+        SKAP: ["30", "45", "0", "60", "1"],
+      })!;
+
+    it("技能を初期値・分類つきで読み、伸ばしたものに印を付ける", () => {
+      const skills = sheetSection(sheet(), "skills")!.entries;
+
+      expect(skills.find((e) => e.label === "運転（自動車）")).toEqual({
+        label: "運転（自動車）",
+        value: 45,
+        base: 20,
+        grown: true,
+        group: "行動技能",
+      });
+      expect(skills.find((e) => e.label === "回避")).toEqual({
+        label: "回避",
+        value: 30,
+        base: 30,
+        group: "戦闘技能",
+      });
+    });
+
+    it("専門の自由記入の印（*）を落とし、空の専門は技能名だけにする", () => {
+      const labels = sheetSection(sheet(), "skills")!.entries.map((e) => e.label);
+
+      expect(labels).toEqual(expect.arrayContaining(["芸術/製作（ピアノ）", "科学"]));
+    });
+
+    it("初期値の無い見出しの行（近接戦闘など）は技能にしない", () => {
+      const labels = sheetSection(sheet(), "skills")!.entries.map((e) => e.label);
+
+      expect(labels).not.toContain("近接戦闘");
+    });
+
+    it("副能力値は幸運を Luck_Left から、NP11 を MOV として読む", () => {
+      const resources = sheetSection(sheet(), "resources")!.entries;
+
+      expect(resources.map((e) => [e.label, e.value])).toEqual([
+        ["HP", 10],
+        ["MP", 12],
+        ["SAN", 55],
+        ["幸運", 45],
+        ["MOV", 8],
+      ]);
+    });
+  });
+
+  /* 保管所のソード・ワールドは game が swordworld2（2.0）・swordworld（無印）。どちらも卓譜の SW2.5 ではない */
+  describe("ソード・ワールド", () => {
+    const sw = (game: string) =>
+      JSON.stringify({
+        pc_name: "A",
+        game,
+        shuzoku_name: "人間",
+        NP1: "12",
+        NP2: "10",
+        NP3: "8",
+        NP4: "9",
+        NP5: "11",
+        NP6: "7",
+        HP: "24",
+        MP: "13",
+        lv: "3",
+        used_exp: "3000",
+        now_exp: "500",
+        total_honor_point: "20",
+      });
+
+    it.each([
+      ["swordworld2", "SwordWorld2.0", "ソード・ワールド2.0"],
+      ["swordworld", "SwordWorld", "ソード・ワールドRPG"],
+    ])("game が %s なら %s として読み、シートに %s と出す", (game, systemId, label) => {
+      const p = parseExternalResponse(
+        "charasheet",
+        sw(game),
+        "application/json",
+        "https://charasheet.vampire-blood.net/1",
+      );
+
+      expect(p?.kind === "character" && p.character.systemId).toBe(systemId);
+      expect(p?.kind === "character" && p.character.sheet?.systemLabel).toBe(label);
+    });
+
+    it("続く値は冒険者レベル・経験点（使った分と残り）・名誉点・HP で、能力値をクトゥルフの STR などに読み替えない", () => {
+      const p = parseExternalResponse(
+        "charasheet",
+        sw("swordworld2"),
+        "application/json",
+        "https://charasheet.vampire-blood.net/1",
+      );
+
+      expect(p?.kind === "character" && p.character.stats).toEqual({ lv: 3, exp: 3500, honor: 20, hp: 24 });
+    });
+  });
+
   it("URL から読むと汎用シートが付く", () => {
     const p = parseExternalResponse(
       "charasheet",
