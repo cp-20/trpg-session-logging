@@ -7,6 +7,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { BRAND_COLORS, MARK_BODY, MARK_PIP_R, MARK_PIPS, MARK_SHAPE } from "../components/brand";
 import { identiconDataUri } from "../lib/identicon";
 import { phraseText, titleSize, type OgCard, type OgPerson, type OgSystem } from "../lib/og-card";
+import type { ReportCard, ReportCardPerson } from "../lib/report-card";
 
 export const OG_SIZE = { width: 1200, height: 630 };
 
@@ -23,12 +24,16 @@ const C = {
 
 /* ---------- 書体: Noto Sans JP（satori は woff2 を読めないので、Google Fonts から TTF を一度だけ取る） ---------- */
 
-type Font = { name: string; data: ArrayBuffer; weight: 500 | 800; style: "normal" };
+type Font = { name: string; data: ArrayBuffer; weight: 400 | 500 | 800; style: "normal" };
 let fontsPromise: Promise<Font[]> | null = null;
 
 async function loadFont(weight: 500 | 800): Promise<Font> {
+  return loadGoogleFont("Noto Sans JP", `Noto+Sans+JP:wght@${weight}`, weight);
+}
+
+async function loadGoogleFont(name: string, family: string, weight: 400 | 500 | 800): Promise<Font> {
   // 利用者の文字は送らない（text= で絞らず、書体全体を取って覚えておく）
-  const css = await fetch(`https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@${weight}`).then((r) =>
+  const css = await fetch(`https://fonts.googleapis.com/css2?family=${family}`).then((r) =>
     r.ok ? r.text() : Promise.reject(new Error(`font css ${r.status}`)),
   );
   const url = /src:\s*url\(([^)]+)\)\s*format\('(?:truetype|opentype)'\)/.exec(css)?.[1];
@@ -36,7 +41,17 @@ async function loadFont(weight: 500 | 800): Promise<Font> {
   const data = await fetch(url).then((r) =>
     r.ok ? r.arrayBuffer() : Promise.reject(new Error(`font ${r.status}`)),
   );
-  return { name: "Noto Sans JP", data, weight, style: "normal" };
+  return { name, data, weight, style: "normal" };
+}
+
+/** 卓報告カードの見出しの書体（LP と同じデラゴシック） */
+let displayPromise: Promise<Font> | null = null;
+function displayFont(): Promise<Font> {
+  displayPromise ??= loadGoogleFont("Dela Gothic One", "Dela+Gothic+One", 400).catch((error: unknown) => {
+    displayPromise = null;
+    throw error;
+  });
+  return displayPromise;
 }
 
 function fonts(): Promise<Font[]> {
@@ -70,11 +85,14 @@ function Watermark({
   color,
   opacity,
   style,
+  pipOpacity = 1,
 }: {
   size: number;
   color: string;
   opacity: number;
   style: CSSProperties;
+  /** 山吹の目の濃さ（紙の札の上では控えめに） */
+  pipOpacity?: number;
 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" style={{ position: "absolute", ...style }}>
@@ -86,7 +104,7 @@ function Watermark({
           cy={p.cy}
           r={MARK_PIP_R}
           fill={i === 1 ? C.yellow : color}
-          fillOpacity={i === 1 ? 1 : opacity}
+          fillOpacity={i === 1 ? pipOpacity : opacity}
         />
       ))}
     </svg>
@@ -149,7 +167,18 @@ function Face({ person, size, ring }: { person: OgPerson; size: number; ring?: s
  * 見出し。文節ごとに折る（P19）。satori は日本語の keep-all・auto-phrase を持たないので、
  * 文節を 1 つずつ折り返す箱に入れる。2 行を超える分は隠す（長さは og-card の clip と titleSize で収める）
  */
-function Phrases({ text, size, lineHeight }: { text: string; size: number; lineHeight: number }) {
+function Phrases({
+  text,
+  size,
+  lineHeight,
+  display,
+}: {
+  text: string;
+  size: number;
+  lineHeight: number;
+  /** デラゴシックで描く（卓報告カードの題名） */
+  display?: boolean;
+}) {
   const parts = phraseText(text)
     .split(/\u200B|(?<= )/)
     .filter(Boolean);
@@ -161,9 +190,10 @@ function Phrases({ text, size, lineHeight }: { text: string; size: number; lineH
         maxHeight: size * lineHeight * 2,
         overflow: "hidden",
         fontSize: size,
-        fontWeight: 800,
+        fontWeight: display ? 400 : 800,
         lineHeight,
         letterSpacing: "0.01em",
+        ...(display ? { fontFamily: "Dela Gothic One" } : {}),
       }}
     >
       {parts.map((p, i) => (
@@ -346,6 +376,163 @@ function Card({ card }: { card: OgCard }) {
   if (card.kind === "session") return <SessionCard card={card} />;
   if (card.kind === "character") return <CharacterCard card={card} />;
   return <GenericCard card={card} />;
+}
+
+/* ---------- 卓報告カード（X の #卓報告 に貼る画像。1200×675 = X の 16:9） ---------- */
+
+export const REPORT_SIZE = { width: 1200, height: 675 };
+
+function ReportFace({ p, kind, size }: { p: ReportCardPerson; kind: "user" | "character"; size: number }) {
+  return (
+    // oxlint-disable-next-line nextjs/no-img-element -- satori は <img> で描く
+    <img
+      src={p.image ?? identiconDataUri(p.seed, kind)}
+      width={size}
+      height={size}
+      style={{ borderRadius: 999, objectFit: "cover", border: `2px solid ${C.line}`, flexShrink: 0 }}
+    />
+  );
+}
+
+/** PC の立ち絵・顔。角丸の枠で、主役として大きく */
+function ReportPortrait({
+  p,
+  kind,
+  size,
+}: {
+  p: ReportCardPerson;
+  kind: "user" | "character";
+  size: number;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        width: size,
+        height: size,
+        flexShrink: 0,
+        overflow: "hidden",
+        borderRadius: 22,
+        border: `2px solid ${C.line}`,
+        background: "#fff",
+      }}
+    >
+      {/* oxlint-disable-next-line nextjs/no-img-element -- satori は <img> で描く */}
+      <img
+        src={p.image ?? identiconDataUri(p.seed, kind)}
+        width={size}
+        height={size}
+        style={{ objectFit: "cover" }}
+      />
+    </div>
+  );
+}
+
+/**
+ * 卓報告カード。遊んだ人が「自分の卓の記念」として貼る 1 枚にする: 卓譜の名前は小さく右下だけ、
+ * 色はシステムの色の帯だけ、主役は題名と PC の顔ぶれ。GM は顔ぶれと格を分けて題名の下に置く
+ */
+function ReportCardImage({ card }: { card: ReportCard }) {
+  const meta = [card.when, card.duration, card.table].filter(Boolean).join(" / ");
+  /* 顔ぶれは札の幅いっぱいに。人数が少ないほど大きく（縦は題名の下に収まる 196px まで） */
+  const n = Math.max(card.cast.length, 1);
+  const gap = 24;
+  const col = Math.min(300, Math.floor((1072 - gap * (n - 1)) / n));
+  const size = Math.min(196, col);
+  const accent = card.system?.color ?? C.field;
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        position: "relative",
+        width: "100%",
+        height: "100%",
+        background: C.paper,
+        color: C.ink,
+        fontFamily: "Noto Sans JP",
+      }}
+    >
+      <div style={{ display: "flex", height: 14, background: accent }} />
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, padding: "40px 64px 36px" }}>
+        <div style={row({ gap: 14, fontSize: 24, fontWeight: 800 })}>
+          <span style={{ color: C.field }}>#卓報告</span>
+          {card.system && (
+            <span style={{ display: "block", lineClamp: 1, maxWidth: 760, color: C.ink2 }}>
+              {card.system.name}
+            </span>
+          )}
+          <div style={row({ marginLeft: "auto", gap: 8, fontSize: 20, color: C.ink2 })}>
+            <Mark size={26} tile={C.ink2} on={C.paper} />
+            卓譜
+          </div>
+        </div>
+        <div style={{ display: "flex", marginTop: 16 }}>
+          <Phrases
+            text={card.title}
+            size={Math.round(titleSize(card.title) * 1.05)}
+            lineHeight={1.18}
+            display
+          />
+        </div>
+        <div style={row({ marginTop: 14, gap: 28, fontSize: 24, fontWeight: 500, color: C.ink2 })}>
+          <span>{meta}</span>
+          {card.gm && (
+            <div style={row({ gap: 10 })}>
+              <ReportFace p={card.gm.person} kind="user" size={40} />
+              <span style={{ fontWeight: 800, color: C.field }}>{card.gm.label}</span>
+              <span style={{ fontWeight: 800, color: C.ink }}>{card.gm.person.name}</span>
+            </div>
+          )}
+        </div>
+        <div style={row({ marginTop: "auto", gap, alignItems: "flex-start" })}>
+          {card.cast.map((c, i) => {
+            const who = c.pc ?? c.pl;
+            return (
+              <div key={i} style={{ display: "flex", flexDirection: "column", width: col }}>
+                <ReportPortrait p={who} kind={c.pc ? "character" : "user"} size={size} />
+                <span
+                  style={{ display: "block", marginTop: 12, lineClamp: 1, fontSize: 28, fontWeight: 800 }}
+                >
+                  {who.name}
+                </span>
+                {c.pc?.note && (
+                  <span
+                    style={{ display: "block", lineClamp: 1, fontSize: 19, fontWeight: 500, color: C.ink2 }}
+                  >
+                    {c.pc.note}
+                  </span>
+                )}
+                <span
+                  style={{ display: "block", lineClamp: 1, fontSize: 19, fontWeight: 500, color: C.ink2 }}
+                >
+                  {c.pc ? `PL ${c.pl.name}` : "PL"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 卓報告カードを PNG にする。書体を取れないときは 503（豆腐の画像を渡さない） */
+export async function renderReportCard(card: ReportCard): Promise<Response> {
+  let loaded: Font[];
+  try {
+    loaded = [...(await fonts()), await displayFont()];
+  } catch {
+    return Response.json(
+      { ok: false, error: "画像を作れませんでした。時間をおいてもう一度お試しください。" },
+      { status: 503 },
+    );
+  }
+  return new ImageResponse(<ReportCardImage card={card} />, {
+    ...REPORT_SIZE,
+    fonts: loaded,
+    headers: { "Cache-Control": "no-store" },
+  });
 }
 
 /**

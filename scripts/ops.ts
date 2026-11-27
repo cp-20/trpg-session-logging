@@ -208,7 +208,7 @@ async function cmdDeploy(args: string[]): Promise<void> {
     }
     lolipop(["deploy", "--project", LOLIPOP_PROJECT, "--json"], staging);
     console.log(
-      `Check status: ${[cliCmd, ...cliPrefix].join(" ")} project show --project ${LOLIPOP_PROJECT} --json\nSite: https://takufu.lolipop-now.app`,
+      `Check status: ${[cliCmd, ...cliPrefix].join(" ")} project show --project ${LOLIPOP_PROJECT} --json\nSite: https://takufu.app`,
     );
   } finally {
     rmSync(staging, { recursive: true, force: true });
@@ -388,7 +388,7 @@ async function cmdReview(args: string[]): Promise<void> {
     page.on("pageerror", (e) => errors.push(String(e).slice(0, 200)));
     await page.goto("/");
     await page.screenshot({ path: join(outDir, `${mode.name}-signin.png`), fullPage: true });
-    await page.getByRole("button", { name: /サンプルデータをそのまま見る/ }).click();
+    await page.goto("/demo");
     await page.getByRole("navigation", { name: "メイン" }).first().waitFor();
     lines.push(`## ${mode.name}`, "");
     for (const route of AUDIT_ROUTES) {

@@ -3,7 +3,7 @@ import { ProviderIcon } from "./identity";
 import { SettingRow } from "./ui";
 import { useMobileStore } from "../store/mobile-store";
 
-const ORIGIN = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.lolipop-now.app";
+const ORIGIN = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.app";
 
 /**
  * 設定の「Discord」の行（見るだけ）。つなぐ・外すは Web 版の設定で行う（Discord の認可画面はブラウザで開く）。

@@ -10,20 +10,20 @@ import { useEnteredHint } from "../lib/entered-hint";
 import { LP_FONT_FILES } from "../data/lp-fonts";
 import { Field, FieldError, LegalLinks, LogoMark, RightsNotice, Seg, cx } from "../components/ui";
 import {
-  IconCalendar,
   IconDice,
-  IconCharacter,
+  IconDiscord,
+  IconEye,
+  IconEyeOff,
   IconLock,
   IconPlayerPlay,
-  IconSearch,
-  IconShare,
+  IconUsers,
 } from "../components/icons";
 import { features } from "../lib/features";
 import { DICETOUS_COMMONS, FEEDBACK_PATH, OSS_LICENSES } from "../lib/rights";
 import { FEEDBACK_KINDS, FEEDBACK_LIMITS, type FeedbackKind } from "../lib/feedback-kinds";
 
 /** 規約・ポリシーの制定日。改定したら更新する */
-const LEGAL_UPDATED = "2026年11月26日";
+const LEGAL_UPDATED = "2026年11月27日";
 
 /* ---------- 公開ページの外枠（ヘッダーとフッター） ---------- */
 /** 公開ページから記録を使う画面（/signin・/demo・/home）へのリンクは prefetch={false}（先読みで Firebase を落とさない） */
@@ -84,14 +84,14 @@ export function PublicFrame({
       >
         {children}
       </main>
-      <footer className="border-t border-base-300 bg-base-100">
+      <footer className={poster ? "pst-footer" : "border-t border-base-300 bg-base-100"}>
         <div
           className={`mx-auto flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-6 text-xs text-ink2 sm:px-6 ${headWidth}`}
         >
           <span>卓譜</span>
           <LegalLinks />
           <span className="basis-full">
-            クトゥルフ神話TRPG・ソード・ワールド2.5・エモクロアTRPG の二次創作物を含みます。権利表記は
+            クトゥルフ神話TRPG・ソード・ワールド2.5・エモクロアTRPG などの二次創作物を含みます。権利表記は
             <Link to="/licenses" className="underline underline-offset-2 hover:text-base-content">
               ライセンス・権利表記
             </Link>
@@ -104,142 +104,170 @@ export function PublicFrame({
 }
 
 /* ================= LP（/） =================
- * 卓報告ポスター。X の #卓報告 に流れてくるもの（卓報告・ログの名台詞・ダイス・SAN・録画・立ち絵・次の日程）を
- * タイルにして貼り、それが卓譜の 1 ページに集まるところを見せる。中身はすべてサンプルの卓「深淵の呼び声」から。
- * 動くのはタイルの帯だけ（prefers-reduced-motion で止まる）。色・書体は styles.css の .pst-* に閉じる。
+ * 柿色の地に極太の見出しで「卓報告ポスター」の声を出し、中身はアプリと同じ紙と墨の作例で見せる。
+ * 流れ: ヒーロー（卓報告のタイル）→ セッションのページの作例（押して試せる）→ 3 つの仕事 → 取り込み元 → はじめる前に → 締め。
+ * 中身はすべてサンプルの卓「深淵の呼び声」から。同じ例を節ごとに繰り返さない。色・書体は styles.css の .pst-* に閉じる。
  */
 
 function Portrait({ name, file, size = 40 }: { name: string; file: string; size?: number }) {
   return <img src={`/lp/${file}.svg`} alt={name} width={size} height={size} className="pst-portrait" />;
 }
 
-const TILES_A: ReactNode[] = [
-  <div key="report" className="pst-tile pst-tile-report">
-    <div className="pst-tile-tag">#卓報告</div>
-    <div className="pst-display pst-tile-title">深淵の呼び声 第一夜</div>
-    <div className="pst-tile-meta">クトゥルフ神話TRPG 7版 / 9月26日 / 4時間23分</div>
-    <div className="mt-3 flex items-center gap-1.5">
-      <Portrait name="白瀬怜" file="rei" size={34} />
-      <Portrait name="灯堂澪" file="mio" size={34} />
-      <Portrait name="桐生那津" file="natsu" size={34} />
-      <span className="pst-tile-meta ml-1.5">GM みかん</span>
-    </div>
-    <div className="pst-stamp">全員生還</div>
-  </div>,
-  <div key="crit" className="pst-tile pst-tile-dice">
-    <div className="pst-tile-meta flex items-center gap-1.5">
-      <IconDice width={16} height={16} aria-hidden /> CC&lt;=70 目星
-    </div>
-    <div className="pst-display pst-dice-num">04</div>
-    <div className="pst-band pst-band-crit">クリティカル</div>
-  </div>,
-  <div key="quote" className="pst-tile pst-tile-quote">
-    <div className="flex items-center gap-2">
-      <Portrait name="みかん" file="mikan" size={30} />
-      <span className="text-sm font-bold">灯台守・源造</span>
-      <span className="pst-tile-meta">NPC</span>
-    </div>
-    <p className="pst-quote">「霧が出る晩は、沖の鐘の音が浜まで聞こえてくるんだ」</p>
-  </div>,
-  <div key="san" className="pst-tile pst-tile-san">
-    <div className="pst-tile-meta">白瀬怜 / SAN チェック</div>
-    <div className="flex items-baseline gap-3">
-      <span className="pst-display pst-san-from">53→50</span>
-      <span className="pst-display pst-san-loss">−3</span>
-    </div>
-  </div>,
-  <div key="rec" className="pst-tile pst-tile-rec">
-    <span className="pst-play" aria-hidden>
-      <IconPlayerPlay width={18} height={18} />
-    </span>
-    <div>
-      <div className="pst-tile-meta pst-on-dark">録画 Part1</div>
-      <div className="text-base font-bold">1:30:00 灯台の地下</div>
-    </div>
-  </div>,
-];
-
-const TILES_B: ReactNode[] = [
-  <div key="portrait" className="pst-tile pst-tile-portrait">
-    <Portrait name="遠沢澄花" file="towa" size={88} />
-    <div>
-      <div className="pst-display pst-tile-title">遠沢澄花</div>
-      <div className="pst-tile-meta">通過 5 卓 / SAN 61</div>
-      <div className="pst-tile-meta">キャラエノと同期</div>
-    </div>
-  </div>,
-  <div key="fumble" className="pst-tile pst-tile-dice">
-    <div className="pst-tile-meta flex items-center gap-1.5">
-      <IconDice width={16} height={16} aria-hidden /> CC&lt;=60 心理学
-    </div>
-    <div className="pst-display pst-dice-num">98</div>
-    <div className="pst-band pst-band-fumble">ファンブル</div>
-  </div>,
-  <div key="poll" className="pst-tile pst-tile-poll">
-    <div className="pst-tile-meta">次回の日程</div>
-    <div className="pst-display pst-tile-title">11/29（土）21:00</div>
-    <div className="pst-poll-row" aria-label="みかん ◯ そら ◯ りん ◯ なつ ◯">
-      <span>◯</span>
-      <span>◯</span>
-      <span>◯</span>
-      <span>◯</span>
-    </div>
-  </div>,
-  <div key="secret" className="pst-tile pst-tile-secret">
-    <div className="pst-tile-meta flex items-center gap-1.5 pst-on-dark">
-      <IconLock width={14} height={14} aria-hidden /> 秘匿 HO2 / そらだけ
-    </div>
-    <p className="pst-quote">「あなたにだけ、鐘の音が三度聞こえた」</p>
-  </div>,
-  <div key="growth" className="pst-tile pst-tile-growth">
-    <div className="pst-tile-meta">成長</div>
-    <div className="pst-growth">
-      <span>目星</span>
-      <b>65→72</b>
-      <span>心理学</span>
-      <b>45→51</b>
-      <span>クトゥルフ神話</span>
-      <b>0→7</b>
-    </div>
-  </div>,
-];
-
-/** 流れるタイルの帯。継ぎ目なく回すため 2 周ぶん並べ、2 周目は読み上げから外す */
-function TileRow({ tiles, reverse }: { tiles: ReactNode[]; reverse?: boolean }) {
+/** 日程の返事の印（◯ △ ×）。文字の ◯ は細くて読めないので線で描く */
+function Mark({ v }: { v: "yes" | "maybe" | "no" }) {
+  const label = v === "yes" ? "参加" : v === "maybe" ? "未定" : "不参加";
   return (
-    <div className={cx("pst-row", reverse && "is-reverse")}>
-      <div className="pst-row-track">
-        {tiles}
-        <div className="contents" aria-hidden>
-          {tiles}
+    <svg
+      viewBox="0 0 20 20"
+      width={18}
+      height={18}
+      role="img"
+      aria-label={label}
+      className={`pst-mark is-${v}`}
+    >
+      {v === "yes" && <circle cx="10" cy="10" r="6.5" />}
+      {v === "maybe" && <path d="M10 3.5 L16.5 15.5 H3.5 Z" />}
+      {v === "no" && <path d="M4.5 4.5 L15.5 15.5 M15.5 4.5 L4.5 15.5" />}
+    </svg>
+  );
+}
+
+/** ヒーローの右: X の #卓報告 に流れてくるもの。卓が終わったあとに散らばるものの代表 */
+function ReportStack() {
+  return (
+    <div className="pst-stack" aria-hidden="true">
+      <div className="pst-stack-col">
+        <div className="pst-tile pst-tile-report">
+          <div className="pst-tile-tag">#卓報告</div>
+          <div className="pst-display pst-tile-title">深淵の呼び声</div>
+          <div className="pst-tile-meta">
+            <span className="whitespace-nowrap">クトゥルフ神話TRPG 7版</span>{" "}
+            <span className="whitespace-nowrap">9月26日（土）</span>
+          </div>
+          <div className="mt-3 flex items-center gap-1.5">
+            <Portrait name="" file="rei" size={32} />
+            <Portrait name="" file="mio" size={32} />
+            <Portrait name="" file="natsu" size={32} />
+            <span className="pst-tile-meta ml-1.5 whitespace-nowrap">KP みかん</span>
+          </div>
+        </div>
+        <div className="pst-tile pst-tile-quote">
+          <div className="flex items-center gap-2">
+            <Portrait name="" file="natsu" size={28} />
+            <span className="text-sm font-bold">桐生那津</span>
+          </div>
+          <p className="pst-quote">「……この写真、もう一人写ってる」</p>
+        </div>
+      </div>
+      <div className="pst-stack-col">
+        <div className="pst-tile pst-tile-dice">
+          <div className="pst-tile-meta flex items-center gap-1.5">
+            <IconDice width={16} height={16} aria-hidden /> CC&lt;=70 目星
+          </div>
+          <div className="pst-display pst-dice-num">04</div>
+          <div className="pst-band pst-band-crit">クリティカル</div>
+        </div>
+        <div className="pst-tile pst-tile-san">
+          <div className="pst-tile-meta whitespace-nowrap">白瀬怜の SAN</div>
+          <div className="pst-display pst-san-loss">−3</div>
+          <div className="pst-display pst-san-from">53→50</div>
         </div>
       </div>
     </div>
   );
 }
 
-const SYSTEMS = [
-  "クトゥルフ神話TRPG 6版",
-  "クトゥルフ神話TRPG 7版",
-  "エモクロアTRPG",
-  "ソード・ワールド2.5",
-  "マーダーミステリー",
-  "汎用",
+/** 取り込み元。種類ごとに 1 行（押せる部品に見える枠つきの札にはしない）。実装と食い違わないことを Landing.test.ts で確かめる */
+export const LP_SOURCES: { what: string; from: string[] }[] = [
+  { what: "ログ", from: ["CCFOLIA（HTML・JSON・ZIP）", "ユドナリウム（ZIP）", "Tekey（HTML）"] },
+  {
+    what: "キャラシ",
+    from: [
+      "キャラエノ",
+      "キャラッシュ",
+      "いあきゃら",
+      "キャラクター保管所",
+      "ゆとシートⅡ",
+      "キャラクターシート倉庫",
+      "冒険窓口",
+    ],
+  },
+  { what: "録画・配信", from: ["YouTube", "ニコニコ"] },
+  { what: "感想・絵", from: ["ふせったー", "X"] },
+  { what: "Discord", from: ["日程の返事", "予定の告知", "前日のお知らせ", "記録の投稿"] },
 ];
 
-const SOURCES = [
-  "CCFOLIA",
-  "キャラエノ",
-  "いあきゃら",
-  "キャラクター保管所",
-  "ゆとシートⅡ",
-  "キャラッシュ",
-  "YouTube",
-  "ニコニコ",
-  "Twitch",
-  "ふせったー",
-  "pixiv",
-  "Google カレンダー",
+/** はじめる前の心配を口にする人（サンプルの卓の顔ぶれ） */
+const FAQ_ASKERS = ["mio", "mikan", "natsu", "rei", "towa", "kasumi"] as const;
+
+/**
+ * キャラシの能力値・技能・特技表まで表示するシステム（src/data/systems.ts の詳しい定義）。
+ * LP は systems.ts を読まない（JS を軽く保つ）ので名前を写し、Landing.test.ts が定義と突き合わせる
+ */
+export const LP_DETAILED_SYSTEMS = [
+  "クトゥルフ神話TRPG 7版",
+  "クトゥルフ神話TRPG 6版",
+  "エモクロアTRPG",
+  "ソード・ワールド2.5",
+  "ソード・ワールド2.0",
+  "ダブルクロス2nd,3rd",
+  "シノビガミ",
+  "インセイン",
+  "ネクロニカ",
+  "アリアンロッドRPG",
+  "ログ・ホライズンTRPG",
+  "神我狩",
+  "ナイトウィザード The 3rd Edition",
+  "ゴブリンスレイヤーTRPG",
+  "マギカロギア",
+  "キルデスビジネス",
+  "銀剣のステラナイツ",
+  "サタスペ",
+  "フタリソウサ",
+  "グランクレストRPG",
+  "マモノスクランブル",
+  "キズナバレット",
+] as const;
+
+/** はじめる前の心配。答えは実装どおりのことだけを書く */
+const FAQ: { q: string; a: ReactNode }[] = [
+  {
+    q: "秘匿タブは、ほかの PL に見られませんか？",
+    a: "セッションごとに「自分だけ」か「共有範囲の人にも見せる」かを選べます。「自分だけ」にすると、記録した人の手元にだけ残ります。",
+  },
+  {
+    q: "記録したら、すぐ誰でも読める状態になりますか？",
+    a: "なりません。はじめは「メンバー限定」で、参加者と卓のメンバーだけが読めます。共有範囲を広げる前に、同卓者に確かめてください。",
+  },
+  {
+    q: "卓が終わったあと、入力に手間はかかりますか？",
+    a: "日付・所要時間・発言者・ダイスはログから読み取ります。選ぶのは、遊んだシナリオと参加者だけです。",
+  },
+  {
+    q: "スマホだけでも読めますか？",
+    a: "ブラウザで開く Web アプリなので、インストールは要りません。共有リンクはスマホでそのまま読めます。スマホアプリ（iOS・Android）も実装予定です。",
+  },
+  {
+    q: "お金はかかりますか？",
+    a: "無料です。広告もありません。",
+  },
+  {
+    q: "クトゥルフ神話TRPG 以外でも使えますか？",
+    a: (
+      <>
+        BCDice が対応するシステムすべてで使えます。シノビガミやダブルクロスなど {LP_DETAILED_SYSTEMS.length}{" "}
+        のシステムは、キャラシの能力値や技能・特技表まで表示します。
+        <details className="pst-systems">
+          <summary>表示するシステムを見る</summary>
+          <ul className="pst-system-list">
+            {LP_DETAILED_SYSTEMS.map((name) => (
+              <li key={name}>{name}</li>
+            ))}
+          </ul>
+        </details>
+      </>
+    ),
+  },
 ];
 
 /**
@@ -259,171 +287,222 @@ function LpFonts() {
   );
 }
 
+/** 始める操作。ヒーローと締めで同じ文言・同じ並び */
+function StartLinks() {
+  return (
+    <div className="pst-actions">
+      <Link prefetch={false} to="/home" className="pst-btn pst-btn-solid">
+        使ってみる
+      </Link>
+      <Link prefetch={false} to="/demo" className="pst-btn pst-btn-line">
+        サンプルの卓を開く
+      </Link>
+    </div>
+  );
+}
+
 export default function Landing() {
   return (
     <PublicFrame poster>
       <LpFonts />
       <section aria-labelledby="lp-title" className="pst-hero">
-        <div className="mx-auto max-w-6xl px-4 pt-12 sm:px-6 sm:pt-16">
-          <h1 id="lp-title" className="pst-display pst-h1">
-            卓が終わったら、
-            <br />
-            ぜんぶここ。
-          </h1>
-          <p className="pst-lead mt-6">
-            CCFOLIA のログ、探索者の成長、録画や感想、次の日程まで、
-            <br className="hidden sm:inline" />
-            TRPG のセッション記録をひとつのページにまとめる無料アプリです。
-          </p>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            <Link prefetch={false} to="/home" className="pst-btn pst-btn-solid">
-              使ってみる
-            </Link>
-            <Link prefetch={false} to="/demo" className="pst-btn pst-btn-line">
-              サンプルデータをそのまま見る
-            </Link>
+        <div className="pst-hero-grid mx-auto max-w-6xl px-4 sm:px-6">
+          <div className="pst-hero-copy">
+            <h1 id="lp-title" className="pst-display pst-h1">
+              <span className="whitespace-nowrap">卓のログを、</span>
+              <br />
+              <span className="whitespace-nowrap">消えない形に。</span>
+            </h1>
+            <p className="pst-lead">
+              卓が終わったら、CCFOLIA のログを入れるだけです。録画や感想、継続探索者の歩みまで 1
+              ページにまとまり、同卓者にはリンクひとつで、未通過の人には伏せたまま渡せます。
+            </p>
+            <StartLinks />
+            <p className="pst-assure">
+              無料・広告なしで、記録ははじめメンバー限定です。サンプルの卓はログインせずに開けます。
+            </p>
           </div>
-        </div>
-        <div
-          className="pst-wall"
-          role="img"
-          aria-label="卓報告・ダイス・名台詞・SAN・録画・立ち絵・日程のタイル"
-        >
-          <TileRow tiles={TILES_A} />
-          <TileRow tiles={TILES_B} reverse />
+          <ReportStack />
         </div>
       </section>
 
-      <section aria-labelledby="lp-page" className="pst-light">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
-          <h2 id="lp-page" className="pst-display pst-h2">
-            ぜんぶ、
-            <br className="sm:hidden" />
-            ひとつのページに集まる。
-          </h2>
-          <p className="pst-body mt-5">
-            CCFOLIA の HTML や ZIP
-            を入れると、発言・ダイス・秘匿タブを読みやすく整理します。録画や探索者の変化も同じページに並びます。
-          </p>
+      <section aria-labelledby="lp-page" className="pst-stage">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <SessionSheet />
-        </div>
-      </section>
-
-      <section aria-labelledby="lp-features" className="pst-light pst-section-border">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
-          <h2 id="lp-features" className="pst-display pst-h2">
-            卓譜でできること
-          </h2>
-          <div className="pst-spec-grid mt-10">
-            <article className="pst-spec">
-              <div className="pst-spec-head">
-                <IconSearch width={20} height={20} aria-hidden />
-                <h3 className="pst-spec-title">ログを読む・探す</h3>
-              </div>
-              <p className="pst-spec-desc">
-                CCFOLIA
-                のログを取り込むと、発言者・ダイス・チャンネルごとに見やすく整理します。秘匿タブは許可された人だけに表示し、全文検索やダイスだけの抽出にも対応しています。
+          <div className="pst-caption-grid">
+            <h2 id="lp-page" className="pst-display pst-h2">
+              ログも録画も、
+              <br />
+              <span className="whitespace-nowrap">キャラも、</span>
+              <br />
+              <span className="whitespace-nowrap">1 ページに。</span>
+            </h2>
+            <div className="pst-caption">
+              <h3 className="pst-h3">HTML を配らず、リンクひとつ</h3>
+              <p className="pst-body">
+                Discord に HTML
+                を貼る代わりに、共有リンクを送るだけです。整形ツールに通し直す手間も要りません。
               </p>
-              <div className="pst-spec-sample" aria-hidden="true">
-                <span className="pst-log-dice">
-                  <IconDice width={14} height={14} aria-hidden /> CC&lt;=70 目星 <b>04</b>
-                  <span className="pst-band pst-band-crit pst-band-sm">クリティカル</span>
-                </span>
-              </div>
-            </article>
-
-            <article className="pst-spec">
-              <div className="pst-spec-head">
-                <IconCharacter width={20} height={20} aria-hidden />
-                <h3 className="pst-spec-title">探索者の歩みを残す</h3>
-              </div>
-              <p className="pst-spec-desc">
-                キャラシの URL から取り込みます。卓ごとの SAN
-                や技能の変化が積み上がり、キャラシサイトとも自動同期します。
-              </p>
-              <div className="pst-spec-sample" aria-hidden="true">
-                <Portrait name="" file="towa" size={28} />
-                <span className="text-sm font-bold">遠沢澄花</span>
-                <span className="pst-tile-meta">SAN 61 / キャラエノ同期</span>
-              </div>
-            </article>
-
-            <article className="pst-spec">
-              <div className="pst-spec-head">
-                <IconPlayerPlay width={20} height={20} aria-hidden />
-                <h3 className="pst-spec-title">録画・感想・絵をつなぐ</h3>
-              </div>
-              <p className="pst-spec-desc">
-                録画・配信アーカイブ・リプレイ動画・卓報告・ふせったー・イラストをセッションに紐付けます。ものごとの共有範囲とネタバレ設定、目次つきで、ログの時刻を押すと録画のその場面が開きます。
-              </p>
-              <div className="pst-spec-sample" aria-hidden="true">
-                <span className="pst-mini-time">23:41</span>
-                <span className="text-sm font-bold">録画 Part1 / 1:30:00 灯台の地下</span>
-              </div>
-            </article>
-
-            <article className="pst-spec">
-              <div className="pst-spec-head">
-                <IconCalendar width={20} height={20} aria-hidden />
-                <h3 className="pst-spec-title">日程調整から共有まで</h3>
-              </div>
-              <p className="pst-spec-desc">
-                卓メンバーでの日程調整、カレンダー購読、許可したときだけの Google
-                カレンダーとの空き時間の照合に対応しています。共有範囲はメンバー限定・通過した人・公開から選べ、未通過の人にはネタバレを伏せます。X
-                用の卓報告カードも作れます。
-              </p>
-              <div className="pst-spec-sample" aria-hidden="true">
-                <IconLock width={16} height={16} aria-hidden />
-                <span className="text-sm font-bold">通過した人だけに公開</span>
-                <span className="pst-tile-meta">未通過の人には本文を伏せる</span>
-              </div>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section aria-labelledby="lp-sources" className="pst-hero">
-        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-          <h2 id="lp-sources" className="pst-display pst-h2 pst-on-dark">
-            いつものシステムと道具で、そのまま。
-          </h2>
-          <div className="mt-10 grid gap-10 lg:grid-cols-2">
-            <div>
-              <h3 className="pst-group-label">対応システム</h3>
-              <ul className="pst-pill-list mt-4" aria-label="対応システム">
-                {SYSTEMS.map((s) => (
-                  <li key={s}>{s}</li>
-                ))}
-              </ul>
             </div>
-            <div>
-              <h3 className="pst-group-label">取り込み・連携</h3>
-              <ul className="pst-pill-list mt-4" aria-label="取り込める場所">
-                {SOURCES.map((s) => (
-                  <li key={s}>{s}</li>
-                ))}
-              </ul>
+            <div className="pst-caption">
+              <h3 className="pst-h3">録画も感想も、同じページに</h3>
+              <p className="pst-body">
+                YouTube・ニコニコの録画は、ログの時刻からその場面が開きます。ふせったーや X
+                の感想も、ここに並びます。
+              </p>
+            </div>
+            <div className="pst-caption">
+              <h3 className="pst-h3">キャラもシナリオも、つながる</h3>
+              <p className="pst-body">
+                探索者のページにはこの卓の SAN や成長が、シナリオのページには通過した卓が並びます。
+              </p>
             </div>
           </div>
         </div>
       </section>
 
-      <section aria-labelledby="lp-cta" className="pst-yellow">
+      <section aria-labelledby="lp-report" className="pst-light pst-rule-top">
+        <div className="pst-report mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-24">
+          <div className="pst-report-text">
+            <h2 id="lp-report" className="pst-display pst-h2">
+              #卓報告 は、
+              <br />
+              <span className="whitespace-nowrap">ネタバレなしの</span>
+              <br />
+              <span className="whitespace-nowrap">1 枚で。</span>
+            </h2>
+            <p className="pst-body">
+              記録したセッションから、X
+              に貼る卓報告カードを作ります。載せるのはシナリオ名・システム・日付と、PC と PL の顔ぶれです。SAN
+              や HP、エンディングは載せません。
+            </p>
+            <p className="pst-body">スマホでは、画像のまま X やほかのアプリに渡せます。</p>
+          </div>
+          <figure className="pst-report-card">
+            <img
+              src="/lp/report-card.png"
+              alt="卓報告カードの見本: 深淵の呼び声、クトゥルフ神話TRPG 7版、KP みかんと PC 3 人の顔ぶれ"
+              width={1200}
+              height={675}
+              loading="lazy"
+              decoding="async"
+            />
+          </figure>
+        </div>
+      </section>
+
+      <section aria-labelledby="lp-jobs" className="pst-light pst-rule-top">
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-24">
-          <h2 id="lp-cta" className="pst-display pst-h2">
-            次の卓報告は、卓譜で。
+          <h2 id="lp-jobs" className="pst-display pst-h2">
+            卓の前後の手間も、
+            <br className="sm:hidden" />
+            ここで片づく。
           </h2>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            <Link prefetch={false} to="/home" className="pst-btn pst-btn-ink">
-              使ってみる
-            </Link>
-            <Link prefetch={false} to="/demo" className="pst-btn pst-btn-ink-line">
-              サンプルの卓を開く
-            </Link>
+          <div className="pst-jobs">
+            <article className="pst-job">
+              <div className="pst-job-text">
+                <p className="pst-pain">
+                  ログや感想を共有したいけれど、まだ通過していないフォロワーに中身が見えてしまうのが気になります。
+                </p>
+                <h3 className="pst-h3-lg">未通過の人には、伏せたまま</h3>
+                <p className="pst-body">
+                  共有範囲を「通過した人」にすると、開く前に通過済みかを確かめます。未通過の人には、題名のほかは見せません。
+                </p>
+              </div>
+              <div className="pst-mat">
+                <ScopeFigure />
+              </div>
+            </article>
+            <article className="pst-job">
+              <div className="pst-job-text">
+                <p className="pst-pain">
+                  継続探索者の通過歴や SAN・成長を、毎回キャラシに手で書き足しています。
+                </p>
+                <h3 className="pst-h3-lg">継続探索者の歩みが、ログとつながる</h3>
+                <p className="pst-body">
+                  キャラシの URL から取り込むと、セッションごとの SAN
+                  や成長がログと結び付いて残ります。遊んだシナリオは、通過済みとして一覧にまとまります。
+                </p>
+              </div>
+              <div className="pst-mat">
+                <KarteFigure />
+              </div>
+            </article>
+            <article className="pst-job">
+              <div className="pst-job-text">
+                <p className="pst-pain">
+                  日程を調整ツールで集めて、決まったら Discord で告知し直しています。
+                </p>
+                <h3 className="pst-h3-lg">日程調整も Discord への告知も、卓の中で</h3>
+                <p className="pst-body">
+                  候補日にメンバーが ◯ △ × で答えます。決まった予定と前日のお知らせは、卓とつないだ Discord
+                  チャンネルに届きます。Google カレンダーの空き時間との照らし合わせも、実装予定です。
+                </p>
+              </div>
+              <div className="pst-mat">
+                <PollFigure />
+              </div>
+            </article>
           </div>
-          <p className="pst-fine mt-8">
-            卓譜は、TRPG
-            を遊んでいる個人が作っている非公式のツールです。無料で、広告もありません。不具合や要望は
+        </div>
+      </section>
+
+      <section aria-labelledby="lp-sources" className="pst-light pst-rule-top">
+        <div className="pst-sources mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-24">
+          <h2 id="lp-sources" className="pst-display pst-h2">
+            いつもの道具に、
+            <br />
+            足すだけ。
+          </h2>
+          <dl className="pst-source-list">
+            {LP_SOURCES.map((s) => (
+              <div key={s.what} className="pst-source-row">
+                <dt>{s.what}</dt>
+                <dd>
+                  {s.from.map((f) => (
+                    <span key={f} className="pst-source-item">
+                      {f}
+                    </span>
+                  ))}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </section>
+
+      <section aria-labelledby="lp-faq" className="pst-light pst-rule-top">
+        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-24">
+          <h2 id="lp-faq" className="pst-display pst-h2">
+            はじめる前に
+          </h2>
+          <div className="pst-faq">
+            {FAQ.map((f, i) => (
+              <div key={f.q} className="pst-qa">
+                <div className="pst-q">
+                  <Portrait name="" file={FAQ_ASKERS[i % FAQ_ASKERS.length]!} size={36} />
+                  <h3 className="pst-h3">{f.q}</h3>
+                </div>
+                <div className="pst-a">
+                  <LogoMark size={28} />
+                  <div className="pst-body">{f.a}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="lp-cta" className="pst-ink">
+        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
+          <h2 id="lp-cta" className="pst-display pst-h2">
+            次の卓から、
+            <br className="sm:hidden" />
+            卓譜に残そう。
+          </h2>
+          <StartLinks />
+          <p className="pst-fine">
+            卓譜は、個人が作っている非公式の TRPG 向け Web アプリです。不具合や要望は
             <Link to={FEEDBACK_PATH} className="underline underline-offset-2">
               ご意見フォーム
             </Link>
@@ -435,164 +514,424 @@ export default function Landing() {
   );
 }
 
-/** タイルが集まった先の、セッションのページ（サンプルの卓から作った作例） */
+/* ---------- セッションのページの作例（押して試せる） ---------- */
+
+type LogFilter = "all" | "dice" | "secret";
+type Chapter = "intro" | "basement" | "bell";
+
+const SHEET_CAST = [
+  { name: "白瀬怜", file: "rei", pl: "そら", change: "SAN 53→50 (−3)", tone: "loss" },
+  { name: "灯堂澪", file: "mio", pl: "りん", change: "SAN 51→47 (−4)", tone: "loss" },
+  { name: "桐生那津", file: "natsu", pl: "なつ", change: "写真術 +7", tone: "gain" },
+] as const;
+
+const CHAPTERS: { id: Chapter; at: string; title: string }[] = [
+  { id: "intro", at: "0:00:00", title: "導入 灯台のある村" },
+  { id: "basement", at: "1:30:00", title: "灯台の地下" },
+  { id: "bell", at: "3:12:40", title: "三度目の鐘" },
+];
+
+function DiceRoll({
+  cmd,
+  skill,
+  value,
+  result,
+  tone,
+}: {
+  cmd: string;
+  skill: string;
+  value: string;
+  result: string;
+  tone: "crit" | "fumble" | "loss" | "plain";
+}) {
+  return (
+    <span className="pst-roll">
+      <IconDice width={15} height={15} aria-hidden />
+      <span className="font-bold">
+        {cmd}【{skill}】
+      </span>
+      <span className="pst-roll-value">→ {value}</span>
+      <span className={cx("pst-roll-result", `is-${tone}`)}>{result}</span>
+    </span>
+  );
+}
+
+function LogLine({
+  time,
+  chapter,
+  current,
+  onTime,
+  who,
+  file,
+  role,
+  secret,
+  children,
+}: {
+  time: string;
+  /** この発言の時刻から開く録画の場面 */
+  chapter?: Chapter;
+  current?: Chapter;
+  onTime?: (c: Chapter) => void;
+  who: string;
+  file: string;
+  role: string;
+  secret?: boolean;
+  children: ReactNode;
+}) {
+  const linked = chapter && onTime;
+  return (
+    <div className={cx("pst-line", secret && "is-secret", linked && current === chapter && "is-current")}>
+      <Portrait name="" file={file} size={36} />
+      <div className="min-w-0 grow">
+        <div className="pst-line-head">
+          <b>{who}</b>
+          <span className="pst-line-role">{role}</span>
+          {linked ? (
+            <button
+              type="button"
+              className="pst-line-time is-link"
+              aria-pressed={current === chapter}
+              aria-label={`${time} の場面を録画で開く`}
+              onClick={() => onTime(chapter)}
+            >
+              {time}
+            </button>
+          ) : (
+            <span className="pst-line-time">{time}</span>
+          )}
+        </div>
+        <div className="pst-line-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 function SessionSheet() {
-  const [filter, setFilter] = useState<"all" | "dice" | "secret">("all");
+  const [filter, setFilter] = useState<LogFilter>("all");
+  const [chapter, setChapter] = useState<Chapter>("basement");
+  const FILTERS: { v: LogFilter; label: string }[] = [
+    { v: "all", label: "すべて" },
+    { v: "dice", label: "ダイスだけ" },
+    { v: "secret", label: "秘匿タブ" },
+  ];
 
   return (
-    <div className="pst-sheet mt-12">
+    <figure className="pst-sheet" aria-label="セッションのページの作例（サンプルの卓）">
       <div className="pst-sheet-head">
         <div className="min-w-0">
-          <div className="pst-display pst-sheet-title">深淵の呼び声 第一夜</div>
-          <div className="pst-tile-meta">クトゥルフ神話TRPG 7版 / 9月26日（土）20:34–00:57 / 潮騒の会</div>
+          <div className="pst-sheet-crumb">セッション</div>
+          <div className="pst-sheet-title">深淵の呼び声</div>
+          <div className="pst-sheet-meta">
+            <span>9月26日（土）20:34〜24:57</span>
+            <span>4時間23分</span>
+            <span className="pst-sys">クトゥルフ神話TRPG 7版</span>
+            <span>潮騒の会</span>
+            <span className="inline-flex items-center gap-1">
+              <IconUsers width={14} height={14} aria-hidden /> 通過した人
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <Portrait name="みかん" file="mikan" size={32} />
-          <Portrait name="白瀬怜" file="rei" size={32} />
-          <Portrait name="灯堂澪" file="mio" size={32} />
-          <Portrait name="桐生那津" file="natsu" size={32} />
+        <div className="pst-sheet-people" aria-label="参加者">
+          <Portrait name="みかん（KP）" file="mikan" size={34} />
+          <Portrait name="白瀬怜" file="rei" size={34} />
+          <Portrait name="灯堂澪" file="mio" size={34} />
+          <Portrait name="桐生那津" file="natsu" size={34} />
         </div>
       </div>
+
       <div className="pst-sheet-body">
         <div className="pst-sheet-log">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="pst-sheet-label mb-0">ログ</div>
+          <div className="pst-sheet-bar">
+            <div className="pst-sheet-label">
+              ログ <span className="pst-count">54行</span>
+            </div>
             <div className="pst-filter-row" role="group" aria-label="ログの表示切り替え">
-              <button
-                type="button"
-                className={cx("pst-filter-btn", filter === "all" && "is-active")}
-                aria-pressed={filter === "all"}
-                onClick={() => setFilter("all")}
-              >
-                すべて
-              </button>
-              <button
-                type="button"
-                className={cx("pst-filter-btn", filter === "dice" && "is-active")}
-                aria-pressed={filter === "dice"}
-                onClick={() => setFilter("dice")}
-              >
-                ダイスだけ
-              </button>
-              <button
-                type="button"
-                className={cx("pst-filter-btn", filter === "secret" && "is-active")}
-                aria-pressed={filter === "secret"}
-                onClick={() => setFilter("secret")}
-              >
-                秘匿タブ
-              </button>
+              {FILTERS.map((f) => (
+                <button
+                  key={f.v}
+                  type="button"
+                  className={cx("pst-filter-btn", filter === f.v && "is-active")}
+                  aria-pressed={filter === f.v}
+                  onClick={() => setFilter(f.v)}
+                >
+                  {f.label}
+                </button>
+              ))}
             </div>
           </div>
 
-          {filter === "all" && (
-            <>
-              <div className="pst-log-line">
-                <span className="pst-log-time">21:03</span>
-                <Portrait name="白瀬怜" file="rei" size={28} />
-                <p>
-                  <b>白瀬怜</b>「灯台の地下を調べます。足跡が残っていないか、よく見て」
-                </p>
-              </div>
-              <div className="pst-log-line">
-                <span className="pst-log-time">21:04</span>
-                <span className="pst-log-dice">
-                  <IconDice width={14} height={14} aria-hidden /> CC&lt;=70 目星 <b>04</b>
-                  <span className="pst-band pst-band-crit pst-band-sm">クリティカル</span>
-                </span>
-              </div>
-              <div className="pst-log-line is-marked">
-                <span className="pst-log-time">23:41</span>
-                <Portrait name="白瀬怜" file="rei" size={28} />
-                <p>
-                  <b>白瀬怜</b>「……この扉、内側から開けられてる」
-                </p>
-              </div>
-              <div className="pst-note">時刻を押すと、録画のこの場面へ</div>
-            </>
-          )}
-
-          {filter === "dice" && (
-            <>
-              <div className="pst-log-line">
-                <span className="pst-log-time">21:04</span>
-                <span className="pst-log-dice">
-                  <IconDice width={14} height={14} aria-hidden /> CC&lt;=70 目星 <b>04</b>
-                  <span className="pst-band pst-band-crit pst-band-sm">クリティカル</span>
-                </span>
-              </div>
-              <div className="pst-log-line">
-                <span className="pst-log-time">22:18</span>
-                <span className="pst-log-dice">
-                  <IconDice width={14} height={14} aria-hidden /> CC&lt;=60 心理学 <b>98</b>
-                  <span className="pst-band pst-band-fumble pst-band-sm">ファンブル</span>
-                </span>
-              </div>
-              <div className="pst-log-line">
-                <span className="pst-log-time">23:42</span>
-                <span className="pst-log-dice">
-                  <IconDice width={14} height={14} aria-hidden /> 1D100&lt;=53 SAN チェック <b>68</b>
-                  <span className="pst-loss-text font-bold">53→50 (−3)</span>
-                </span>
-              </div>
-            </>
-          )}
-
-          {filter === "secret" && (
-            <>
-              <div className="pst-log-line is-secret">
-                <span className="pst-log-time">22:05</span>
-                <div>
-                  <div className="pst-tile-meta pst-on-dark flex items-center gap-1">
-                    <IconLock width={13} height={13} aria-hidden /> 秘匿 HO2 / 許可されたメンバーだけ表示
-                  </div>
-                  <p className="mt-1">
-                    <b>GM みかん</b>「あなたにだけ、鐘の音が三度聞こえた」
-                  </p>
-                </div>
-              </div>
-              <div className="pst-log-line">
-                <span className="pst-log-time">22:06</span>
-                <Portrait name="灯堂澪" file="mio" size={28} />
-                <p>
-                  <b>灯堂澪</b>「……今のは、ほかの二人には聞こえていないんですね」
-                </p>
-              </div>
-            </>
-          )}
+          <div className="pst-lines" data-user-content>
+            {filter === "all" && (
+              <>
+                <LogLine
+                  time="20:47"
+                  chapter="intro"
+                  current={chapter}
+                  onTime={setChapter}
+                  who="灯台守・源造"
+                  file="mikan"
+                  role="NPC"
+                >
+                  「霧が出る晩は、沖の鐘の音が浜まで聞こえてくるんだ」
+                </LogLine>
+                <LogLine
+                  time="22:03"
+                  chapter="basement"
+                  current={chapter}
+                  onTime={setChapter}
+                  who="白瀬怜"
+                  file="rei"
+                  role="PC・そら"
+                >
+                  「灯台の地下を調べます。足跡が残っていないか、よく見て」
+                </LogLine>
+                <LogLine time="22:04" who="白瀬怜" file="rei" role="PC・そら">
+                  <DiceRoll cmd="CC<=70" skill="目星" value="04" result="クリティカル" tone="crit" />
+                </LogLine>
+                <LogLine time="22:05" who="桐生那津" file="natsu" role="PC・なつ">
+                  「足跡、二人分ある。片方は……裸足？」
+                </LogLine>
+                <LogLine time="22:18" who="灯堂澪" file="mio" role="PC・りん">
+                  <DiceRoll cmd="CC<=60" skill="心理学" value="98" result="ファンブル" tone="fumble" />
+                </LogLine>
+                <LogLine
+                  time="23:41"
+                  chapter="bell"
+                  current={chapter}
+                  onTime={setChapter}
+                  who="灯堂澪"
+                  file="mio"
+                  role="PC・りん"
+                >
+                  「……この扉、内側から開けられてる」
+                </LogLine>
+              </>
+            )}
+            {filter === "dice" && (
+              <>
+                <LogLine time="22:04" who="白瀬怜" file="rei" role="PC・そら">
+                  <DiceRoll cmd="CC<=70" skill="目星" value="04" result="クリティカル" tone="crit" />
+                </LogLine>
+                <LogLine time="22:18" who="灯堂澪" file="mio" role="PC・りん">
+                  <DiceRoll cmd="CC<=60" skill="心理学" value="98" result="ファンブル" tone="fumble" />
+                </LogLine>
+                <LogLine time="23:42" who="白瀬怜" file="rei" role="PC・そら">
+                  <DiceRoll cmd="CC<=53" skill="SAN" value="68" result="SAN 53→50 (−3)" tone="loss" />
+                </LogLine>
+                <LogLine time="23:50" who="桐生那津" file="natsu" role="PC・なつ">
+                  <DiceRoll cmd="CC<=45" skill="写真術" value="31" result="成功" tone="plain" />
+                </LogLine>
+              </>
+            )}
+            {filter === "secret" && (
+              <>
+                <LogLine time="22:05" who="みかん" file="mikan" role="KP・秘匿 HO2" secret>
+                  「あなたにだけ、鐘の音が三度聞こえた」
+                </LogLine>
+                <LogLine time="22:06" who="灯堂澪" file="mio" role="PC・りん" secret>
+                  「……今のは、ほかの二人には聞こえていないんですね」
+                </LogLine>
+                <LogLine time="22:07" who="みかん" file="mikan" role="KP・秘匿 HO2" secret>
+                  「ええ。鐘のことは、まだ誰にも話さないでください」
+                </LogLine>
+              </>
+            )}
+          </div>
         </div>
+
         <div className="pst-sheet-side">
           <div>
-            <div className="pst-sheet-label">関連するもの</div>
-            <div className="pst-tile-rec pst-rec-inline">
-              <span className="pst-play" aria-hidden>
-                <IconPlayerPlay width={16} height={16} />
-              </span>
-              <div>
-                <div className="pst-tile-meta pst-on-dark">録画 / 目次 4</div>
-                <div className="text-sm font-bold">1:30:00 灯台の地下</div>
-              </div>
+            <div className="pst-sheet-label">録画 YouTube</div>
+            <div className="pst-rec">
+              <ol className="pst-rec-list">
+                {CHAPTERS.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      className={cx(chapter === c.id && "is-current")}
+                      aria-pressed={chapter === c.id}
+                      onClick={() => setChapter(c.id)}
+                    >
+                      <span className="pst-rec-play" aria-hidden>
+                        <IconPlayerPlay width={12} height={12} />
+                      </span>
+                      <span className="pst-rec-at">{c.at}</span>
+                      <span className="min-w-0 truncate">{c.title}</span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
             </div>
           </div>
           <div>
-            <div className="pst-sheet-label">探索者の変化</div>
-            <div className="pst-growth">
-              <span>白瀬怜 SAN</span>
-              <b className="pst-loss-text">53→50 (−3)</b>
-              <span>灯堂澪 図書館</span>
-              <b>70→76 (+6)</b>
-            </div>
+            <div className="pst-sheet-label">探索者</div>
+            <ul className="pst-cast">
+              {SHEET_CAST.map((c) => (
+                <li key={c.name}>
+                  <Portrait name="" file={c.file} size={32} />
+                  <span className="min-w-0 grow">
+                    <b>{c.name}</b>
+                    <span className="pst-cast-pl">PL {c.pl}</span>
+                  </span>
+                  <span className={cx("pst-cast-change", c.tone === "loss" ? "pst-loss" : "pst-gain")}>
+                    {c.change}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
           <div>
-            <div className="pst-sheet-label flex items-center gap-1.5">
-              <IconShare width={14} height={14} aria-hidden /> 共有とネタバレ配慮
+            <div className="pst-sheet-label">感想・絵</div>
+            <ul className="pst-links">
+              <li>
+                <span className="pst-link-service">ふせったー</span>
+                <b>深淵の呼び声 感想（ネタバレ）</b>
+                <span className="pst-cast-pl">そら</span>
+              </li>
+              <li>
+                <span className="pst-link-service">X</span>
+                <b>「鐘の音、まだ耳に残ってる」</b>
+                <span className="pst-cast-pl">りん</span>
+              </li>
+            </ul>
+          </div>
+          <div>
+            <div className="pst-sheet-label">シナリオ</div>
+            <div className="pst-scenario">
+              <b>深淵の呼び声</b>
+              <span className="pst-cast-pl">このシナリオのセッション 3</span>
             </div>
-            <p className="text-sm leading-relaxed">
-              <b>通過した人</b>だけに公開します。未通過の人には本文を伏せます。X
-              用の卓報告カードもここから作れます。
-            </p>
           </div>
         </div>
+      </div>
+    </figure>
+  );
+}
+
+/* ---------- 3 つの仕事の作例 ---------- */
+
+function ScopeFigure() {
+  return (
+    <div className="pst-split" aria-hidden="true">
+      <div className="pst-figure">
+        <div className="pst-pane-label">
+          <IconEye width={14} height={14} /> 通過した人が開くと
+        </div>
+        <div className="pst-mini-title">深淵の呼び声</div>
+        <div className="pst-mini-line">
+          <Portrait name="" file="mio" size={26} />
+          <span>「……この扉、内側から開けられてる」</span>
+        </div>
+        <div className="pst-mini-line">
+          <Portrait name="" file="rei" size={26} />
+          <span>「鐘の音が、三度」</span>
+        </div>
+      </div>
+      <div className="pst-figure">
+        <div className="pst-pane-label">
+          <IconEyeOff width={14} height={14} /> 未通過の人には
+        </div>
+        <div className="pst-mini-title">深淵の呼び声</div>
+        <div className="pst-gate">
+          <IconLock width={18} height={18} />
+          <span>シナリオを通過した人だけが読めます</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KarteFigure() {
+  const rows = [
+    {
+      date: "11月8日",
+      title: "鏡の館の晩餐",
+      change: "SAN 66→61 (−5)",
+      tone: "loss",
+      growth: "目星 65→72 (+7)",
+    },
+    {
+      date: "10月4日",
+      title: "雨夜の古書店",
+      change: "SAN 70→66 (−4)",
+      tone: "loss",
+      growth: "心理学 45→51 (+6)",
+    },
+    {
+      date: "8月30日",
+      title: "はじまりの手紙",
+      change: "SAN (±0)",
+      tone: "plain",
+      growth: "図書館 70→75 (+5)",
+    },
+  ] as const;
+  return (
+    <div className="pst-figure" aria-hidden="true">
+      <div className="pst-karte-head">
+        <Portrait name="" file="towa" size={52} />
+        <div className="min-w-0">
+          <div className="pst-mini-title">遠沢澄花</div>
+          <div className="pst-tile-meta">地方紙記者・キャラエノと同期</div>
+        </div>
+        <div className="pst-karte-san">
+          <span className="pst-tile-meta">SAN</span>
+          <b>61</b>
+        </div>
+      </div>
+      <ol className="pst-karte">
+        {rows.map((r) => (
+          <li key={r.title}>
+            <span className="pst-karte-date">{r.date}</span>
+            <span className="pst-karte-title">{r.title}</span>
+            <span className={cx("pst-karte-change", r.tone === "loss" && "pst-loss")}>{r.change}</span>
+            <span className="pst-karte-growth">{r.growth}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function PollFigure() {
+  const people = ["mikan", "rei", "mio", "natsu"];
+  const rows: { day: string; marks: ("yes" | "maybe" | "no")[]; chosen?: boolean }[] = [
+    { day: "11月29日（土）21:00〜", marks: ["yes", "yes", "yes", "yes"], chosen: true },
+    { day: "11月30日（日）20:00〜", marks: ["yes", "maybe", "no", "yes"] },
+    { day: "12月6日（土）21:00〜", marks: ["yes", "yes", "maybe", "no"] },
+  ];
+  return (
+    <div className="pst-figure" aria-hidden="true">
+      <div className="pst-mini-title">深淵の呼び声 第二夜の日程</div>
+      <table className="pst-poll">
+        <thead>
+          <tr>
+            <th />
+            {people.map((p) => (
+              <th key={p}>
+                <Portrait name="" file={p} size={26} />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.day} className={cx(r.chosen && "is-chosen")}>
+              <th scope="row">
+                {r.day}
+                {r.chosen && <span className="pst-chosen">決定</span>}
+              </th>
+              {r.marks.map((m, i) => (
+                <td key={i}>
+                  <Mark v={m} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="pst-discord">
+        <IconDiscord width={16} height={16} />
+        <span>決まった予定が、卓の Discord チャンネルにも届きます</span>
       </div>
     </div>
   );
@@ -959,9 +1298,7 @@ export function Terms() {
         />
       </Clause>
       <Clause title="第9条 サービスの変更・停止">
-        <p>
-          運営者は、予告なく本サービスの内容を変更し、または提供を中断・終了することがあります。大切な記録は、設定画面の「バックアップ」から書き出して保管してください。
-        </p>
+        <p>運営者は、予告なく本サービスの内容を変更し、または提供を中断・終了することがあります。</p>
       </Clause>
       <Clause title="第10条 記録の削除">
         <p>
@@ -1013,6 +1350,9 @@ export function Privacy() {
             "端末内の保存領域（localStorage・IndexedDB）: 記録の控え、表示の設定、ログイン状態",
           ]}
         />
+        <p>
+          卓報告カードを作るとき、カードに載せる題名・システム・日付・名前・アイコン画像を本サービスのサーバーに送り、画像にして返します。サーバーには残しません。
+        </p>
         <p>広告や行動分析のための Cookie・計測ツールは使っていません。</p>
       </Clause>
       <Clause title="2. 利用目的">
@@ -1067,6 +1407,7 @@ export function Privacy() {
               <ExternalLink href="https://sentry.io/privacy/">Sentry のプライバシーポリシー</ExternalLink>
             </>,
             "キャラクターシート・シナリオのサイト: 利用者が URL を指定して取り込むとき、本サービスのサーバーがそのページを取得します。利用者のアカウント情報は送りません",
+            "YouTube・ニコニコ・ふせったー・X: セッションの「関連するもの」に貼った URL の題名や本文の頭を出すとき、本サービスのサーバーがそのサービスに問い合わせます。送るのは貼った URL から取り出した ID だけで、利用者のアカウント情報は送りません",
             "X: 卓報告の投稿画面を開くとき、投稿文と共有ページの URL を X に渡します",
             <>
               Discord: ご意見・不具合の報告フォームの内容を、運営者だけが読む Discord

@@ -11,7 +11,7 @@ export interface DiscordConfig {
   publicUrl: string;
 }
 
-export const DEFAULT_PUBLIC_URL = "https://takufu.lolipop-now.app";
+export const DEFAULT_PUBLIC_URL = "https://takufu.app";
 
 export function discordConfig(env: Record<string, string | undefined> = process.env): DiscordConfig {
   return {

@@ -202,6 +202,9 @@ export interface SessionImpression {
  * セッション: 1 つのシナリオを通しで遊んだ 1 回。名前は持たず、シナリオの題名で呼ぶ。
  * 同じシナリオをもう一度遊んだら別のセッション。何夜かに分けて遊んだら sittings が複数になる
  */
+/** シークレットタブの見せ方。shared = 共有範囲の人にも見せる / private = 記録した人だけ */
+export type SecretTabsScope = "shared" | "private";
+
 export interface Log {
   id: string;
   tableId?: string;
@@ -209,6 +212,11 @@ export interface Log {
   systemId: string;
   ownerId: string;
   scope: Scope;
+  /**
+   * シークレットタブとシークレットダイスを、共有ページ（参加者・共有範囲の人が読むもの）に載せるか。
+   * private なら記録した人の手元にだけ残し、共有ページの写しには入れない。無いときは shared
+   */
+  secretTabs?: SecretTabsScope;
   hasLog: boolean;
   channels: Channel[];
   players: Record<string, LinkState>;

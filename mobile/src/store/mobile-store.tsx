@@ -61,8 +61,6 @@ export interface MobileStoreApi {
   exitDemo: () => void;
   resetDemo: () => void;
   refreshProfile: () => void;
-  exportData: () => string;
-  importData: (next: State) => void;
 }
 
 const MobileStoreContext = createContext<MobileStoreApi>(null!);
@@ -615,18 +613,6 @@ export function MobileStoreProvider({ children }: { children: ReactNode }) {
         update((s) => {
           s.users[user.uid] = { ...s.users[user.uid], ...firebaseUserProfile(user) };
         });
-      },
-      exportData: () => JSON.stringify(stateRef.current, null, 2),
-      importData: (next) => {
-        const user = authUserRef.current;
-        if (user && next.me !== user.uid) {
-          throw new Error("このアカウントの記録を選んでください。");
-        }
-        const normalized: State = { ...next, events: next.events ?? {}, entered: true };
-        stateRef.current = normalized;
-        persistLocalNow(normalized, true);
-        setState(normalized);
-        if (user) void runSyncCycle("mutation");
       },
     }),
     [

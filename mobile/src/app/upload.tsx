@@ -1058,7 +1058,7 @@ function Step3Done({
 }) {
   const { tokens } = useTheme();
   const router = useRouter();
-  const origin = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.lolipop-now.app";
+  const origin = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.app";
   const shareUrl = result?.slug ? `${origin}/share/l/${result.slug}` : "";
 
   return (

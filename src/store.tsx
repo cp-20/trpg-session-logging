@@ -100,8 +100,6 @@ export interface StoreStateApi {
   authUser: FirebaseUser | null;
   enterDemo: (userId?: string) => void;
   refreshProfile: () => void;
-  exportData: () => string;
-  importData: (next: State) => void;
 }
 
 export interface SyncStatusApi {
@@ -153,7 +151,7 @@ export function StoreProvider({
   }, [state.entered, storageKey]);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [otherTabUpdated, setOtherTabUpdated] = useState(false);
-  const [dataCorrupt, setDataCorrupt] = useState(initial.issue === "corrupt");
+  const [dataCorrupt] = useState(initial.issue === "corrupt");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [cloudStatus, setCloudStatus] = useState<SyncStatusApi["cloudStatus"]>(
     authUser ? (needsInitialCloudSync ? "saving" : "saved") : "idle",
@@ -530,29 +528,6 @@ export function StoreProvider({
     );
   }, [authUser]);
 
-  const exportData = useCallback(
-    () =>
-      initial.issue === "corrupt"
-        ? (localStorage.getItem(storageKey) ?? JSON.stringify(stateRef.current))
-        : JSON.stringify(stateRef.current, null, 2),
-    [initial.issue, storageKey],
-  );
-
-  const importData = useCallback(
-    (next: State) => {
-      if (authUser && next.me !== authUser.uid) throw new Error("このアカウントの記録を選んでください。");
-      if (dataCorrupt) {
-        const raw = localStorage.getItem(storageKey);
-        if (raw) localStorage.setItem(`${storageKey}-backup-${Date.now()}`, raw);
-      }
-      blockedRef.current = false;
-      dirtyLocalRef.current = true;
-      setDataCorrupt(false);
-      setState({ ...next, events: next.events ?? {}, entered: true });
-    },
-    [authUser, dataCorrupt, storageKey],
-  );
-
   const toast = useCallback((msg: string) => {
     const id = Date.now() + Math.random();
     setToasts((t) => [...t, { id, msg }]);
@@ -569,11 +544,9 @@ export function StoreProvider({
       update,
       enterDemo,
       refreshProfile,
-      exportData,
-      importData,
       toast,
     }),
-    [state, authUser, update, enterDemo, refreshProfile, exportData, importData, toast],
+    [state, authUser, update, enterDemo, refreshProfile, toast],
   );
 
   const syncApi = useMemo<SyncStatusApi>(

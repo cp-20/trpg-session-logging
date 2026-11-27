@@ -80,7 +80,7 @@ export function createDiscordRest(opts: {
         headers: {
           ...(auth ? { Authorization: `Bot ${opts.botToken}` } : {}),
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-          "User-Agent": "DiscordBot (https://takufu.lolipop-now.app, 1)",
+          "User-Agent": "DiscordBot (https://takufu.app, 1)",
         },
         body: body === undefined ? undefined : JSON.stringify(body),
       });

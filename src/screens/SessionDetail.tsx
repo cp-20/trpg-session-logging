@@ -14,6 +14,7 @@ import {
   PageHead,
   ScopeLabel,
   ScopePicker,
+  Seg,
   StatChange,
   SectionTitle,
   Combobox,
@@ -32,7 +33,7 @@ import { isGoodRoll, rollOutcomes, rollTone } from "../lib/roll-tone";
 import { userHref } from "../lib/people";
 import { fmtDates, fmtDur, fmtSessionWhen, sessionDays, sessionPlayMinutes, uid } from "../lib/time";
 import { sittingToFields, sittingsFromFields, type SittingFields } from "../lib/sittings";
-import type { Character, Log, MsgKind, Scope } from "../types";
+import type { Character, Log, MsgKind, Scope, SecretTabsScope } from "../types";
 import {
   IconBooks,
   IconBrandX,
@@ -52,7 +53,8 @@ import {
   IconTable,
   IconX,
 } from "../components/icons";
-import { buildReportCardSVG, svgDataUrl, downloadReportPNG, xIntentUrl } from "../external";
+import { reportTweetText, xIntentUrl } from "../external";
+import { reportCardFromSession } from "../lib/report-card";
 import {
   createSharedInvite,
   fetchSharedLog,
@@ -1253,24 +1255,49 @@ function EditLogModal({ log, onClose }: { log: Log; onClose: () => void }) {
 }
 
 /* ---------- 卓報告カード ---------- */
+/**
+ * 卓報告カード。画像はサーバーが描く（書体をそろえるため。src/app/api/report-card）。
+ * 載せるのはネタバレにならないものだけ（src/lib/report-card.ts）。スマホでは画像ごと共有シートに渡せる
+ */
 export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => void }) {
   const { state } = useStore();
-  const [savingImage, setSavingImage] = useState(false);
-  const [imageError, setImageError] = useState<string | null>(null);
-  const sc = log.scenarioId ? state.scenarios[log.scenarioId] : null;
   const shareUrl = `${location.origin}/share/l/${log.slug}`;
-  const cardData = useMemo(
-    () => ({
-      scenarioEmoji: sc?.emoji,
-      title: sessionTitle(log, state.scenarios),
-      dateLabel: fmtDates(sessionDays(log)),
-      systemName: SYSTEMS[log.systemId]?.name ?? "汎用・その他",
-      playerCount: Object.keys(log.players).length,
-      shareUrl,
-    }),
-    [sc?.emoji, log, shareUrl, state.scenarios],
+  const card = useMemo(() => reportCardFromSession(log, state), [log, state]);
+  const tweet = useMemo(
+    () => ({ title: card.title, playerCount: card.cast.length, shareUrl }),
+    [card.title, card.cast.length, shareUrl],
   );
-  const cardSvg = useMemo(() => buildReportCardSVG(cardData), [cardData]);
+  const [image, setImage] = useState<{ url: string; file: File } | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let url: string | null = null;
+    let cancelled = false;
+    setImage(null);
+    setImageError(null);
+    fetch("/api/report-card", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(card),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        const blob = await res.blob();
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        setImage({ url, file: new File([blob], `takufu-report-${log.id}.png`, { type: "image/png" }) });
+      })
+      .catch(() => {
+        if (!cancelled) setImageError("画像を作れませんでした。時間をおいてもう一度お試しください。");
+      });
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [card, log.id]);
+
+  const canShareFile =
+    image !== null && typeof navigator.canShare === "function" && navigator.canShare({ files: [image.file] });
 
   return (
     <Modal
@@ -1278,34 +1305,44 @@ export function ReportCardModal({ log, onClose }: { log: Log; onClose: () => voi
       onClose={onClose}
       foot={
         <>
-          <button
-            className="btn"
-            disabled={savingImage}
-            onClick={async () => {
-              setSavingImage(true);
-              setImageError(null);
-              try {
-                await downloadReportPNG(cardSvg, `takufu-report-${log.id}.png`);
-              } catch {
-                setImageError("画像を保存できませんでした。もう一度お試しください。");
-              } finally {
-                setSavingImage(false);
+          {canShareFile ? (
+            <button
+              className="btn"
+              onClick={() =>
+                void navigator
+                  .share({ files: [image.file], text: reportTweetText(tweet), url: shareUrl })
+                  .catch(() => {})
               }
-            }}
-          >
-            {savingImage ? "画像を作成中…" : "画像を保存"}
-          </button>
-          <a className="btn btn-primary" href={xIntentUrl(cardData)} target="_blank" rel="noreferrer">
+            >
+              画像を共有
+            </button>
+          ) : (
+            <a
+              className={cx("btn", !image && "btn-disabled")}
+              href={image?.url}
+              download={image?.file.name}
+              aria-disabled={!image}
+            >
+              画像を保存
+            </a>
+          )}
+          <a className="btn btn-primary" href={xIntentUrl(tweet)} target="_blank" rel="noreferrer">
             <IconExternal width={14} height={14} /> Xで投稿
           </a>
         </>
       }
     >
-      <img
-        src={svgDataUrl(cardSvg)}
-        alt="卓報告カード"
-        className="w-full rounded-xl border border-base-300"
-      />
+      <div className="aspect-[16/9] w-full overflow-hidden rounded-xl border border-base-300 bg-base-200">
+        {image ? (
+          <img src={image.url} alt="卓報告カード" className="h-full w-full object-cover motion-fade" />
+        ) : (
+          !imageError && (
+            <div className="flex h-full items-center justify-center">
+              <span className="loading loading-spinner loading-sm" aria-label="画像を作っています" />
+            </div>
+          )
+        )}
+      </div>
       <div className="mt-3">
         <CopyBox text={shareUrl} />
       </div>
@@ -1340,14 +1377,36 @@ function ShareModal({
     });
   }
 
+  function setSecretTabs(v: SecretTabsScope) {
+    if (!isOwner) return;
+    update((s) => {
+      if (v === "shared") delete s.logs[log.id].secretTabs;
+      else s.logs[log.id].secretTabs = v;
+    });
+  }
+  const hasSecret = log.channels.some((c) => c.secret || c.msgs.some((m) => m.roll?.secret));
+
   return (
     <Modal title="共有" onClose={onClose}>
       <h3 className="text-sm font-bold">共有範囲</h3>
       <div className="mt-2">
         <ScopePicker ariaLabel="共有範囲" value={log.scope} onChange={setScope} />
       </div>
-      {log.channels.some((c) => c.secret) && (
-        <p className="mt-1 text-sm text-ink2">シークレットタブも、共有範囲の人にはそのまま表示されます。</p>
+      {hasSecret && isOwner && (
+        <>
+          <h3 className="mt-6 text-sm font-bold">シークレットタブ・シークレットダイス</h3>
+          <div className="mt-2 flex">
+            <Seg<SecretTabsScope>
+              ariaLabel="シークレットタブ・シークレットダイス"
+              value={log.secretTabs ?? "shared"}
+              onChange={setSecretTabs}
+              options={[
+                { v: "shared", label: "共有範囲の人にも見せる" },
+                { v: "private", label: "自分だけ" },
+              ]}
+            />
+          </div>
+        </>
       )}
 
       <h3 className="mt-6 text-sm font-bold">共有リンク</h3>

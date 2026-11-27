@@ -187,7 +187,7 @@ describe("parseExternalUrl のエラー文と正規化", () => {
     ["https://emoklore.charasheet.jp/ab?x=1", "エモクロアのキャラシはキャラッシュの URL を貼ってください。"],
     [
       "https://character-sheets.appspot.com/sw2/edit.html?key=ahVzfmNoYXJhY3Rlci1z",
-      "キャラクターシート倉庫はダブルクロス3rd・シノビガミ・インセインのキャラシに対応しています。",
+      "キャラクターシート倉庫はダブルクロス3rd・シノビガミ・インセイン・マギカロギア・キルデスビジネス・銀剣のステラナイツ・サタスペ・フタリソウサのキャラシに対応しています。",
     ],
     [
       "https://character-sheets.appspot.com/dx3/edit.html",

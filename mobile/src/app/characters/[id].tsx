@@ -456,7 +456,7 @@ function ShareCharSheet({ c, onClose }: { c: Character; onClose: () => void }) {
   const { update } = useMobileStore();
   const router = useRouter();
   const sys = SYSTEMS[c.systemId];
-  const origin = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.lolipop-now.app";
+  const origin = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.app";
   const url = `${origin}/share/c/${c.id}`;
 
   const setField = (key: keyof Character["share"], val: boolean) =>

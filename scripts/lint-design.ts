@@ -24,6 +24,7 @@ const TOAST_CALL_RE = /\btoast\s*\(/;
 const LOW_ALPHA_TEXT_RE = /\btext-(?:base-content|neutral)\/(?:[0-5]?\d|6[0-4])\b/;
 const MASK_FILTER_RE =
   /filter\(\s*\((?:c|channel)\)\s*=>\s*!(?:c|channel)\.secret\s*\)|mode\s*===\s*"share"\s*&&\s*c\.secret/;
+const SECRET_TABS_CHOICE_RE = /\.secretTabs\s*!==\s*"private"/;
 const BANNED_ABBREV_RE = /["'`](?:CoC7|CoC6|SW2\.5|MM)["'`]/;
 const BANNED_DURATION_RE = /\bfmtDurShort\b/;
 const BANNED_END_LABEL_RE = /\bendLabel\b/;
@@ -329,12 +330,14 @@ function checkSrcRules(violations: Violation[]): void {
         });
       }
 
-      if (MASK_FILTER_RE.test(line) && !rel.includes("__tests__")) {
+      // 黙って伏せない。例外は、記録した人がセッションごとに選んだ「シークレットタブは自分だけ」（secretTabs）を写しに効かせる所だけ
+      const chosenBySession = lines.slice(Math.max(0, i - 4), i).some((l) => SECRET_TABS_CHOICE_RE.test(l));
+      if (MASK_FILTER_RE.test(line) && !rel.includes("__tests__") && !chosenBySession) {
         violations.push({
           file: rel,
           line: lineNumber,
           message:
-            "Log masking (filtering out secret channels) is disallowed; include all channels and control access via scope.",
+            "Log masking (filtering out secret channels) is disallowed; include all channels and control access via scope (only the per-session secretTabs choice may drop them).",
         });
       }
 
@@ -888,6 +891,27 @@ function checkMobileSrcRules(violations: Violation[]): void {
 }
 
 /**
+ * LP の「選んでいる」塗り（墨の地 var(--pst-fg)）は、押せる切り替えの選択中にだけ使う。
+ * is-active の検査（ソース）をくぐって、押せない札（日程の「決定」）に同じ塗りを付けた（LP の再レビュー、2026-11-27）。
+ * styles.css の LP の規則で、墨の地を塗る規則のセレクタに is-active か aria-pressed が要る。
+ */
+function checkLpSelectedFill(violations: Violation[]): void {
+  const filePath = path.join(ROOT_DIR, "src/styles.css");
+  const css = fs.readFileSync(filePath, "utf8");
+  for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selector = m[1]!.trim();
+    if (!selector.includes(".pst-")) continue;
+    if (!/background(?:-color)?:\s*var\(--pst-fg\)/.test(m[2]!)) continue;
+    if (/\.is-active|\[aria-pressed/.test(selector)) continue;
+    violations.push({
+      file: toRel(filePath),
+      line: css.slice(0, m.index).split("\n").length + 1,
+      message: `LP: the ink fill (var(--pst-fg)) marks the selected state of a pressable toggle only; "${selector.split("\n").pop()}" is not one.`,
+    });
+  }
+}
+
+/**
  * 「選んでいる」見た目（is-active）は、押せる部品の状態にだけ付ける。飾りの見本に付けると、
  * どれが選べてどれを選んでいるのか分からなくなる（LP の指摘）。同じタグに aria-pressed 等が必要。
  * 問い合わせは /feedback（Discord に届くフォーム）に集め、リポジトリの Issues へは案内しない。
@@ -1245,7 +1269,7 @@ function checkUnnaturalModel(violations: Violation[]): void {
 
 // 取り込みをやめた形式（P6）を、取り込める形式として画面に書く・その読み取りを戻す
 const DROPPED_IMPORT_COPY_RE =
-  /Discord[^"'`]{0,12}(?:JSON|テキスト|ログ)|[・、]テキスト(?:のログ|ログ)|テキストログ|どどんとふ|Tekey|通過履歴を(?:まとめて)?取り込|CSV[・／/]TSV|Markdown\s*表/;
+  /Discord[^"'`]{0,12}(?:JSON|テキスト|ログ)|[・、]テキスト(?:のログ|ログ)|テキストログ|どどんとふ|通過履歴を(?:まとめて)?取り込|CSV[・／/]TSV|Markdown\s*表/;
 const DROPPED_IMPORT_CODE_RE =
   /\b(?:parseDiscordLog\w*|parsePlainTextLog|parseGenericHtmlLog|parsePlayHistory|commitPlayHistoryImport|historyRowEpochs)\b|lib\/history-import/;
 
@@ -1269,7 +1293,7 @@ function checkDroppedImport(violations: Violation[]): void {
             file: rel,
             line: i + 1,
             message:
-              "dropped-import: Discord / plain-text / どどんとふ logs and history tables are not imported (P6). List only CCFOLIA and Udonarium (SUPPORTED_LOG_FORMATS_LABEL).",
+              "dropped-import: Discord / plain-text / どどんとふ logs and history tables are not imported (P6). List only CCFOLIA, Udonarium and Tekey (SUPPORTED_LOG_FORMATS_LABEL).",
           });
         }
         if (DROPPED_IMPORT_CODE_RE.test(line)) {
@@ -1525,6 +1549,7 @@ checkMobileSrcRules(violations);
 checkButtonHoverAndTimelineRules(violations);
 checkPagesCohesion(violations);
 checkSelectedStateAndContact(violations);
+checkLpSelectedFill(violations);
 checkPublicPagesStayLight(violations);
 checkServerCatalog(violations);
 checkComboboxForGrowingOptions(violations);

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   MEDIA_KINDS,
   MEDIA_SOURCES,
+  SERVICE_LABEL,
   canViewMedia,
+  defaultSpoiler,
   detectMediaLink,
   expiryState,
   formatChapters,
@@ -10,10 +12,8 @@ import {
   mediaThumbnail,
   mediaEditorFields,
   mediaSourceOf,
-  mediaTitleLookupUrl,
   needsConsentCheck,
   normalizeMediaUrl,
-  titleFromOembed,
   embedAt,
   formatClock,
   mediaOffsetAt,
@@ -207,40 +207,45 @@ describe("追加の流れ", () => {
     );
   });
 
+  it("選ばせるのは YouTube・ニコニコ・ふせったー・X とその他。どのサービスもどこかの置き場所に入る", () => {
+    expect(MEDIA_SOURCES.map((s) => s.id)).toEqual(["youtube", "niconico", "fusetter", "x", "other", "none"]);
+    for (const service of Object.keys(SERVICE_LABEL) as (keyof typeof SERVICE_LABEL)[]) {
+      expect(
+        MEDIA_SOURCES.some((s) => s.services.includes(service)),
+        service,
+      ).toBe(true);
+    }
+    // 選べなくなったサービスの URL も、これまでどおり読める（保存済みのものを壊さない）
+    expect(detectMediaLink("https://www.twitch.tv/videos/123")?.embedUrl).toContain("player.twitch.tv");
+    expect(mediaSourceOf("twitch")).toBe("other");
+    expect(resolveMediaSource("other", detectMediaLink("https://www.twitch.tv/videos/123")).kind).toBe(
+      "stream",
+    );
+  });
+
   it("選んだ置き場所と違う URL を貼ったら、合う置き場所と種類に寄せる", () => {
     const at = (raw: string) => detectMediaLink(raw);
     expect(resolveMediaSource("youtube", null)).toEqual({ source: "youtube", kind: "recording" });
-    expect(resolveMediaSource("secret", null)).toEqual({ source: "secret", kind: "impression" });
+    expect(resolveMediaSource("fusetter", null)).toEqual({ source: "fusetter", kind: "impression" });
     expect(resolveMediaSource("youtube", at("https://youtu.be/abcdefghijk"))).toEqual({
       source: "youtube",
       kind: "recording",
     });
     expect(resolveMediaSource("youtube", at("https://www.youtube.com/live/abcdefghijk")).kind).toBe("stream");
     expect(resolveMediaSource("youtube", at("https://fusetter.com/tw/abc"))).toEqual({
-      source: "secret",
+      source: "fusetter",
       kind: "impression",
     });
-    expect(resolveMediaSource("other", at("https://www.pixiv.net/novel/show.php?id=1"))).toEqual({
-      source: "gallery",
+    expect(resolveMediaSource("x", at("https://www.pixiv.net/novel/show.php?id=1"))).toEqual({
+      source: "other",
       kind: "story",
     });
     // 知らないサイトでも、選んだときのつもり（感想）は残す
-    expect(resolveMediaSource("secret", at("https://example.com/a"))).toEqual({
+    expect(resolveMediaSource("fusetter", at("https://example.com/a"))).toEqual({
       source: "other",
       kind: "impression",
     });
     expect(resolveMediaSource("other", at("https://example.com/a")).kind).toBe("other");
-  });
-
-  it("題名は YouTube の動画だけ oEmbed で引く", () => {
-    expect(mediaTitleLookupUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe(
-      "https://www.youtube.com/oembed?format=json&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DdQw4w9WgXcQ",
-    );
-    expect(mediaTitleLookupUrl("https://www.youtube.com/playlist?list=PLx")).toBeUndefined();
-    expect(mediaTitleLookupUrl("https://fusetter.com/tw/abc")).toBeUndefined();
-    expect(titleFromOembed({ title: "  第一夜  " })).toBe("第一夜");
-    expect(titleFromOembed({ title: "" })).toBeUndefined();
-    expect(titleFromOembed(null)).toBeUndefined();
   });
 
   it("種類と置き場所で、最初に見せる欄と畳む欄を分ける", () => {
@@ -254,6 +259,14 @@ describe("追加の流れ", () => {
     expect(mediaEditorFields("impression", "fusetter").more).not.toContain("chapters");
     // 値の入っている欄は種類を変えても残す
     expect(mediaEditorFields("impression", null, ["pov"]).more).toContain("pov");
+  });
+
+  it("ネタバレの既定は、卓報告だけ含まない", () => {
+    expect(defaultSpoiler("report")).toBe(false);
+    expect(defaultSpoiler("impression")).toBe(true);
+    expect(defaultSpoiler("recording")).toBe(true);
+    // X の URL は卓報告と読むので、ネタバレを含まないが既定になる
+    expect(defaultSpoiler(detectMediaLink("https://x.com/a/status/1")!.kindHint)).toBe(false);
   });
 
   it("了承は録画・録音・配信を自分以外に見せるときだけ確かめる", () => {

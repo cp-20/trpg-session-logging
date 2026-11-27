@@ -37,7 +37,7 @@ pnpm run mobile:export  # iOS / Android 本番バンドル書き出し検証
 ```sh
 pnpm run check:firebase # Firebase Auth プロバイダ・許可ドメイン確認
 pnpm run deploy:rules   # Firestore ルール (takufu データベース) のデプロイ
-pnpm run deploy         # LOLIPOP! Deploy Now (takufu.lolipop-now.app) へソースを送り、クラウドでビルド
+pnpm run deploy         # LOLIPOP! Deploy Now（https://takufu.app） へソースを送り、クラウドでビルド
 ```
 
 UI を触るときは [DESIGN.md](DESIGN.md)（規則）と [docs/design-feedback.md](docs/design-feedback.md)（過去の指摘と検査の対応）を、運用は [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) を参照してください。

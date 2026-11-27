@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
-import { todayStr } from "@shared/lib/time";
 import { userHref } from "@shared/lib/people";
 import { ScreenShell } from "../components/ScreenShell";
 import { DiscordAccountRow } from "../components/DiscordAccountRow";
 import { Avatar, ProviderIcon } from "../components/identity";
-import { IconBell, IconDownload, IconFingerprint, IconRefresh, IconUpload } from "../components/icons";
+import { IconBell, IconFingerprint, IconRefresh } from "../components/icons";
 import {
   BottomSheet,
   Button,
@@ -22,14 +21,11 @@ import {
 import { signOutAccount } from "../lib/firebase-mobile";
 import { signOutOfGoogle } from "../lib/google-sign-in";
 import { isBiometricAvailable, isBiometricLockEnabled, setBiometricLockEnabled } from "../native/biometrics";
-import { pickAndImportBackupJson } from "../native/file-import";
-import { hapticSuccess } from "../native/haptics";
 import {
   areRemindersEnabled,
   rescheduleSessionNotifications,
   setRemindersEnabled,
 } from "../native/notifications";
-import { shareJsonBackupFile } from "../native/native-share";
 import { useMobileStore } from "../store/mobile-store";
 import { useTheme, type ThemeMode } from "../theme/ThemeProvider";
 import { userFacingError } from "@shared/lib/user-error";
@@ -48,8 +44,6 @@ export default function SettingsScreen() {
     enterDemo,
     exitDemo,
     resetDemo,
-    exportData,
-    importData,
   } = useMobileStore();
   const router = useRouter();
   const me = state.users[state.me]!;
@@ -111,18 +105,6 @@ export default function SettingsScreen() {
       setError(userFacingError(cause, "サインアウトできませんでした。"));
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function handleImportBackup() {
-    setError(null);
-    try {
-      const imported = await pickAndImportBackupJson();
-      if (!imported) return;
-      importData(imported);
-      hapticSuccess();
-    } catch (cause) {
-      setError(userFacingError(cause, "ファイルを読み込めませんでした。"));
     }
   }
 
@@ -288,29 +270,6 @@ export default function SettingsScreen() {
                   </Button>
                 </SettingRow>
               )}
-              <SettingRow
-                title="バックアップ"
-                desc="すべての記録を1つのファイルに保存したり、保存したファイルから戻したりします。"
-              >
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    icon={<IconDownload size={15} color={tokens.ink} />}
-                    onPress={() => void shareJsonBackupFile(`takufu-data-${todayStr()}.json`, exportData())}
-                  >
-                    書き出す
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    icon={<IconUpload size={15} color={tokens.ink} />}
-                    onPress={() => void handleImportBackup()}
-                  >
-                    読み込む
-                  </Button>
-                </View>
-              </SettingRow>
               {!authUser && (
                 <SettingRow title="サンプルを初期状態に戻す" desc="この端末で加えた変更をすべて消します。">
                   <Button size="sm" variant="danger" onPress={() => setConfirmReset(true)}>

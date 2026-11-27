@@ -19,6 +19,15 @@ describe("rollTone", () => {
     ["致命的失敗", "fumble"],
     ["ファンブル", "fumble"],
     ["ファンブル!", "fumble"],
+    // BCDice の各システムの言い方（i18n の文言）
+    ["大成功", "crit"],
+    ["大失敗", "fumble"],
+    ["自動的成功", "crit"],
+    ["自動的失敗", "fumble"],
+    ["自動失敗", "fumble"],
+    ["クリティカル！", "crit"],
+    ["ファンブル！", "fumble"],
+    ["スペシャル(【生命力】1点か変調一つを回復)", "special"],
     ["14", undefined],
     ["健忘症", undefined],
   ])("%s → %s", (result, tone) => {

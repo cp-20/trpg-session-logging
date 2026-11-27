@@ -1,21 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ComponentRef } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { SvgXml } from "react-native-svg";
 import { SYSTEMS } from "@shared/data/systems";
 import { userHref } from "@shared/lib/people";
 import { recentSystemIds, systemOptions } from "@shared/lib/system-options";
-import { buildReportCardSVG, xIntentUrl } from "@shared/external";
+import { xIntentUrl } from "@shared/external";
+import { reportCardFromSession } from "@shared/lib/report-card";
 import { createSharedInvite, fetchSharedLog, revokeSharedMember } from "@shared/lib/cloud-state";
-import {
-  fmtDates,
-  fmtSessionWhen,
-  sessionDays,
-  fmtDur,
-  jstTime,
-  sessionPlayMinutes,
-  uid,
-} from "@shared/lib/time";
+import { fmtSessionWhen, fmtDur, jstTime, sessionPlayMinutes, uid } from "@shared/lib/time";
 import { sittingToFields, sittingsFromFields, type SittingFields } from "@shared/lib/sittings";
 import type { Log, MsgKind } from "@shared/types";
 import { LogReader } from "../../components/LogReader";
@@ -847,7 +839,7 @@ function ShareSheet({
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
 
-  const origin = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.lolipop-now.app";
+  const origin = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.app";
   const shareUrl = `${origin}/share/l/${log.slug}`;
 
   async function issueInvite() {
@@ -989,23 +981,42 @@ function ReportCardSheet({ log, onClose }: { log: Log; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const sc = log.scenarioId ? state.scenarios[log.scenarioId] : undefined;
-  const sys = SYSTEMS[log.systemId];
-  const origin = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.lolipop-now.app";
+  const origin = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.app";
   const shareUrl = `${origin}/share/l/${log.slug}`;
-
-  const data = useMemo(
-    () => ({
-      scenarioEmoji: sc?.emoji,
-      title: sc?.title ?? sessionTitle(log, {}),
-      dateLabel: fmtDates(sessionDays(log)),
-      systemName: sys?.name ?? "汎用・その他",
-      playerCount: Object.keys(log.players).length || 1,
-      shareUrl,
-    }),
-    [log, sc?.emoji, sc?.title, shareUrl, sys?.name],
+  /* 画像は Web と同じくサーバーが描く（src/app/api/report-card。中身は src/lib/report-card.ts） */
+  const card = useMemo(() => reportCardFromSession(log, state), [log, state]);
+  const tweet = useMemo(
+    () => ({ title: card.title, playerCount: card.cast.length, shareUrl }),
+    [card.title, card.cast.length, shareUrl],
   );
-  const svg = useMemo(() => buildReportCardSVG(data), [data]);
+  const [uri, setUri] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setUri(null);
+    fetch(`${origin}/api/report-card`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(card),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        const blob = await res.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(new Error("read"));
+          reader.readAsDataURL(blob);
+        });
+        if (!cancelled) setUri(dataUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setError("画像を作れませんでした。時間をおいてもう一度お試しください。");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [card, origin]);
 
   async function sharePng() {
     setBusy(true);
@@ -1031,7 +1042,7 @@ function ReportCardSheet({ log, onClose }: { log: Log; onClose: () => void }) {
           </Button>
           <Button
             variant="secondary"
-            disabled={busy}
+            disabled={busy || !uri}
             icon={<IconShare size={16} color={tokens.ink} />}
             onPress={() => void sharePng()}
           >
@@ -1040,7 +1051,7 @@ function ReportCardSheet({ log, onClose }: { log: Log; onClose: () => void }) {
           <Button
             variant="primary"
             icon={<IconBrandX size={16} color={tokens.primaryContent} />}
-            onPress={() => void openExternalUrl(xIntentUrl(data))}
+            onPress={() => void openExternalUrl(xIntentUrl(tweet))}
           >
             X で投稿
           </Button>
@@ -1048,7 +1059,13 @@ function ReportCardSheet({ log, onClose }: { log: Log; onClose: () => void }) {
       }
     >
       <View ref={cardRef} collapsable={false} style={[styles.reportWrap, { borderColor: tokens.border }]}>
-        <SvgXml xml={svg} width="100%" height={190} />
+        {uri ? (
+          <Image source={{ uri }} style={styles.reportImage} accessibilityLabel="卓報告カード" />
+        ) : (
+          <View style={[styles.reportImage, styles.reportLoading]}>
+            <ActivityIndicator color={tokens.ink2} />
+          </View>
+        )}
       </View>
       <InlineNotice text={error} tone="error" />
     </BottomSheet>
@@ -1092,6 +1109,14 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+  reportImage: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+  },
+  reportLoading: {
+    alignItems: "center",
+    justifyContent: "center",
   },
   reportWrap: {
     borderWidth: 1,

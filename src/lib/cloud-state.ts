@@ -19,6 +19,7 @@ import { getTakufuFirestore } from "./firebase";
 import { mediaForSharedPage } from "./session-media";
 import { identiconDataUri } from "./identicon";
 import type {
+  Channel,
   Character,
   Log,
   Scenario,
@@ -396,6 +397,17 @@ export function sharedManifestAccess(log: Pick<Log, "scope">): { scope: Scope } 
   return { scope: sharedPageScope(log) };
 }
 
+/**
+ * 共有ページに載せるタブ。シークレットタブを「記録した人だけ」にしたセッションは、
+ * シークレットタブとシークレットダイスを写しに入れない（読む側の画面で隠すのではなく、写しに無い）
+ */
+export function sharedChannels(log: Pick<Log, "channels" | "secretTabs">): Channel[] {
+  if (log.secretTabs !== "private") return log.channels;
+  return log.channels
+    .filter((c) => !c.secret)
+    .map((c) => ({ ...c, msgs: c.msgs.filter((m) => !m.roll?.secret) }));
+}
+
 export function sharedLogProjection(log: Log, state: State): SharedLogData {
   const scenario: Scenario = state.scenarios[log.scenarioId] ?? {
     ...userScenario({ id: log.scenarioId, title: UNKNOWN_SCENARIO_TITLE, systemId: log.systemId, uid: "" }),
@@ -409,6 +421,7 @@ export function sharedLogProjection(log: Log, state: State): SharedLogData {
   const sharedLog: Log = {
     ...log,
     players,
+    channels: sharedChannels(log),
   };
   // File names may contain personal information and do not belong on public pages.
   delete sharedLog.importedFrom;

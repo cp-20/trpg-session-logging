@@ -1,8 +1,9 @@
 # Deployment
 
-- Site: https://takufu.lolipop-now.app
+- Site: https://takufu.app
 - Service: https://deploy.lolipop.jp (LOLIPOP! Deploy Now)
 - Project: `takufu` (`01M7JCJVR7GCWGXR5MD32MZ22G`)
+- Domain: `takufu.app`（Cloudflare の DNS。Deploy Now の独自ドメイン）。レコードは `@`（CNAME、Deploy Now の配信先。Cloudflare が apex で平らにする）・`_cf-challenge`（検証）・ACM の検証用 CNAME の 3 件で、どれも Cloudflare のプロキシを切る（DNS only）。Cloudflare の操作は `cf` CLI で行う（`cf dns records list -z <zone id>`）。`lolipop domain show takufu.app --project <id>` で必要なレコードと状態を確かめる。
 - Framework: `next`. Next.js runs as a server from the `standalone` output (`next.config.ts`), so route handlers such as the calendar feed (`/api/calendar/{token}.ics`) work.
 
 ```sh
@@ -41,13 +42,13 @@ Firestore `takufu` has point-in-time recovery (7 days, 1-minute granularity) and
 
 The server never holds user credentials (the Discord integration adds its own bot credentials only; see Discord below). A signed-in browser writes its confirmed events, already rendered as a calendar file, to `calendarFeeds/{token}` in Firestore (`src/lib/calendar-feed.ts`); the token is 32 random bytes. Firestore rules let anyone `get` a feed document by its token but never `list` them, and only the owner can write or delete it. `/api/calendar/{token}.ics` reads the document through Firestore's public REST API and returns it as `text/calendar`. Recreating the link deletes the old document. Deploy rule changes with `node scripts/ops.ts rules`.
 
-Firebase uses project `takufu-app` and the named Firestore database `takufu`. Add `takufu.lolipop-now.app` to Firebase Authentication's authorized domains. Firebase's browser configuration is public; OAuth client secrets and administrative credentials must never be put in `NEXT_PUBLIC_*` variables or static assets.
+Firebase uses project `takufu-app` and the named Firestore database `takufu`. Add `takufu.app` to Firebase Authentication's authorized domains. Firebase's browser configuration is public; OAuth client secrets and administrative credentials must never be put in `NEXT_PUBLIC_*` variables or static assets.
 
-Google Authentication is enabled. The public app name is `卓譜`, and the authorized domains include `localhost`, the Firebase project domains, and `takufu.lolipop-now.app`. `node scripts/ops.ts firebase` verifies these settings without printing client secrets.
+Google Authentication is enabled. The public app name is `卓譜`, and the authorized domains include `localhost`, the Firebase project domains, and `takufu.app`. `node scripts/ops.ts firebase` verifies these settings without printing client secrets.
 
 X uses the dedicated production application `Takufu TRPG` (app ID `33648016`) in the `Takufu` project. The unrelated legacy `cp20` app is unchanged. The user explicitly approved app creation under Pay Per Use with no card, credit purchase or automatic recharge setup.
 
-The X app has read-only permissions, does not request email, and allows callback `https://takufu-app.firebaseapp.com/__/auth/handler`. Its website is `https://takufu.lolipop-now.app`. The OAuth 1.0a consumer key and secret are stored in Firebase's `twitter.com` provider configuration, never in the frontend or repository. Google and Twitter providers are both enabled; the administrative status script reports credential presence only.
+The X app has read-only permissions, does not request email, and allows callback `https://takufu-app.firebaseapp.com/__/auth/handler`. Its website is `https://takufu.app`. The OAuth 1.0a consumer key and secret are stored in Firebase's `twitter.com` provider configuration, never in the frontend or repository. Google and Twitter providers are both enabled; the administrative status script reports credential presence only.
 
 A signed `POST https://api.x.com/oauth/request_token` returned HTTP 200 with `oauth_callback_confirmed=true` while the account had no purchased credits. This verifies OAuth initiation, not a complete user linking flow. Linking completes only after a Google-authenticated user approves the X authorization screen. The app does not call X content APIs or post automatically; report sharing opens the user's X composer.
 
@@ -111,15 +112,15 @@ The rest of the app keeps "the server never holds user credentials". Discord use
 | `DISCORD_CLIENT_SECRET` | OAuth2 → Client Secret |
 | `TAKUFU_BOT_EMAIL` | The bot user's email (`setup-bot` writes it to `.env.discord.local`) |
 | `TAKUFU_BOT_PASSWORD` | The bot user's random 32-byte password (same file) |
-| `TAKUFU_PUBLIC_URL` | Optional; defaults to `https://takufu.lolipop-now.app` (links in messages, OAuth redirect) |
+| `TAKUFU_PUBLIC_URL` | Optional; defaults to `https://takufu.app` (links in messages, OAuth redirect) |
 
 Set each with `lolipop env create NAME --value-stdin --sensitive --project <id> < file`, then redeploy. Without them the endpoints answer 503 and the app shows Discord as unlinked. Locally, keep them in `.env.discord.local` (git-ignored); Next.js does not load that file name, so `pnpm run dev` (`scripts/dev.ts`) passes its values to Next.js, and `scripts/discord.ts` reads it too.
 
 ### Owner setup
 
 1. Discord Developer Portal → New Application `卓譜`. Installation: Guild Install only; disable User Install. Bot: turn off "Public Bot" if it should stay on your servers only; no privileged intents are needed.
-2. General Information → Interactions Endpoint URL: `https://takufu.lolipop-now.app/api/discord/interactions` (set after the env vars are deployed; Discord sends a signed PING and only saves the URL if it is answered within 3 seconds; right after a deploy the first request can be a cold start, so retry once if it says "could not be verified"). It can also be set without the portal: `PATCH https://discord.com/api/v10/applications/@me` with `{"interactions_endpoint_url": …}` and the bot token.
-3. OAuth2 → Redirects: `https://takufu.lolipop-now.app/api/discord/oauth/callback` (add `http://localhost:5173/api/discord/oauth/callback` for development with `TAKUFU_PUBLIC_URL=http://localhost:5173`).
+2. General Information → Interactions Endpoint URL: `https://takufu.app/api/discord/interactions` (set after the env vars are deployed; Discord sends a signed PING and only saves the URL if it is answered within 3 seconds; right after a deploy the first request can be a cold start, so retry once if it says "could not be verified"). It can also be set without the portal: `PATCH https://discord.com/api/v10/applications/@me` with `{"interactions_endpoint_url": …}` and the bot token.
+3. OAuth2 → Redirects: `https://takufu.app/api/discord/oauth/callback` (add `http://localhost:5173/api/discord/oauth/callback` for development with `TAKUFU_PUBLIC_URL=http://localhost:5173`).
 4. Bot user: Firebase console → Authentication → Sign-in method → enable Email/Password. Then `node scripts/discord.ts setup-bot --project takufu-app` (the flag confirms the target project; optionally `--email <address>`; the default `discord-bot@takufu.invalid` cannot receive mail). It signs up the user through the Auth REST API with a random 32-byte password, writes `TAKUFU_BOT_EMAIL` / `TAKUFU_BOT_PASSWORD` to `.env.discord.local` (mode 600), prints the uid and writes it into `firestore.rules` (`botUid()`) and `src/lib/discord/bot-account.ts` (`BOT_UID`; a unit test keeps the two equal). Deploy the rules (`node scripts/ops.ts rules`), commit both files, set the two variables on Deploy Now and redeploy. It refuses to run again unless `--force`.
 5. Register commands: `node scripts/discord.ts register --guild <server ID>` while testing (instant), then `node scripts/discord.ts register` (global, up to an hour).
 6. `node scripts/discord.ts setup-check` reports which variables are present (never values), whether the rules carry the bot's uid and the bot can sign in as that uid, whether the portal's endpoint and redirect match, and probes the deployed endpoints (unsigned interaction → 401).

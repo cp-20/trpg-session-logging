@@ -5,10 +5,32 @@
  * - クトゥルフ神話TRPG: https://product.kadokawa.co.jp/cthulhu/guideline.html （2024-05-01 更新のシリーズ表記）
  * - ソード・ワールド2.5: https://fujimi-trpg-online.jp/info/entry-2587.html
  * - エモクロアTRPG: https://emoklore.dicetous.com/guideline/ （ダイスタス・コモンズ）
+ * - 銀剣のステラナイツ: https://fujimi-trpg-online.jp/info/stellar_ug.html （2021-03-18 更新。表記は必須）
+ * - キズナバレット・マモノスクランブル: https://karasuba-sei.biz/officialsite/?page_id=256 （2025-01-13 更新。表記は任意）
+ *   以上 3 件は 2026-11-27 に確認。
+ * - TRPGライツ事務局の共通ガイドラインの作品（ダブルクロス・シノビガミなど）:
+ *   http://www.arclight.co.jp/trpg-rights/二次創作活動のガイドライン/ の書式 1「本作は、「(著作名)+(出版社/発売元)」が権利を有する
+ *   「(製品名)」の二次創作作品です。」に、二次創作管理製品名リストの製品名・著者名・出版社を写して当てはめる（2026-11-27 に確認）。
+ *   作品ごとの表示例は無いので、文はこの書式から作ったもの（運営者の判断、2026-11-27）。
  * Web ページは「トップページやタイトルページ」に表示する決まりなので、ログイン画面・設定・共有ページに出す。
  */
 
-export type RightsHolderId = "cthulhu" | "sword-world" | "emoklore";
+export type RightsHolderId =
+  | "cthulhu"
+  | "sword-world"
+  | "emoklore"
+  | "stellar-knights"
+  | "kizuna-bullet"
+  | "mamono-scramble"
+  | "double-cross"
+  | "arianrhod"
+  | "night-wizard"
+  | "shinobigami"
+  | "magicalogia"
+  | "kill-death-business"
+  | "satasupe"
+  | "futari-sousa"
+  | "kamigakari";
 
 export interface RightsNotice {
   id: RightsHolderId;
@@ -17,6 +39,22 @@ export interface RightsNotice {
   /** 権利者が示す表記。1 要素 1 行で、文字を変えない */
   lines: readonly string[];
   guidelineUrl: string;
+}
+
+/** TRPGライツ事務局の共通ガイドラインの書式 1（権利者表示）。製品名・著者名・出版社は製品名リストのとおりに写す */
+const TRPG_RIGHTS_GUIDELINE = "http://www.arclight.co.jp/trpg-rights/";
+function trpgRightsNotice(
+  id: RightsHolderId,
+  product: string,
+  author: string,
+  publisher: string,
+): RightsNotice {
+  return {
+    id,
+    title: product,
+    lines: [`本作は、「${author}、${publisher}」が権利を有する『${product}』の二次創作作品です。`],
+    guidelineUrl: TRPG_RIGHTS_GUIDELINE,
+  };
 }
 
 export const RIGHTS_NOTICES: Record<RightsHolderId, RightsNotice> = {
@@ -50,10 +88,98 @@ export const RIGHTS_NOTICES: Record<RightsHolderId, RightsNotice> = {
     ],
     guidelineUrl: "https://emoklore.dicetous.com/guideline/",
   },
+  "stellar-knights": {
+    id: "stellar-knights",
+    title: "銀剣のステラナイツ",
+    lines: [
+      "本作は「どらこにあん」及び「株式会社KADOKAWA」が権利を有する『銀剣のステラナイツ』の二次創作です。",
+      "(C)Fuyu Takizato / Draconian",
+      "(C)KADOKAWA",
+    ],
+    guidelineUrl: "https://fujimi-trpg-online.jp/info/stellar_ug.html",
+  },
+  "kizuna-bullet": {
+    id: "kizuna-bullet",
+    title: "キズナバレット",
+    lines: [
+      "本作は「からすば晴（Ｎ.Ｇ.Ｐ.）」および「株式会社アークライト出版事業部」が権利を有する『キズナバレット』の二次創作です。",
+      "c2021 からすば晴／Ｎ.Ｇ.Ｐ.／アークライト／新紀元社",
+    ],
+    guidelineUrl: "https://karasuba-sei.biz/officialsite/?page_id=256",
+  },
+  "mamono-scramble": {
+    id: "mamono-scramble",
+    title: "マモノスクランブル",
+    lines: [
+      "本作は「からすば晴」および「株式会社KADOKAWA ゲーム・企画書籍編集部」が権利を有する『マモノスクランブル』の二次創作です。",
+      "c Karasuba Sei 2023",
+    ],
+    guidelineUrl: "https://karasuba-sei.biz/officialsite/?page_id=256",
+  },
+  "double-cross": trpgRightsNotice(
+    "double-cross",
+    "ダブルクロス The 3rd Edition",
+    "著：矢野俊策／F.E.A.R.",
+    "KADOKAWA",
+  ),
+  arianrhod: trpgRightsNotice("arianrhod", "アリアンロッドRPG２E", "著：菊池たけし／F.E.A.R", "KADOKAWA"),
+  "night-wizard": trpgRightsNotice(
+    "night-wizard",
+    "ナイトウィザード The 3rd Edition",
+    "著：菊池たけし／F.E.A.R.",
+    "KADOKAWA",
+  ),
+  shinobigami: trpgRightsNotice(
+    "shinobigami",
+    "忍術バトルRPG シノビガミ",
+    "著：河嶋陶一朗／冒険企画局",
+    "新紀元社",
+  ),
+  magicalogia: trpgRightsNotice(
+    "magicalogia",
+    "魔道書大戦RPG マギカロギア",
+    "著：河嶋陶一朗／冒険企画局",
+    "新紀元社",
+  ),
+  "kill-death-business": trpgRightsNotice(
+    "kill-death-business",
+    "リアリティショーRPG キルデスビジネス",
+    "著：齋藤高吉／冒険企画局",
+    "新紀元社",
+  ),
+  satasupe: trpgRightsNotice(
+    "satasupe",
+    "アジアンパンクRPG サタスペ",
+    "著：河嶋陶一朗と速水螺旋人と暗転丸と池田朝佳とイケダサトシと泉信行と魚蹴と岡野繁浩と齋藤高吉とdczとぺらねこと吉井徹／冒険企画局",
+    "新紀元社",
+  ),
+  "futari-sousa": trpgRightsNotice(
+    "futari-sousa",
+    "バディサスペンスTRPG フタリソウサ",
+    "著：平野累次／冒険企画局",
+    "新紀元社",
+  ),
+  kamigakari: trpgRightsNotice("kamigakari", "武装伝奇RPG 神我狩", "著：力造", "新紀元社"),
 };
 
 /** 表示順。複数出すときはこの順に並べる */
-export const RIGHTS_ORDER: readonly RightsHolderId[] = ["cthulhu", "sword-world", "emoklore"];
+export const RIGHTS_ORDER: readonly RightsHolderId[] = [
+  "cthulhu",
+  "sword-world",
+  "emoklore",
+  "stellar-knights",
+  "kizuna-bullet",
+  "mamono-scramble",
+  "double-cross",
+  "arianrhod",
+  "night-wizard",
+  "shinobigami",
+  "magicalogia",
+  "kill-death-business",
+  "satasupe",
+  "futari-sousa",
+  "kamigakari",
+];
 
 /**
  * システム ID ごとの権利者。権利表記が要らないシステムは null。
@@ -71,6 +197,25 @@ export const SYSTEM_RIGHTS: Record<string, RightsHolderId | null> = {
   PulpCthulhu: "cthulhu",
   // 表示例が「ソード・ワールド2.0/2.5」を対象にしている
   "SwordWorld2.0": "sword-world",
+  StellarKnights: "stellar-knights",
+  KizunaBullet: "kizuna-bullet",
+  MamonoScramble: "mamono-scramble",
+  // TRPGライツ事務局の共通ガイドラインの作品（書式 1 から作った表記）
+  DoubleCross: "double-cross",
+  Arianrhod: "arianrhod",
+  NightWizard3rd: "night-wizard",
+  ShinobiGami: "shinobigami",
+  MagicaLogia: "magicalogia",
+  KillDeathBusiness: "kill-death-business",
+  Satasupe: "satasupe",
+  FutariSousa: "futari-sousa",
+  Kamigakari: "kamigakari",
+  /* 公式の二次創作ガイドラインを見つけられなかったもの（2026-11-27 調査）。表示例が分かるまで出さない */
+  Insane: null,
+  Nechronica: null,
+  LogHorizon: null,
+  GoblinSlayer: null,
+  GranCrest: null,
 };
 
 /**

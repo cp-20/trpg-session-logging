@@ -108,8 +108,8 @@ p { margin: 36px 0 0; font-size: 34px; font-weight: 700; color: ${POSTER.tint}; 
 </style></head><body><div class="og">
 <svg class="watermark" viewBox="0 0 32 32" aria-hidden="true"><path d="${MARK_BODY}" fill="none" stroke="${POSTER.paper}" stroke-opacity="0.16" stroke-width="0.5"/>${MARK_PIPS.map((p, i) => `<circle cx="${p.cx}" cy="${p.cy}" r="${MARK_PIP_R}" ${i === 1 ? `fill="${POSTER.yellow}"` : `fill="${POSTER.paper}" fill-opacity="0.16"`}/>`).join("")}</svg>
 <div class="brand">${ogMark}<span>卓譜</span></div>
-<h1>卓が終わったら、<br>ぜんぶここ。</h1>
-<p>TRPG のセッション記録をひとつのページに</p>
+<h1>卓のログを、<br>消えない形に。</h1>
+<p>CCFOLIA のログを、スマホで読める 1 ページに</p>
 </div></body></html>`;
 const ogFile = path.join(ROOT, "node_modules/.cache/takufu-og.html");
 mkdirSync(path.dirname(ogFile), { recursive: true });
@@ -120,7 +120,7 @@ await page.evaluate(() => document.fonts.ready);
 writeFileSync(out("src/app/opengraph-image.png"), await page.screenshot({ type: "png" }));
 writeFileSync(
   out("src/app/opengraph-image.alt.txt"),
-  "卓譜「卓が終わったら、ぜんぶここ。」TRPG のセッション記録をひとつのページに\n",
+  "卓譜「卓のログを、消えない形に。」CCFOLIA のログを、スマホで読める 1 ページに\n",
 );
 
 await browser.close();

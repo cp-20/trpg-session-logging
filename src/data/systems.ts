@@ -2,6 +2,16 @@ import { BCDICE_SYSTEMS } from "../lib/bcdice-systems.ts";
 import type { BcdiceSystem } from "../lib/bcdice-systems.ts";
 import type { Channel, RoleKey, SystemDef } from "../types";
 
+/** BCDice の一覧にあるシステムを、能力値・続く値まで持つ定義にする（名前は BCDice の一覧から） */
+function bcdiceDetailed(
+  bcdiceId: string,
+  def: Omit<SystemDef, "id" | "name" | "short" | "bcdiceId">,
+): SystemDef {
+  const b = BCDICE_SYSTEMS.find((x) => x.id === bcdiceId);
+  if (!b) throw new Error(`BCDice に ${bcdiceId} がありません`);
+  return { id: bcdiceId, name: b.name, short: b.name, bcdiceId, ...def };
+}
+
 /**
  * 能力値・技能まで持つシステム。ID は保存データに残っているので変えない。
  * BCDice が対応するものは bcdiceId で結び、BCDice の一覧から同じものを重ねて出さない。
@@ -107,6 +117,182 @@ const DETAILED_SYSTEMS: Record<string, SystemDef> = {
       "精神抵抗",
     ],
   },
+  /*
+   * ここから下は BCDice の ID をそのまま卓譜の ID にしたもの（BCDice の一覧から選んだ記録と同じ ID なので移し替えが要らない）。
+   * stats の key はキャラシの読み取り（src/lib/sheet-games/）が返す key と同じ。carry は卓をまたいで続く値だけ
+   */
+  "SwordWorld2.0": bcdiceDetailed("SwordWorld2.0", {
+    color: "#9a5a2e",
+    emoji: "SW",
+    roles: { ENEMY: "魔物" },
+    stats: [
+      { key: "lv", label: "冒険者レベル", carry: true },
+      { key: "exp", label: "経験点", carry: true },
+      { key: "honor", label: "名誉点", carry: true },
+      { key: "hp", label: "HP" },
+    ],
+    growthLabel: "成長",
+    skills: ["冒険者技能", "戦闘技能", "命中", "回避", "生命抵抗", "精神抵抗"],
+  }),
+  DoubleCross: bcdiceDetailed("DoubleCross", {
+    color: "#5e4f7c",
+    emoji: "DX",
+    roles: { ENEMY: "エネミー" },
+    /* 侵蝕率は卓ごとに基本値から始まるので続く値にしない */
+    stats: [
+      { key: "exp", label: "経験点", carry: true },
+      { key: "hp", label: "HP" },
+    ],
+    growthLabel: "経験点",
+    skills: ["白兵", "回避", "射撃", "知覚", "RC", "意志", "交渉", "調達", "運転", "芸術", "知識", "情報"],
+  }),
+  ShinobiGami: bcdiceDetailed("ShinobiGami", {
+    color: "#4f5f52",
+    emoji: "忍",
+    stats: [],
+    growthLabel: "功績点",
+    skills: [],
+  }),
+  Insane: bcdiceDetailed("Insane", {
+    color: "#5c4a52",
+    emoji: "狂",
+    stats: [],
+    growthLabel: "功績点",
+    skills: [],
+  }),
+  Nechronica: bcdiceDetailed("Nechronica", {
+    color: "#6a4d5e",
+    emoji: "ネクロ",
+    roles: { GM: "ネクロマンサー" },
+    stats: [{ key: "favor", label: "寵愛点", carry: true }],
+    growthLabel: "寵愛点",
+    skills: [],
+  }),
+  Arianrhod: bcdiceDetailed("Arianrhod", {
+    color: "#3f6a6e",
+    emoji: "AR",
+    roles: { ENEMY: "エネミー" },
+    stats: [
+      { key: "level", label: "レベル", carry: true },
+      { key: "exp", label: "経験点", carry: true },
+      { key: "hp", label: "HP" },
+      { key: "mp", label: "MP" },
+    ],
+    growthLabel: "成長点",
+    skills: [],
+  }),
+  LogHorizon: bcdiceDetailed("LogHorizon", {
+    color: "#456a4a",
+    emoji: "LH",
+    roles: { ENEMY: "エネミー" },
+    stats: [
+      { key: "lv", label: "CR", carry: true },
+      { key: "hp", label: "HP" },
+    ],
+    growthLabel: "成長",
+    skills: [],
+  }),
+  Kamigakari: bcdiceDetailed("Kamigakari", {
+    color: "#7a4a3a",
+    emoji: "神",
+    stats: [
+      { key: "level", label: "レベル", carry: true },
+      { key: "exp", label: "経験点", carry: true },
+    ],
+    growthLabel: "経験点",
+    skills: [],
+  }),
+  NightWizard3rd: bcdiceDetailed("NightWizard3rd", {
+    color: "#3e4e72",
+    emoji: "NW",
+    roles: { ENEMY: "エネミー" },
+    stats: [{ key: "level", label: "CL", carry: true }],
+    growthLabel: "経験点",
+    skills: [],
+  }),
+  GoblinSlayer: bcdiceDetailed("GoblinSlayer", {
+    color: "#6b5a3a",
+    emoji: "GS",
+    stats: [
+      { key: "level", label: "冒険者レベル", carry: true },
+      { key: "exp", label: "経験点", carry: true },
+      { key: "growth", label: "成長点", carry: true },
+    ],
+    growthLabel: "成長",
+    skills: [],
+  }),
+  MagicaLogia: bcdiceDetailed("MagicaLogia", {
+    color: "#4a4f78",
+    emoji: "魔",
+    /* 攻撃力・防御力・根源力・魔力は卓ごとに決め直す */
+    stats: [{ key: "exp", label: "功績点", carry: true }],
+    growthLabel: "功績点",
+    skills: [],
+  }),
+  KillDeathBusiness: bcdiceDetailed("KillDeathBusiness", {
+    color: "#7a3e44",
+    emoji: "KDB",
+    stats: [
+      { key: "soul", label: "ソウル", carry: true },
+      { key: "hellslug", label: "ヘルスラッグ", carry: true },
+    ],
+    growthLabel: "成長",
+    skills: [],
+  }),
+  StellarKnights: bcdiceDetailed("StellarKnights", {
+    color: "#566a8a",
+    emoji: "銀剣",
+    stats: [{ key: "medal", label: "勲章", carry: true }],
+    growthLabel: "勲章",
+    skills: [],
+  }),
+  Satasupe: bcdiceDetailed("Satasupe", {
+    color: "#8a5a3e",
+    emoji: "サタ",
+    stats: [
+      { key: "crime", label: "犯罪", carry: true },
+      { key: "life", label: "生活", carry: true },
+      { key: "love", label: "恋愛", carry: true },
+      { key: "culture", label: "教養", carry: true },
+      { key: "combat", label: "戦闘", carry: true },
+      { key: "emotion", label: "性業値", carry: true },
+      { key: "exp", label: "経験値", carry: true },
+    ],
+    growthLabel: "経験値",
+    skills: [],
+  }),
+  FutariSousa: bcdiceDetailed("FutariSousa", {
+    color: "#5a6a5e",
+    emoji: "2S",
+    stats: [],
+    growthLabel: "記録",
+    skills: [],
+  }),
+  GranCrest: bcdiceDetailed("GranCrest", {
+    color: "#6e5a2e",
+    emoji: "GC",
+    stats: [
+      { key: "level", label: "レベル", carry: true },
+      { key: "hp", label: "HP" },
+      { key: "mp", label: "MP" },
+    ],
+    growthLabel: "成長",
+    skills: [],
+  }),
+  MamonoScramble: bcdiceDetailed("MamonoScramble", {
+    color: "#5e5a7a",
+    emoji: "MS",
+    stats: [{ key: "level", label: "強度", carry: true }],
+    growthLabel: "成長",
+    skills: [],
+  }),
+  KizunaBullet: bcdiceDetailed("KizunaBullet", {
+    color: "#6a4a4a",
+    emoji: "KB",
+    stats: [],
+    growthLabel: "成長",
+    skills: [],
+  }),
   madamis: {
     id: "madamis",
     name: "マーダーミステリー",

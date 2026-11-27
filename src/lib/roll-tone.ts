@@ -5,13 +5,15 @@ import type { Roll, RollOutcome } from "../types";
  * - CoC 6 版: 決定的成功/スペシャル・スペシャル・成功・失敗・致命的失敗
  * - CoC 7 版: クリティカル・イクストリーム成功・ハード成功・レギュラー成功・失敗・ファンブル
  * - エモクロア: ミラクル!・トリプル!・ダブル!・成功!・失敗!・ファンブル!
+ * - ネクロニカ: 大成功・大失敗 / ソード・ワールド: 自動的成功・自動的失敗 / ダブルクロス・サタスペ: 自動失敗
+ *   （BCDice の i18n の文言。大成功・自動的成功は「成功」、大失敗・自動失敗は「失敗」を含むので先に見る）
  * 合計値や表の結果のように判定の無いロールは undefined。
  */
 export type RollTone = "crit" | "special" | "success" | "fail" | "fumble";
 
 export function rollTone(result: string): RollTone | undefined {
-  if (/ファンブル|致命的失敗/.test(result)) return "fumble";
-  if (/クリティカル|決定的成功|ミラクル/.test(result)) return "crit";
+  if (/ファンブル|致命的失敗|大失敗|自動的?失敗/.test(result)) return "fumble";
+  if (/クリティカル|決定的成功|ミラクル|大成功|自動的成功/.test(result)) return "crit";
   if (/スペシャル|イクストリーム|トリプル|ダブル/.test(result)) return "special";
   if (/失敗/.test(result)) return "fail";
   if (/成功/.test(result)) return "success";

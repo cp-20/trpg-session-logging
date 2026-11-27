@@ -9,8 +9,10 @@ import {
   sheetFromYtsheet,
   ytsheetSystemFromUrl,
 } from "./sheet-sources";
+import { readYtsheetDx3rd } from "./sheet-games/ytsheet-dx3rd";
 import {
   coerceSheet,
+  compact,
   diffSheetSkills,
   groupSkills,
   isGrownSkill,
@@ -365,30 +367,44 @@ describe("ゆとシートⅡ", () => {
   });
 
   describe("ほかのシステム", () => {
-    const sheet = () =>
-      sheetFromYtsheet(
-        {
-          characterName: "D",
-          unitStatus: [{ HP: "28" }, { 侵蝕率: "34" }],
-          sheetDescriptionM: "ワークス:UGN",
-        },
-        "https://yutorize.work/ytsheet/dx3rd/?id=a",
-      )!;
+    const raw = {
+      characterName: "D",
+      sheetDescriptionM: "ワークス:UGN",
+      sttTotalBody: "3",
+      sttTotalSense: "2",
+    };
+    const sheet = () => sheetFromYtsheet(raw, "https://yutorize.work/ytsheet/dx3rd/?id=a")!;
 
-    it("システム名を付ける", () => {
+    it("URL の道のシステムの読み取りで読み、システム名を付ける", () => {
       expect(sheet().systemLabel).toBe("ダブルクロス The 3rd Edition");
+      // ダブルクロスの読み取りの能力値（肉体・感覚…）で並ぶ。空の区分は出さない
+      expect(sheetSection(sheet(), "abilities")?.entries).toEqual(
+        compact(readYtsheetDx3rd(raw).sections).find((x) => x.id === "abilities")!.entries,
+      );
+      expect(sheet().sections.map((x) => x.id)).toEqual(["abilities"]);
     });
 
-    it("説明行をプロフィールに並べる", () => {
-      expect(sheet().profile).toEqual([{ label: "ワークス", value: "UGN" }]);
+    it("道からシステムを決める", () => {
+      expect(ytsheetSystemFromUrl("https://yutorize.work/ytsheet/dx3rd/?id=a")?.id).toBe("DoubleCross");
+      expect(ytsheetSystemFromUrl("https://yutorize.work/ytsheet/ar2e/?id=a")?.id).toBe("Arianrhod");
+      expect(ytsheetSystemFromUrl("https://yutorize.work/ytsheet/sw2.0/?id=a")?.id).toBe("SwordWorld2.0");
     });
+  });
+});
 
-    it("unitStatus を資源に並べる", () => {
-      expect(sheetSection(sheet(), "resources")?.entries).toEqual([
-        { label: "HP", value: 28 },
-        { label: "侵蝕率", value: 34 },
-      ]);
-    });
+describe("キャラクターシート倉庫のほかのシステム", () => {
+  it("マギカロギアは表の名前を名前にし、システムと特技を読む", () => {
+    const parsed = parseSoukoJson(
+      {
+        base: { covername: "白石みお", magicname: "星詠み", level: "2" },
+        learned: [{ id: "skills.row0.name0" }],
+      },
+      "mglg",
+      "https://character-sheets.appspot.com/mglg/edit.html?key=x",
+    )!;
+    expect(parsed.name).toBe("白石みお");
+    expect(parsed.systemId).toBe("MagicaLogia");
+    expect(sheetSection(parsed.sheet!, "skills")?.entries.length).toBe(1);
   });
 });
 

@@ -1,14 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "../lib/router";
-import {
-  IconChevronRight,
-  IconDownload,
-  IconLock,
-  IconPencil,
-  IconSearch,
-  IconSettings,
-  IconUpload,
-} from "../components/icons";
+import { IconChevronRight, IconLock, IconPencil, IconSearch, IconSettings } from "../components/icons";
 import {
   EmptyState,
   Field,
@@ -27,12 +19,11 @@ import {
 import { Avatar, ImageUploadField, ProviderIcon } from "../components/identity";
 import { findUserByRef, userHref } from "../lib/people";
 import { authErrorMessage, linkXAccount, signOutAccount, unlinkXAccount } from "../lib/auth";
-import { parseSavedState } from "../lib/state-schema";
 import { LEGAL_LINKS } from "../lib/rights";
 import { GoogleBusySettings } from "../components/google-busy";
 import { features } from "../lib/features";
 import { DiscordAccountRow } from "../components/discord";
-import { download, todayStr, sessionStart } from "../lib/time";
+import { sessionStart } from "../lib/time";
 import { resetData, useStore } from "../store";
 import { CharacterCard } from "./Characters";
 import { SessionRow } from "./Sessions";
@@ -42,18 +33,8 @@ export { applyTheme, currentThemeMode, resolveTheme, type ThemeMode } from "../l
 export { ThemeSync } from "../components/ThemeSync";
 
 export default function Settings() {
-  const {
-    state,
-    update,
-    authUser,
-    cloudStatus,
-    enterDemo,
-    exportData,
-    importData,
-    refreshProfile,
-    retrySave,
-    saveError,
-  } = useStore();
+  const { state, update, authUser, cloudStatus, enterDemo, refreshProfile, retrySave, saveError } =
+    useStore();
   const nav = useNavigate();
   const me = state.users[state.me]!;
   const [mode, setMode] = useState<ThemeMode>(currentThemeMode);
@@ -62,7 +43,6 @@ export default function Settings() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 成功は画面の変化（連携状態・読み込んだ記録）で伝わるので、エラーだけを出す
-  const [backupError, setBackupError] = useState<string | null>(null);
 
   const x = me.accounts.find((account) => account.provider === "x" && account.status === "linked");
   const google = me.accounts.find((account) => account.provider === "google");
@@ -222,69 +202,24 @@ export default function Settings() {
       {features.googleCalendar && <GoogleCalendarSection />}
 
       <SectionTitle sub={syncText}>データ</SectionTitle>
-      <div className="surface list">
-        <SettingRow title="バックアップ">
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="btn btn-sm"
-              onClick={() => {
-                download(`takufu-data-${todayStr()}.json`, exportData());
-              }}
-            >
-              <IconDownload width={16} height={16} /> 書き出す
-            </button>
-            <label className="btn btn-sm">
-              <IconUpload width={16} height={16} /> 読み込む
-              <input
-                type="file"
-                accept=".json,application/json"
-                className="sr-only"
-                aria-label="記録を読み込む"
-                onChange={async (event) => {
-                  const input = event.currentTarget;
-                  const file = input.files?.[0];
-                  if (!file) return;
-                  setBackupError(null);
-                  try {
-                    const imported = parseSavedState(await file.text());
-                    if (!imported) {
-                      setBackupError("卓譜の記録として読み込めませんでした。ファイルを確認してください。");
-                      return;
-                    }
-                    if (authUser && imported.me !== authUser.uid) {
-                      setBackupError("このアカウントの記録を選んでください。");
-                      return;
-                    }
-                    importData(imported);
-                  } catch {
-                    setBackupError("ファイルを読み込めませんでした。もう一度お試しください。");
-                  } finally {
-                    input.value = "";
-                  }
-                }}
-              />
-            </label>
-          </div>
-        </SettingRow>
-        {authUser && saveError && (
-          <SettingRow title="保存できていない記録" desc={saveError}>
-            <button className="btn btn-sm" onClick={retrySave}>
-              もう一度保存
-            </button>
-          </SettingRow>
-        )}
-        {!authUser && (
-          <SettingRow title="サンプルを初期状態に戻す" desc="このブラウザで加えた変更をすべて消します。">
-            <button className="btn btn-sm btn-danger" onClick={() => setConfirmReset(true)}>
-              初期状態に戻す
-            </button>
-          </SettingRow>
-        )}
-      </div>
-      {backupError && (
-        <p role="alert" className="mt-2 text-sm text-error">
-          {backupError}
-        </p>
+      {/* 操作が無いとき（ログイン中で保存できている）は、空の面を出さず保存の状態だけを見せる */}
+      {(!authUser || saveError) && (
+        <div className="surface list">
+          {authUser && saveError && (
+            <SettingRow title="保存できていない記録" desc={saveError}>
+              <button className="btn btn-sm" onClick={retrySave}>
+                もう一度保存
+              </button>
+            </SettingRow>
+          )}
+          {!authUser && (
+            <SettingRow title="サンプルを初期状態に戻す" desc="このブラウザで加えた変更をすべて消します。">
+              <button className="btn btn-sm btn-danger" onClick={() => setConfirmReset(true)}>
+                初期状態に戻す
+              </button>
+            </SettingRow>
+          )}
+        </div>
       )}
 
       <SectionTitle>このサービスについて</SectionTitle>

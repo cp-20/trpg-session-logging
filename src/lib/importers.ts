@@ -11,7 +11,9 @@ import {
   type LogEntry,
   type ParsedLog,
 } from "./ccfolia-parser";
+import { parseTekeyLogHtml } from "./tekey-parser";
 import { parseUdonariumChatsFallback } from "./html-xml-fallback";
+import { CHARASHEET_GAMES } from "./sheet-games";
 
 export { toCharacterFields, sessionDatesOf, summarizeParsed };
 export type { ParsedCharacter, ParsedLog };
@@ -133,6 +135,16 @@ export function parseCharasheetJson(raw: string): ParsedCharacter | null {
   if (makingMemo) memoLines.push(makingMemo);
 
   const game = str(root.game)?.toLowerCase() ?? "";
+  // 読み方を持つシステム（ダブルクロス・神我狩・ネクロニカなど）は、そのシステムの続く値だけを持つ
+  const reader = CHARASHEET_GAMES[game];
+  if (reader) {
+    return {
+      name: pcName,
+      memo: memoLines.join("\n") || undefined,
+      systemId: reader.id,
+      stats: reader.read(root).stats,
+    };
+  }
   let systemId: string | undefined;
   if (game.includes("coc7") || game.includes("7")) systemId = "coc7";
   else if (game === "coc" || game.includes("coc6")) systemId = "coc6";
@@ -228,12 +240,14 @@ export function parseYtsheetJson(raw: string): ParsedCharacter | null {
    セッションログ取り込み（機械が確実に読める構造化形式だけ）:
    1. CCFOLIA JSON / HTML 書き出し / ZIP
    2. Udonarium chat.xml / ZIP（中の chat xml）
+   3. Tekey チャットログ HTML
    Discord・テキストログ・どどんとふ等の自由形式は推測になるため受け付けない。
    ============================================================ */
 
-export const SUPPORTED_LOG_FORMATS_LABEL = "CCFOLIA（JSON・HTML・ZIP）・Udonarium（chat.xml・ZIP）";
+export const SUPPORTED_LOG_FORMATS_LABEL =
+  "CCFOLIA（JSON・HTML・ZIP）・Udonarium（chat.xml・ZIP）・Tekey（HTML）";
 export const UNSUPPORTED_LOG_MESSAGE =
-  "読み取れませんでした。CCFOLIA か Udonarium から書き出したログを選んでください。";
+  "読み取れませんでした。CCFOLIA・Udonarium・Tekey から書き出したログを選んでください。";
 export const LOG_FILE_ACCEPT = ".json,.html,.htm,.xml,.zip";
 
 function parseTimestampAttr(raw: string | null): number {
@@ -313,7 +327,11 @@ export function importLogFromText(raw: string): LogImportResult | null {
     return { log: udonarium, sourceLabel: "Udonarium" };
   }
 
-  // 2. CCFOLIA JSON / HTML
+  // 2. Tekey HTML（構造が確かなものだけ。CCFOLIA HTML には .chatlog / タブ一覧が無い）
+  const tekey = parseTekeyLogHtml(trimmed);
+  if (tekey) return { log: tekey, sourceLabel: "Tekey" };
+
+  // 3. CCFOLIA JSON / HTML
   const ccfolia = parseCcfoliaLog(trimmed);
   if (ccfolia) {
     return { log: ccfolia, sourceLabel: "CCFOLIA" };
@@ -358,7 +376,10 @@ export async function importLogFromFile(file: File): Promise<LogImportResult | n
   }
 
   if (/\.html?$/i.test(lowerName)) {
-    const ccfoliaHtml = parseCcfoliaLogHtml(await readFileText(file));
+    const htmlText = await readFileText(file);
+    const tekey = parseTekeyLogHtml(htmlText);
+    if (tekey) return { log: tekey, sourceLabel: "Tekey" };
+    const ccfoliaHtml = parseCcfoliaLogHtml(htmlText);
     return ccfoliaHtml ? { log: ccfoliaHtml, sourceLabel: "CCFOLIA" } : null;
   }
 

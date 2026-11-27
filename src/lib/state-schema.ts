@@ -142,6 +142,7 @@ export const RestoredStateSchema = z
         systemId: z.string(),
         ownerId: z.string(),
         scope: z.enum(["members", "passed", "public"]),
+        secretTabs: z.enum(["shared", "private"]).optional(),
         hasLog: z.boolean(),
         sittings: z.array(z.object({ start: z.number().finite(), end: z.number().finite() })),
         slug: z.string().min(1),

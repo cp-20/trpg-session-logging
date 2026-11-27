@@ -882,7 +882,7 @@ function CalendarSyncSheet({
   const [deviceResult, setDeviceResult] = useState<{ added: number; total: number } | null>(null);
 
   const feedToken = state.prefs.calendarFeedToken;
-  const origin = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.lolipop-now.app";
+  const origin = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.app";
   const url = feedToken ? feedUrl(origin, feedToken) : null;
   const links = url ? calendarSubscribeLinks(url) : null;
 

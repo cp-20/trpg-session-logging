@@ -3,8 +3,6 @@ import { File as ExpoFile } from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import { Platform } from "react-native";
 import { importLogFromFile, type LogImportResult } from "@shared/lib/importers";
-import { parseSavedState } from "@shared/lib/state-schema";
-import type { State } from "@shared/types";
 
 function assetToWebFileLike(asset: DocumentPicker.DocumentPickerAsset): File {
   if (Platform.OS === "web" && asset.file) {
@@ -46,21 +44,6 @@ export async function pickAndImportLogFile(): Promise<{
   const asset = picked.assets[0];
   const result = await importLogFromFile(assetToWebFileLike(asset));
   return { fileName: asset.name, result };
-}
-
-export async function pickAndImportBackupJson(): Promise<State | null> {
-  const picked = await DocumentPicker.getDocumentAsync({
-    type: ["application/json", "text/plain", "*/*"],
-    copyToCacheDirectory: true,
-    multiple: false,
-  });
-  if (picked.canceled || !picked.assets[0]) return null;
-  const text = await assetToWebFileLike(picked.assets[0]).text();
-  const parsed = parseSavedState(text);
-  if (!parsed) {
-    throw new Error("卓譜の記録として読み込めませんでした。ファイルを確認してください。");
-  }
-  return parsed;
 }
 
 export async function pickAvatarImageDataUrl(): Promise<string | null> {

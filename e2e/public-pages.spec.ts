@@ -32,7 +32,7 @@ test("LP はサーバーで描画し、絞った書体を先に読み、Web フ�
 }) => {
   const html = await (await request.get("/")).text();
   // JS を待たずに本文が出る
-  expect(html).toContain("卓が終わったら");
+  expect(html).toContain("卓のログを");
   // 書体の指定も HTML に入っている（CSS を待たずに書体を読み始める）。先読みの link は本番ビルドで head に出る
   expect(html).toMatch(/src:url\(\/fonts\/lp-sans\.[0-9a-f]{8}\.woff2\)/);
   expect(html).toMatch(/src:url\(\/fonts\/lp-display\.[0-9a-f]{8}\.woff2\)/);
@@ -98,7 +98,7 @@ test("権利表記は /licenses にまとまり、設定と共有ページから
   await expect(notices.getByRole("img", { name: /ダイスタス・コモンズ/ })).toBeVisible();
 
   await page.goto("/");
-  await page.getByRole("link", { name: /サンプルデータをそのまま見る/ }).click({ force: true });
+  await page.getByRole("link", { name: "サンプルの卓を開く" }).first().click({ force: true });
   // サンプルの読み込みは enterDemo と同じく遷移の待ち時間で待つ（全体を並べて走らせると 5 秒を超えることがある）
   await page.waitForURL(/\/home$/);
   await page.getByRole("navigation", { name: "メイン" }).first().waitFor();
@@ -130,18 +130,35 @@ test("権利表記は /licenses にまとまり、設定と共有ページから
   await expect(page).toHaveURL(/\/licenses$/);
 });
 
-test("LP のタイルの帯は流れ、動きを減らす設定では止まる", async ({ browser, page }) => {
+test("LP の作例は切り替えと時刻で録画の場面を試せ、動きを減らす設定ではタイルが動かない", async ({
+  browser,
+  page,
+}) => {
   await page.goto("/");
-  const track = page.locator(".pst-row-track").first();
-  await expect(track).toHaveCSS("animation-name", "pst-marquee");
+  await expect(page.locator(".pst-stack .pst-tile").first()).toHaveCSS("animation-name", "pst-rise");
+  // 時刻を押すと、録画の目次のその場面が選ばれる
+  const rec = page.locator(".pst-rec-list .is-current");
+  await expect(rec).toContainText("灯台の地下");
+  await page.getByRole("button", { name: "23:41 の場面を録画で開く" }).click();
+  await expect(rec).toContainText("三度目の鐘");
+  await expect(page.getByRole("button", { name: "23:41 の場面を録画で開く" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  // 録画の目次から選んでも、ログのその時刻が示される
+  await page.getByRole("button", { name: /導入 灯台のある村/ }).click();
+  await expect(page.getByRole("button", { name: "20:47 の場面を録画で開く" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   await page.getByRole("button", { name: "ダイスだけ" }).click();
-  await expect(page.getByText("ファンブル", { exact: true }).last()).toBeVisible();
+  await expect(page.getByText("ファンブル", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "秘匿タブ" }).click();
-  await expect(page.getByText("秘匿 HO2 / 許可されたメンバーだけ表示")).toBeVisible();
+  await expect(page.getByText("「あなたにだけ、鐘の音が三度聞こえた」")).toBeVisible();
   const ctx = await browser.newContext({ reducedMotion: "reduce" });
   const still = await ctx.newPage();
   await still.goto("/");
-  await expect(still.locator(".pst-row-track").first()).toHaveCSS("animation-name", "none");
+  await expect(still.locator(".pst-stack .pst-tile").first()).toHaveCSS("animation-name", "none");
   await ctx.close();
 });
 

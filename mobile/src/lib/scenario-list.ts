@@ -5,7 +5,7 @@
 import { scenarioToDirectory, withoutKnown, type DirectoryScenario } from "@shared/lib/scenario-directory";
 import type { Scenario } from "@shared/types";
 
-export const WEB_ORIGIN = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.lolipop-now.app";
+export const WEB_ORIGIN = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.app";
 
 /** 手元の写しと同じ作品（同じ ID、同じ TALTO の作品）を除いた共有シナリオ一覧の結果（Web と同じ withoutKnown） */
 export const remoteOnly = (

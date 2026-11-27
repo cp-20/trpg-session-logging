@@ -72,6 +72,17 @@ export interface CharacterSheet {
   sections: SheetSection[];
 }
 
+/**
+ * システムごとの読み取り（src/lib/sheet-games/）が返すもの。sheet-sources.ts がこれに URL と取得元を足してシートにする。
+ * stats は卓をまたいで続く値などを、システム定義（src/data/systems.ts の stats）の key で持つ
+ */
+export interface GameSheetParts {
+  profile: (SheetEntry | null)[];
+  sections: (SheetSection | null)[];
+  stats: Record<string, number>;
+  systemLabel: string;
+}
+
 export const SHEET_PROVIDER_LABELS: Record<SheetProvider, string> = {
   charaeno: "キャラエノ",
   charash: "キャラッシュ",

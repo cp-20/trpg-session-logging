@@ -1,57 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { BRAND_COLORS } from "../components/brand";
-import { buildReportCardSVG, reportTweetText, xIntentUrl, svgDataUrl } from "./index";
+import { reportTweetText, xIntentUrl } from "./index";
 
-describe("buildReportCardSVG", () => {
-  const data = {
-    scenarioEmoji: "🌊",
-    title: "深淵の呼び声",
-    dateLabel: "11月7日(土)・8日(日)",
-    systemName: "クトゥルフ神話TRPG 7版",
-    playerCount: 4,
-    shareUrl: "https://takufu.app/l/svhemln",
-  };
+describe("X の #卓報告 の投稿", () => {
+  const d = { title: "廃校の十三時間目", playerCount: 4, shareUrl: "https://takufu.app/l/abc" };
 
-  it("セッションの呼び名（シナリオの題名）・共有URLを含むSVGを生成する", () => {
-    const svg = buildReportCardSVG(data);
-    expect(svg).toContain("<svg");
-    expect(svg).toContain("深淵の呼び声");
-    expect(svg).toContain("クトゥルフ神話TRPG 7版");
-    expect(svg).toContain("takufu.app");
-    expect(svg).toContain("#f2ebe0");
-    expect(svg).toContain("#fffdf9");
-    expect(svg).toContain("#e2d7c5");
-    expect(svg).toContain("#221c17");
-    expect(svg).toContain(BRAND_COLORS.tile);
+  it("題名と人数と #卓報告 を入れ、エンディングなどネタバレになるものは入れない", () => {
+    expect(reportTweetText(d)).toBe("「廃校の十三時間目」を4人で遊びました #卓報告");
   });
-  it("エスケープされる(不正なタイトルでも壊れない)", () => {
-    const svg = buildReportCardSVG({
-      ...data,
-      title: "<script>alert(1)</script>",
-    });
-    expect(svg).not.toContain("<script>");
-    expect(svg).toContain("&lt;script&gt;");
-  });
-});
 
-describe("X intent", () => {
-  it("#卓報告 付きのツイート本文とURLを組む", () => {
-    const d = {
-      title: "廃校の十三時間目",
-      dateLabel: "11月14日(土)",
-      systemName: "CoC7",
-      playerCount: 4,
-      endLabel: "正常END「新しい朝」",
-      shareUrl: "https://takufu.app/l/abc",
-    };
-    expect(reportTweetText(d)).toContain("#卓報告");
-    expect(reportTweetText(d)).toContain("廃校の十三時間目");
-    expect(xIntentUrl(d)).toContain("https://twitter.com/intent/tweet");
+  it("顔ぶれが分からないときは人数を書かない", () => {
+    expect(reportTweetText({ ...d, playerCount: 0 })).toBe("「廃校の十三時間目」を遊びました #卓報告");
   });
-});
 
-describe("svgDataUrl", () => {
-  it("data URL にエンコードする", () => {
-    expect(svgDataUrl("<svg/>").startsWith("data:image/svg+xml;utf8,%3Csvg%2F%3E")).toBe(true);
+  it("投稿画面の URL に本文と共有ページの URL を載せる", () => {
+    const url = new URL(xIntentUrl(d));
+    expect(url.origin + url.pathname).toBe("https://twitter.com/intent/tweet");
+    expect(url.searchParams.get("text")).toBe(reportTweetText(d));
+    expect(url.searchParams.get("url")).toBe(d.shareUrl);
   });
 });

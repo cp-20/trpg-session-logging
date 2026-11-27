@@ -119,8 +119,11 @@ describe("parseCharasheetJson (キャラクター保管所)", () => {
     [{ game: "coc6" }, "coc6"],
     [{ game: "sw2" }, "sw25"],
     [{ game: "emo" }, "emoklore"],
-    [{ game: "dx3" }, undefined],
-    [{ game: "dx3", shuzoku: "エルフ" }, "sw25"],
+    // 読み方を持つシステムは game の値で決める（種族の欄から SW と推さない）
+    [{ game: "dx3" }, "DoubleCross"],
+    [{ game: "dx3", shuzoku: "エルフ" }, "DoubleCross"],
+    [{ game: "kmgkr" }, "Kamigakari"],
+    [{ game: "nechro" }, "Nechronica"],
     [{ shuzoku: "エルフ" }, "sw25"],
     [{ shuzoku: "人間", SAN: 50 }, "coc6"],
     [{ NP1: 50 }, undefined],

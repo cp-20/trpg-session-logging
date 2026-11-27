@@ -13,7 +13,10 @@ describe("権利表記", () => {
 
   it("BCDice の一覧から作ったシステムも、表記が分からないものは何も出さずに通る", () => {
     expect(rightsNoticesFor(Object.keys(SYSTEMS)).map((n) => n.id)).toEqual([...RIGHTS_ORDER]);
-    expect(rightsNoticesFor(["DoubleCross", "Cthulhu:Korean"])).toEqual([]);
+    expect(rightsNoticesFor(["Insane", "Cthulhu:Korean"])).toEqual([]);
+    expect(rightsNoticesFor(["DoubleCross"])[0]?.lines).toEqual([
+      "本作は、「著：矢野俊策／F.E.A.R.、KADOKAWA」が権利を有する『ダブルクロス The 3rd Edition』の二次創作作品です。",
+    ]);
     expect(rightsNoticesFor(["PulpCthulhu", "SwordWorld2.0"]).map((n) => n.id)).toEqual([
       "cthulhu",
       "sword-world",

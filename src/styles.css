@@ -811,9 +811,10 @@ main#main-content:focus {
 }
 
 /* ---------- LP（src/screens/Landing.tsx）: 卓報告ポスター ----------
- * X の #卓報告 に流れてくるものをタイルにして貼ったポスター。柿色の地・温かい白・焦げ茶のインク・山吹の目印（アプリ本体の暖色と揃える）。
- * 色はダイスの結果（クリティカル=緑、ファンブル・SAN 減少=赤）にだけ意味を持たせる。見出しはデラゴシック。
- * 生成物の典型（くすんだクリーム地に明朝とテラコッタ）にはせず、鮮やかな面と極太ゴシックで押す。影は使わず、焦げ茶の線で縁取る。
+ * 声はポスター、中身は道具。柿色の地と極太の見出し（デラゴシック）で #卓報告 の勢いを出し、
+ * セッションのページや探索者の歩みなどの作例はアプリと同じ紙・墨・細い罫線で描く（チラシの部品で作例を描かない）。
+ * 2px の焦げ茶の縁取りはヒーローのタイル（X に流れてくる物）だけ。色はダイスの結果（成功の緑・失敗と SAN 減少の赤）にだけ意味を持たせる。
+ * 影は使わない。全面の山吹の帯・押せそうに見える枠つきの札は使わない。ダークでは紙の節を夜の地に替える（柿色とタイルは物なのでそのまま）。
  */
 /* LP の書体は LP に出る文字だけに絞ったファイル（scripts/subset-lp-fonts.ts。@font-face は Landing.tsx の LpFonts）。後ろの候補は端末の書体だけにする:
  * 読み込み中の代わりの表示で Web フォント（Noto Sans JP の分割ファイル）を呼ばないため */
@@ -829,76 +830,156 @@ main#main-content:focus {
 .pst-root :is(button, input, textarea, select) {
   font-family: inherit;
 }
-.pst-hero,
-.pst-header,
-.pst-light,
-.pst-yellow {
+.pst-root {
+  /* 物の色（ダークでも変えない） */
   --pst-field: #bf3a16;
-  --pst-ink: #2b140c;
-  --pst-ink-2: #6b3f2d;
-  --pst-paper: #fff9f1;
+  --pst-cream: #fff9f1;
+  --pst-brown: #2b140c;
+  --pst-brown-2: #6b3f2d;
   --pst-yellow: #ffc233;
   --pst-crit: #2bbf73;
   --pst-red: #c8102e;
-  --pst-on-dark-2: #f5cdb9;
-  --pst-tint: #ffe9dc;
+  --pst-on-dark-2: #ffeee4;
+  --pst-night: #2b140c;
+  /* 紙の節の色（ダークで替える） */
+  --pst-bg: #fff9f1;
+  --pst-surface: #fffefb;
+  --pst-mat: #f6ebde;
+  --pst-fg: #2b140c;
+  --pst-fg-2: #6b4a3a;
+  --pst-line: #ead9c6;
+  --pst-line-strong: #2b140c;
+  --pst-tint: #f8eee3;
+  --pst-accent: #b23413;
+  --pst-loss: #c8102e;
+  --pst-gain: #137341;
+  --pst-mark-bg: #fff0c2;
+  --pst-secret: #2b140c;
+}
+[data-theme="takufuDark"] .pst-ink {
+  /* 夜の地は本文の地と見分けにくいので、締めは柿色に戻す */
+  background-color: var(--pst-field);
+}
+[data-theme="takufuDark"] .pst-root {
+  --pst-field: #a9330f;
+  --pst-night: #120c09;
+  --pst-bg: #17120f;
+  --pst-surface: #211a16;
+  --pst-mat: #261f1a;
+  --pst-fg: #e8dccf;
+  --pst-fg-2: #b5a291;
+  --pst-line: #3a2f27;
+  --pst-line-strong: #7a6859;
+  --pst-tint: #2a211b;
+  --pst-accent: #f0906b;
+  --pst-loss: #ff8f80;
+  --pst-gain: #6fd39b;
+  --pst-mark-bg: #3b3016;
+  --pst-secret: #0f0a08;
 }
 .pst-display {
   font-family: var(--pst-font-display, sans-serif);
   font-weight: 400;
   letter-spacing: 0;
+  font-feature-settings: "palt" 1;
   word-break: auto-phrase;
 }
 .pst-header {
   background-color: var(--pst-field);
-  color: var(--pst-paper);
+  color: var(--pst-cream);
 }
 .pst-logo {
-  color: var(--pst-paper);
+  color: var(--pst-cream);
 }
+
+/* 節の地 */
 .pst-hero {
-  overflow: hidden;
   background-color: var(--pst-field);
-  color: var(--pst-paper);
+  color: var(--pst-cream);
 }
 .pst-light {
-  background-color: var(--pst-paper);
-  color: var(--pst-ink);
+  background-color: var(--pst-bg);
+  color: var(--pst-fg);
 }
-.pst-yellow {
-  background-color: var(--pst-yellow);
-  color: var(--pst-ink);
+.pst-rule-top {
+  border-top: 1px solid var(--pst-line);
 }
+.pst-ink {
+  background-color: var(--pst-night);
+  color: var(--pst-cream);
+}
+/* 作例は柿色の地から紙の地にまたがって置く（境目は段の色を切り替えるだけ。ぼかしの帯にはしない） */
+.pst-stage {
+  background: linear-gradient(var(--pst-field) 0 6rem, var(--pst-bg) 6rem);
+  color: var(--pst-fg);
+}
+
+/* 文字 */
 .pst-h1 {
-  font-size: clamp(2.75rem, 8.6vw, 6rem);
+  font-size: clamp(2.5rem, 11.4vw, 4.5rem);
   line-height: 1.08;
 }
 .pst-h2 {
-  font-size: clamp(1.875rem, 5vw, 3.5rem);
-  line-height: 1.15;
+  font-size: clamp(1.875rem, 3.8vw, 3rem);
+  line-height: 1.2;
+}
+.pst-h3 {
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.6;
+  font-feature-settings: "palt" 1;
+}
+.pst-h3-lg {
+  margin-top: 0.75rem;
+  font-size: clamp(1.375rem, 2.3vw, 1.75rem);
+  font-weight: 700;
+  line-height: 1.45;
+  font-feature-settings: "palt" 1;
+  text-wrap: balance;
 }
 .pst-lead {
-  max-width: 38rem;
-  font-size: 1.0625rem;
+  max-width: 34rem;
+  margin-top: 1.75rem;
+  font-size: clamp(1.0625rem, 1.5vw, 1.1875rem);
   line-height: 1.9;
-  color: var(--pst-paper);
 }
 .pst-body {
-  max-width: 40rem;
-  font-size: 1.0625rem;
+  margin-top: 0.5rem;
+  font-size: 1rem;
   line-height: 1.9;
-  color: var(--pst-ink-2);
+  color: var(--pst-fg-2);
+}
+.pst-job-text .pst-body {
+  max-width: 28rem;
+  margin-top: 1rem;
+}
+/* 3 つの仕事の書き出し: よくある手間（利用者の側の言葉）。答えの見出しの前に置く */
+.pst-pain {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  line-height: 1.7;
+  color: var(--pst-accent);
+}
+.pst-assure {
+  margin-top: 1rem;
+  font-size: 0.875rem;
+  color: var(--pst-on-dark-2);
 }
 .pst-fine {
-  max-width: 44rem;
+  max-width: 40rem;
+  margin-top: 3rem;
   font-size: 0.875rem;
-  line-height: 1.8;
-}
-.pst-on-dark {
-  color: var(--pst-paper);
+  line-height: 1.9;
+  color: var(--pst-on-dark-2);
 }
 
-/* 操作。地ごとに塗りを変える */
+/* 操作。柿色と夜の地にだけ置く */
+.pst-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 2.25rem;
+}
 .pst-btn {
   display: inline-flex;
   height: 3.25rem;
@@ -912,6 +993,11 @@ main#main-content:focus {
   transition:
     transform 0.12s ease,
     background-color 0.15s ease;
+}
+@media (max-width: 639px) {
+  .pst-actions .pst-btn {
+    flex: 1 1 100%;
+  }
 }
 .pst-btn:active {
   transform: scale(0.98);
@@ -927,86 +1013,88 @@ main#main-content:focus {
   font-size: 0.875rem;
 }
 .pst-btn-solid {
-  background-color: var(--pst-paper);
+  background-color: var(--pst-cream);
   color: var(--pst-field);
 }
 .pst-btn-solid:hover {
-  background-color: var(--pst-yellow);
-  color: var(--pst-ink);
+  background-color: #ffffff;
+}
+.pst-ink .pst-btn-solid {
+  color: var(--pst-night);
+}
+[data-theme="takufuDark"] .pst-ink .pst-btn-solid {
+  color: var(--pst-field);
 }
 .pst-btn-line {
-  border-color: var(--pst-paper);
-  color: var(--pst-paper);
+  border-color: var(--pst-cream);
+  color: var(--pst-cream);
 }
 .pst-btn-line:hover {
   background-color: rgb(255 255 255 / 0.12);
 }
-.pst-btn-ink {
-  background-color: var(--pst-ink);
-  color: var(--pst-paper);
-}
-.pst-btn-ink:hover {
-  background-color: var(--pst-field);
-}
-.pst-btn-ink-line {
-  border-color: var(--pst-ink);
-  color: var(--pst-ink);
-}
-.pst-btn-ink-line:hover {
-  background-color: rgb(43 20 12 / 0.08);
-}
-.pst-yellow .pst-btn:focus-visible,
-.pst-light .pst-btn:focus-visible {
-  outline-color: var(--pst-field);
-}
 
-/* 流れるタイルの帯 */
-.pst-wall {
-  margin-top: 3.5rem;
+/* ---------- ヒーロー ---------- */
+.pst-hero-grid {
+  display: grid;
+  gap: 3rem;
+  padding-top: 3.5rem;
   padding-bottom: 4rem;
 }
-.pst-row {
-  overflow: hidden;
-  padding: 0.75rem 0;
-}
-.pst-row-track {
-  display: flex;
-  width: max-content;
-  align-items: center;
-  animation: pst-marquee 80s linear infinite;
-}
-.pst-row.is-reverse .pst-row-track {
-  animation-duration: 95s;
-  animation-direction: reverse;
-}
-.pst-row:hover .pst-row-track {
-  animation-play-state: paused;
-}
-@keyframes pst-marquee {
-  from {
-    transform: translateX(0);
+@media (min-width: 640px) {
+  .pst-hero-grid {
+    padding-top: 5rem;
   }
-  to {
-    transform: translateX(-50%);
+}
+@media (min-width: 1024px) {
+  .pst-hero-grid {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 3.5rem;
+    padding-bottom: 5rem;
+  }
+}
+/* X の #卓報告 に流れてくるもの。2 本の縦の列を少しずらして並べる（傾けない・重ねない） */
+.pst-stack {
+  display: none;
+}
+@media (min-width: 1024px) {
+  .pst-stack {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+    align-items: start;
+    gap: 1rem;
+  }
+  .pst-stack-col {
+    display: grid;
+    gap: 1rem;
+  }
+  .pst-stack-col + .pst-stack-col {
+    margin-top: 2.5rem;
   }
 }
 .pst-tile {
   position: relative;
-  flex: none;
-  margin-right: 1.25rem;
-  border: 2px solid var(--pst-ink);
+  border: 2px solid var(--pst-brown);
   border-radius: 1rem;
-  background-color: var(--pst-paper);
+  background-color: var(--pst-cream);
   padding: 1rem 1.125rem;
-  color: var(--pst-ink);
+  color: var(--pst-brown);
+  animation: pst-rise 0.4s var(--ease-out, ease-out) backwards;
 }
-.pst-row-track > .pst-tile:nth-child(odd),
-.pst-row-track > .contents > .pst-tile:nth-child(odd) {
-  transform: rotate(-1.4deg);
+.pst-stack-col > :nth-child(2) {
+  animation-delay: 0.16s;
 }
-.pst-row-track > .pst-tile:nth-child(even),
-.pst-row-track > .contents > .pst-tile:nth-child(even) {
-  transform: rotate(1.1deg);
+.pst-stack-col + .pst-stack-col > :nth-child(1) {
+  animation-delay: 0.08s;
+}
+.pst-stack-col + .pst-stack-col > :nth-child(2) {
+  animation-delay: 0.24s;
+}
+@keyframes pst-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
 }
 .pst-tile-tag {
   display: inline-block;
@@ -1015,35 +1103,34 @@ main#main-content:focus {
   padding: 0.125rem 0.5rem;
   font-size: 0.75rem;
   font-weight: 700;
-  color: var(--pst-paper);
+  color: var(--pst-cream);
 }
 .pst-tile-title {
-  margin-top: 0.375rem;
-  font-size: 1.375rem;
+  margin-top: 0.5rem;
+  font-size: 1.5rem;
   line-height: 1.25;
 }
 .pst-tile-meta {
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   line-height: 1.6;
-  color: var(--pst-ink-2);
+  color: var(--pst-brown-2);
 }
-.pst-tile-meta.pst-on-dark {
-  color: var(--pst-on-dark-2);
+.pst-figure .pst-tile-meta {
+  color: var(--pst-fg-2);
 }
 .pst-portrait {
   flex: none;
-  border: 2px solid var(--pst-ink);
+  border: 1.5px solid currentColor;
   border-radius: 999px;
-  background-color: var(--pst-paper);
+  background-color: var(--pst-cream);
 }
-.pst-tile-report {
-  width: 19rem;
-  padding-right: 6rem;
+.pst-tile-report .pst-tile-title {
+  white-space: nowrap;
 }
 .pst-stamp {
   position: absolute;
-  right: 0.875rem;
-  top: 1.5rem;
+  right: 1rem;
+  top: 1rem;
   border: 3px solid var(--pst-red);
   border-radius: 0.5rem;
   padding: 0.25rem 0.5rem;
@@ -1053,13 +1140,10 @@ main#main-content:focus {
   color: var(--pst-red);
   transform: rotate(8deg);
 }
-.pst-tile-dice {
-  width: 11rem;
-}
 .pst-dice-num {
-  font-size: 4rem;
-  line-height: 1;
   margin: 0.25rem 0 0.5rem;
+  font-size: 4.5rem;
+  line-height: 1;
 }
 .pst-band {
   display: inline-block;
@@ -1068,21 +1152,21 @@ main#main-content:focus {
   font-size: 0.875rem;
   font-weight: 700;
 }
-.pst-band-sm {
-  margin-left: 0.25rem;
-  padding: 0.0625rem 0.5rem;
-  font-size: 0.75rem;
-}
 .pst-band-crit {
   background-color: var(--pst-crit);
-  color: var(--pst-ink);
+  color: var(--pst-brown);
 }
-.pst-band-fumble {
-  background-color: var(--pst-red);
-  color: var(--pst-paper);
+.pst-tile-san {
+  background-color: var(--pst-yellow);
 }
-.pst-tile-quote {
-  width: 20rem;
+.pst-san-from {
+  font-size: 1.25rem;
+}
+.pst-san-loss {
+  margin-top: 0.25rem;
+  font-size: 3.25rem;
+  line-height: 1.05;
+  color: var(--pst-red);
 }
 .pst-quote {
   margin-top: 0.625rem;
@@ -1090,320 +1174,809 @@ main#main-content:focus {
   font-weight: 700;
   line-height: 1.7;
 }
-.pst-tile-san {
-  width: 15rem;
-  background-color: var(--pst-yellow);
-}
-.pst-san-from {
-  font-size: 1.75rem;
-}
-.pst-san-loss {
-  font-size: 3rem;
-  line-height: 1.1;
-  color: var(--pst-red);
-}
-.pst-tile-rec {
-  display: flex;
-  align-items: center;
-  gap: 0.875rem;
-  border: 2px solid var(--pst-ink);
-  border-radius: 1rem;
-  background-color: var(--pst-ink);
-  padding: 1rem 1.25rem;
-  color: var(--pst-paper);
-}
-.pst-row .pst-tile-rec {
-  width: 17rem;
-}
-.pst-play {
-  display: inline-flex;
-  width: 2.75rem;
-  height: 2.75rem;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background-color: var(--pst-yellow);
-  color: var(--pst-ink);
-}
-.pst-tile-portrait {
-  display: flex;
-  width: 19rem;
-  align-items: center;
-  gap: 1rem;
-}
-.pst-tile-poll {
-  width: 15rem;
-}
-.pst-poll-row {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-  font-size: 1.25rem;
-  font-weight: 700;
-  color: var(--pst-field);
-}
-.pst-tile-secret {
-  width: 18rem;
-  background-color: var(--pst-ink);
-  color: var(--pst-paper);
-}
-.pst-tile-growth {
-  width: 15rem;
-}
-.pst-growth {
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: 0.25rem 1rem;
-  margin-top: 0.375rem;
-  font-size: 0.875rem;
-}
-.pst-growth b {
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-.pst-loss-text {
-  color: var(--pst-red);
-}
 
-/* タイルが集まった先のページ（作例） */
+/* ---------- セッションのページの作例（アプリと同じ紙と罫線） ---------- */
 .pst-sheet {
   overflow: hidden;
-  border: 2px solid var(--pst-ink);
+  border: 1px solid var(--pst-line);
   border-radius: 1.25rem;
-  background-color: var(--pst-paper);
-  color: var(--pst-ink);
+  background-color: var(--pst-surface);
+  color: var(--pst-fg);
 }
 .pst-sheet-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 1rem;
-  border-bottom: 2px solid var(--pst-ink);
-  background-color: var(--pst-tint);
-  padding: 1.25rem 1.5rem;
+  gap: 1rem 2rem;
+  border-bottom: 1px solid var(--pst-line);
+  padding: 1.5rem 1.25rem 1.25rem;
+}
+@media (min-width: 640px) {
+  .pst-sheet-head {
+    padding: 1.75rem 2rem 1.5rem;
+  }
+}
+.pst-sheet-crumb {
+  font-size: 0.8125rem;
+  color: var(--pst-fg-2);
 }
 .pst-sheet-title {
-  font-size: clamp(1.375rem, 3vw, 2rem);
-  line-height: 1.2;
+  margin-top: 0.25rem;
+  font-size: clamp(1.5rem, 2.6vw, 1.875rem);
+  font-weight: 700;
+  line-height: 1.3;
+}
+.pst-sheet-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--pst-fg-2);
+}
+.pst-sheet-meta > span {
+  white-space: nowrap;
+}
+.pst-sys::before {
+  content: "";
+  display: inline-block;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  margin-right: 0.375rem;
+  border-radius: 999px;
+  background-color: #3e6aa8;
+  vertical-align: 0.125rem;
+}
+.pst-sheet-people {
+  display: flex;
+  color: var(--pst-surface);
+}
+.pst-sheet-people > * + * {
+  margin-left: -0.375rem;
 }
 .pst-sheet-body {
   display: grid;
-  gap: 2rem;
-  padding: 1.5rem;
 }
 @media (min-width: 1024px) {
   .pst-sheet-body {
-    grid-template-columns: 1.5fr 1fr;
-    gap: 2.5rem;
+    grid-template-columns: minmax(0, 1fr) 20rem;
   }
+}
+.pst-sheet-log {
+  padding: 1.25rem 0.75rem 1.5rem;
+}
+@media (min-width: 640px) {
+  .pst-sheet-log {
+    padding: 1.5rem 1.5rem 1.75rem;
+  }
+}
+.pst-sheet-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0.5rem 0.75rem;
 }
 .pst-sheet-label {
   margin-bottom: 0.625rem;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   font-weight: 700;
-  color: var(--pst-ink-2);
+  color: var(--pst-fg);
 }
-.pst-sheet-log {
-  position: relative;
+.pst-sheet-bar .pst-sheet-label {
+  margin-bottom: 0;
 }
-.pst-log-line {
+.pst-count {
+  margin-left: 0.25rem;
+  font-weight: 400;
+  color: var(--pst-fg-2);
+}
+/* 押せる切り替えは 1 つの枠にまとめ、選んでいるものだけを墨で塗る（LP で唯一の選択 UI） */
+.pst-filter-row {
+  display: inline-flex;
+  gap: 2px;
+  border-radius: 0.75rem;
+  background-color: var(--pst-tint);
+  padding: 3px;
+}
+.pst-filter-btn {
+  display: inline-flex;
+  height: 2.125rem;
+  align-items: center;
+  border-radius: 0.5625rem;
+  padding: 0 0.875rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--pst-fg-2);
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+.pst-filter-btn:hover {
+  color: var(--pst-fg);
+}
+.pst-filter-btn.is-active {
+  background-color: var(--pst-fg);
+  color: var(--pst-surface);
+}
+.pst-filter-btn:focus-visible,
+.pst-line-time.is-link:focus-visible {
+  outline: 2px solid var(--pst-accent);
+  outline-offset: 2px;
+}
+/* 切り替えても高さが変わらないように、いちばん長い表示の高さを取っておく */
+.pst-lines {
+  display: grid;
+  align-content: start;
+  gap: 0.25rem;
+  min-height: 22rem;
+}
+.pst-line {
   display: flex;
   align-items: flex-start;
   gap: 0.75rem;
-  border-radius: 0.75rem;
-  padding: 0.625rem 0.75rem;
+  border-radius: 0.875rem;
+  padding: 0.75rem 0.5rem;
+  color: var(--pst-fg);
+  animation: pst-in 0.2s var(--ease-out, ease-out) backwards;
+  transition: background-color 0.15s ease;
+}
+@keyframes pst-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.pst-line .pst-portrait {
+  color: var(--pst-line);
+}
+.pst-line.is-current {
+  background-color: var(--pst-mark-bg);
+}
+.pst-line.is-secret {
+  background-color: var(--pst-secret);
+  color: var(--pst-cream);
+}
+.pst-line.is-secret + .pst-line.is-secret {
+  margin-top: -0.25rem;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.pst-line.is-secret:has(+ .pst-line.is-secret) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.pst-line-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.125rem 0.5rem;
   font-size: 0.9375rem;
-  line-height: 1.7;
 }
-.pst-log-line.is-marked {
-  background-color: var(--pst-yellow);
+.pst-line-role {
+  font-size: 0.8125rem;
+  color: var(--pst-fg-2);
 }
-.pst-log-time {
-  width: 2.75rem;
-  flex: none;
-  padding-top: 0.125rem;
+.is-secret .pst-line-role,
+.is-secret .pst-line-time {
+  color: var(--pst-on-dark-2);
+}
+.pst-line-time {
+  margin-left: auto;
   font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
-  color: var(--pst-ink-2);
+  color: var(--pst-fg-2);
 }
-.is-marked .pst-log-time {
-  color: var(--pst-ink);
+.pst-line-time.is-link {
+  margin-right: -0.375rem;
+  border-radius: 0.375rem;
+  padding: 0 0.375rem;
   font-weight: 700;
+  color: var(--pst-accent);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.pst-log-dice {
+.pst-line-time.is-link:hover {
+  color: var(--pst-fg);
+}
+.is-current .pst-line-time.is-link {
+  background-color: var(--pst-yellow);
+  color: var(--pst-brown);
+  font-weight: 700;
+  text-decoration: none;
+}
+.pst-line-body {
+  margin-top: 0.25rem;
+  font-size: 1rem;
+  line-height: 1.75;
+}
+.pst-roll {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.375rem;
-  border-radius: 0.5rem;
+  gap: 0.25rem 0.625rem;
+  border: 1px solid var(--pst-line);
+  border-radius: 0.625rem;
   background-color: var(--pst-tint);
-  padding: 0.25rem 0.625rem;
-  font-size: 0.875rem;
-}
-.pst-note {
-  display: inline-block;
-  margin: 0.75rem 0 0 3.5rem;
-  border: 2px solid var(--pst-ink);
-  border-radius: 0.5rem;
-  background-color: var(--pst-paper);
   padding: 0.375rem 0.75rem;
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
+}
+.pst-roll-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--pst-fg-2);
+}
+.pst-roll-result {
   font-weight: 700;
-  transform: rotate(-1.5deg);
+}
+.pst-roll-result.is-crit {
+  color: var(--pst-gain);
+}
+.pst-roll-result.is-fumble,
+.pst-roll-result.is-loss {
+  color: var(--pst-loss);
 }
 .pst-sheet-side {
   display: grid;
   align-content: start;
   gap: 1.75rem;
+  border-top: 1px solid var(--pst-line);
+  padding: 1.5rem 1.25rem 1.75rem;
 }
-.pst-rec-inline {
-  padding: 0.75rem 1rem;
+@media (min-width: 1024px) {
+  .pst-sheet-side {
+    border-top: 0;
+    border-left: 1px solid var(--pst-line);
+    padding: 1.5rem 1.5rem 1.75rem;
+  }
 }
-/* 押せる切り替えは 1 つの枠にまとめ、選んでいるものだけを墨で塗る（LP で唯一の選択 UI） */
-.pst-filter-row {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  border: 2px solid var(--pst-ink);
-  border-radius: 0.625rem;
-  background-color: var(--pst-paper);
-  padding: 2px;
+.pst-rec {
+  border-radius: 0.875rem;
+  background-color: var(--pst-secret);
+  padding: 0.375rem;
+  color: var(--pst-cream);
 }
-.pst-filter-btn {
-  display: inline-flex;
-  height: 1.875rem;
+.pst-rec-list button {
+  display: flex;
+  width: 100%;
+  text-align: left;
   align-items: center;
-  border-radius: 0.375rem;
-  padding: 0 0.75rem;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  color: var(--pst-ink-2);
+  gap: 0.625rem;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  font-size: 0.875rem;
   transition: background-color 0.15s ease;
 }
-.pst-filter-btn:hover {
-  background-color: var(--pst-tint);
-  color: var(--pst-ink);
+.pst-rec-list button:hover {
+  background-color: rgb(255 255 255 / 0.06);
 }
-.pst-filter-btn.is-active {
-  background-color: var(--pst-ink);
-  color: var(--pst-paper);
+.pst-rec-list button.is-current {
+  background-color: rgb(255 255 255 / 0.1);
+  font-weight: 700;
 }
-.pst-filter-btn:focus-visible {
-  outline: 3px solid var(--pst-field);
-  outline-offset: 2px;
+.pst-rec-list button:focus-visible {
+  outline: 2px solid var(--pst-yellow);
+  outline-offset: -2px;
 }
-.pst-log-line.is-secret {
-  background-color: var(--pst-ink);
-  color: var(--pst-paper);
+.pst-rec-play {
+  display: inline-flex;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background-color: rgb(255 255 255 / 0.14);
 }
-.is-secret .pst-log-time {
+.is-current .pst-rec-play {
+  background-color: var(--pst-yellow);
+  color: var(--pst-brown);
+}
+.pst-rec-at {
+  flex: none;
+  font-variant-numeric: tabular-nums;
   color: var(--pst-on-dark-2);
 }
+.pst-changes > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--pst-line);
+  padding: 0.5rem 0;
+  font-size: 0.9375rem;
+}
+.pst-changes > div:last-child {
+  border-bottom: 0;
+}
+.pst-changes dd {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pst-loss {
+  color: var(--pst-loss);
+}
+.pst-gain {
+  color: var(--pst-gain);
+}
 
-/* 卓譜でできること（2x2 のポスター標本グリッド） */
-.pst-section-border {
-  border-top: 2px solid var(--pst-ink);
-}
-.pst-spec-grid {
+/* 作例の下の見出しと説明 */
+.pst-caption-grid {
   display: grid;
-  border: 2px solid var(--pst-ink);
-  border-radius: 1.25rem;
-  overflow: hidden;
-  background-color: var(--pst-ink);
-  gap: 2px;
+  gap: 2rem;
+  padding: 3.5rem 0 5rem;
 }
-@media (min-width: 768px) {
-  .pst-spec-grid {
+@media (min-width: 640px) {
+  .pst-caption-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2.5rem;
+    padding: 4.5rem 0 5rem;
+  }
+  .pst-caption-grid > .pst-h2 {
+    grid-column: 1 / -1;
+  }
+}
+@media (min-width: 1024px) {
+  .pst-caption-grid {
+    grid-template-columns: minmax(0, 1.5fr) repeat(3, minmax(0, 1fr));
+  }
+  .pst-caption-grid > .pst-h2 {
+    font-size: clamp(1.75rem, 2.7vw, 2.5rem);
+  }
+  .pst-caption-grid > .pst-h2 {
+    grid-column: auto;
+  }
+}
+.pst-caption {
+  border-top: 1px solid var(--pst-line-strong);
+  padding-top: 1rem;
+}
+
+/* ---------- 3 つの仕事 ---------- */
+.pst-jobs {
+  display: grid;
+  margin-top: 3.5rem;
+}
+.pst-job {
+  display: grid;
+  gap: 2rem;
+  padding: 3.5rem 0;
+}
+.pst-job:first-child {
+  padding-top: 0;
+}
+.pst-job:last-child {
+  padding-bottom: 0;
+}
+.pst-job + .pst-job {
+  border-top: 1px solid var(--pst-line);
+}
+@media (min-width: 1024px) {
+  .pst-job {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    align-items: center;
+    gap: 4rem;
+    padding: 4.5rem 0;
+  }
+}
+/* 作例を置く机（作例そのものは紙の面）。狭い画面では机と面の余白を詰めて中身の幅を取る */
+.pst-mat {
+  border-radius: 1.25rem;
+  background-color: var(--pst-mat);
+  padding: 0.625rem;
+}
+@media (min-width: 640px) {
+  .pst-mat {
+    padding: 2rem;
+  }
+}
+.pst-figure {
+  border: 1px solid var(--pst-line);
+  border-radius: 1rem;
+  background-color: var(--pst-surface);
+  padding: 1rem;
+  color: var(--pst-fg);
+}
+@media (min-width: 640px) {
+  .pst-figure {
+    padding: 1.25rem;
+  }
+}
+.pst-figure .pst-portrait {
+  color: var(--pst-line);
+}
+.pst-split {
+  display: grid;
+  gap: 1rem;
+}
+@media (min-width: 640px) {
+  .pst-split {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
-.pst-spec {
-  display: flex;
-  flex-direction: column;
-  background-color: var(--pst-paper);
-  padding: 1.75rem;
+.pst-mini-line .pst-portrait {
+  margin-top: 0.125rem;
 }
-.pst-spec-head {
+.pst-pane-label {
   display: flex;
   align-items: center;
-  gap: 0.625rem;
-  color: var(--pst-field);
-}
-.pst-spec-title {
-  font-size: 1.25rem;
-  font-weight: 700;
-  line-height: 1.35;
-  color: var(--pst-ink);
-}
-.pst-spec-desc {
-  margin-top: 0.75rem;
-  font-size: 0.9375rem;
-  line-height: 1.8;
-  color: var(--pst-ink-2);
-}
-.pst-spec-sample {
-  margin-top: auto;
-  padding-top: 1.25rem;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-.pst-mini-time {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 0.375rem;
-  background-color: var(--pst-yellow);
-  padding: 0.125rem 0.5rem;
+  gap: 0.375rem;
+  margin-bottom: 0.75rem;
   font-size: 0.8125rem;
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--pst-ink);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  color: var(--pst-fg-2);
 }
-
-/* 対応システム・連携ツール */
-.pst-group-label {
-  font-size: 0.875rem;
+.pst-mini-title {
+  font-size: 1.0625rem;
   font-weight: 700;
-  color: var(--pst-on-dark-2);
 }
-.pst-pill-list {
+.pst-mini-line {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.625rem;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  font-size: 0.9375rem;
 }
-.pst-pill-list li {
-  border: 2px solid var(--pst-ink);
+.pst-gate {
+  display: flex;
+  min-height: 5.75rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
   border-radius: 0.75rem;
-  background-color: var(--pst-paper);
-  padding: 0.5rem 0.875rem;
+  background-color: var(--pst-tint);
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--pst-fg-2);
+}
+.pst-karte-head {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  border-bottom: 1px solid var(--pst-line);
+  padding-bottom: 1rem;
+}
+.pst-karte-san {
+  display: flex;
+  margin-left: auto;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.pst-karte-san b {
+  font-size: 1.75rem;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.pst-karte li {
+  display: grid;
+  grid-template-columns: 3.75rem minmax(0, 1fr) auto;
+  gap: 0.125rem 0.75rem;
+  border-bottom: 1px solid var(--pst-line);
+  padding: 0.875rem 0;
+}
+.pst-karte li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.pst-karte-date {
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--pst-fg-2);
+  padding-top: 0.125rem;
+}
+.pst-karte-title {
   font-size: 0.9375rem;
   font-weight: 700;
-  color: var(--pst-ink);
 }
+.pst-karte-change {
+  font-size: 0.875rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pst-karte-growth {
+  grid-column: 2 / -1;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--pst-fg-2);
+}
+.pst-poll {
+  width: 100%;
+  margin-top: 0.75rem;
+  border-collapse: collapse;
+}
+.pst-poll th,
+.pst-poll td {
+  padding: 0.5rem 0.25rem;
+}
+.pst-poll thead th {
+  padding-top: 0;
+}
+.pst-poll thead .pst-portrait {
+  margin: 0 auto;
+}
+.pst-poll tbody tr {
+  border-top: 1px solid var(--pst-line);
+}
+.pst-poll tbody th {
+  padding-left: 0.375rem;
+  text-align: left;
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.pst-poll td {
+  text-align: center;
+}
+.pst-poll tr.is-chosen {
+  background-color: var(--pst-mark-bg);
+}
+.pst-chosen {
+  margin-left: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--pst-accent);
+}
+.pst-mark {
+  display: inline-block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pst-mark.is-yes {
+  color: var(--pst-gain);
+}
+.pst-mark.is-maybe {
+  color: var(--pst-fg-2);
+}
+.pst-mark.is-no {
+  color: var(--pst-loss);
+}
+.pst-discord {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  border-top: 1px solid var(--pst-line);
+  padding-top: 0.875rem;
+  font-size: 0.875rem;
+  color: var(--pst-fg-2);
+}
+
+/* ---------- 取り込み元 ---------- */
+@media (min-width: 1024px) {
+  .pst-sources {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: 4rem;
+  }
+}
+.pst-source-list {
+  margin-top: 2.5rem;
+  border-top: 1px solid var(--pst-line-strong);
+}
+@media (min-width: 1024px) {
+  .pst-source-list {
+    margin-top: 0.5rem;
+  }
+}
+.pst-source-row {
+  display: grid;
+  gap: 0.375rem 1.5rem;
+  border-bottom: 1px solid var(--pst-line);
+  padding: 1.125rem 0;
+}
+@media (min-width: 640px) {
+  .pst-source-row {
+    grid-template-columns: 7rem minmax(0, 1fr);
+  }
+}
+.pst-source-row dt {
+  font-weight: 700;
+}
+.pst-source-row dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  color: var(--pst-fg-2);
+}
+.pst-source-item {
+  white-space: nowrap;
+}
+
+/* ---------- はじめる前に ---------- */
+.pst-faq {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2.25rem 4rem;
+  margin-top: 3rem;
+}
+.pst-a > div {
+  min-width: 0;
+}
+.pst-systems {
+  margin-top: 0.75rem;
+}
+.pst-systems summary {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--pst-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.pst-systems summary:focus-visible {
+  outline: 2px solid var(--pst-accent);
+  outline-offset: 2px;
+}
+.pst-system-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0;
+  margin-top: 0.5rem;
+  color: var(--pst-fg);
+}
+.pst-system-list > li {
+  white-space: nowrap;
+}
+.pst-system-list > li:not(:last-child)::after {
+  content: "・";
+  color: var(--pst-fg-2);
+}
+@media (min-width: 768px) {
+  .pst-faq {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+/* 心配を口にする人と、卓譜の答え。ログの 1 行のように並べる */
+.pst-q {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.pst-q .pst-portrait {
+  color: var(--pst-line);
+}
+.pst-a {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin: 0.75rem 0 0 1.25rem;
+  border-radius: 0.875rem;
+  background-color: var(--pst-tint);
+  padding: 0.875rem 1rem;
+}
+.pst-a > svg {
+  flex: none;
+  margin-top: 0.25rem;
+}
+.pst-a .pst-body {
+  margin-top: 0;
+}
+
+/* 卓報告カード */
+.pst-report {
+  display: grid;
+  gap: 2.5rem;
+  align-items: center;
+}
+@media (min-width: 1024px) {
+  .pst-report {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: 4rem;
+  }
+}
+.pst-report-text .pst-body {
+  max-width: 30rem;
+  margin-top: 1rem;
+}
+.pst-report-card {
+  border-radius: 1.25rem;
+  background-color: var(--pst-mat);
+  padding: 0.75rem;
+}
+@media (min-width: 640px) {
+  .pst-report-card {
+    padding: 1.5rem;
+  }
+}
+.pst-report-card img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 0.875rem;
+}
+
+/* セッションのページの作例: 探索者・感想・シナリオ */
+.pst-cast li,
+.pst-links li {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  border-bottom: 1px solid var(--pst-line);
+  padding: 0.5rem 0;
+  font-size: 0.9375rem;
+}
+.pst-cast li:last-child,
+.pst-links li:last-child {
+  border-bottom: 0;
+}
+.pst-cast .pst-portrait {
+  color: var(--pst-line);
+}
+.pst-cast b,
+.pst-links b,
+.pst-scenario b {
+  display: block;
+  font-weight: 700;
+}
+.pst-cast-pl {
+  font-size: 0.8125rem;
+  color: var(--pst-fg-2);
+}
+.pst-cast-change {
+  flex: none;
+  font-size: 0.875rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pst-links li {
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
+}
+.pst-links b {
+  flex-basis: 100%;
+  order: 2;
+}
+.pst-links .pst-cast-pl {
+  order: 3;
+}
+.pst-link-service {
+  order: 1;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--pst-accent);
+}
+.pst-scenario {
+  font-size: 0.9375rem;
+}
+
+/* ---------- 外枠の足（LP だけ夜の地で締めにつなげる） ---------- */
+.pst-footer {
+  border-top: 1px solid rgb(255 255 255 / 0.1);
+  background-color: var(--pst-night);
+}
+.pst-footer > div,
+.pst-footer a {
+  color: var(--pst-on-dark-2);
+}
+.pst-footer a:hover {
+  color: var(--pst-cream);
+}
+
 .pst-hero ::selection,
-.pst-light ::selection,
-.pst-yellow ::selection {
-  background-color: var(--pst-yellow);
-  color: var(--pst-ink);
-}
-.pst-hero ::selection {
-  background-color: var(--pst-paper);
+.pst-ink ::selection {
+  background-color: var(--pst-cream);
   color: var(--pst-field);
+}
+.pst-light ::selection,
+.pst-stage ::selection {
+  background-color: var(--pst-yellow);
+  color: var(--pst-brown);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pst-row-track {
+  .pst-tile,
+  .pst-line {
     animation: none;
-  }
-  .pst-row {
-    overflow-x: auto;
   }
 }
 

@@ -9,6 +9,10 @@ import {
   type SheetSection,
 } from "../lib/sheet";
 import { INSANE_SKILLS, SHINOBIGAMI_SKILLS, type SkillTable } from "../lib/skill-tables";
+import { MAGICALOGIA_SKILLS } from "../lib/sheet-games/skill-table-magicalogia";
+import { KILLDEATH_SKILLS } from "../lib/sheet-games/souko-helltv";
+import { SATASUPE_HOBBIES } from "../lib/sheet-games/souko-satasupe";
+import { FUTARISOUSA_SKILLS } from "../lib/sheet-games/souko-2s";
 import {
   coc6AbilityRoll,
   coc7Levels,
@@ -40,6 +44,8 @@ interface SheetLayout {
   skillsByAbility?: boolean;
   /** 決まった特技表の上に、習得した特技を示す */
   skillTable?: SkillTable;
+  /** 特技表の行の見出し。2〜12 は 2D6 の出目（シノビガミなど）、1〜6 は 1D6（サタスペの趣味表）、none は出目で引かない表 */
+  skillTableRows?: "2d6" | "d6" | "none";
   /** 区分の並び順（ここに無い区分は後ろに元の順で並ぶ） */
   order: string[];
   /** 一覧・本文のうち、最初から見せる区分（ほかは開閉） */
@@ -121,6 +127,104 @@ const SHEET_LAYOUTS: Record<string, SheetLayout> = {
     skillMode: "plain",
     order: ["resources", "abilities", "skills"],
   },
+  Arianrhod: {
+    vitals: ["HP", "MP", "フェイト"],
+    abilityCols: "grid-cols-4 [@container_(min-width:40rem)]:grid-cols-7",
+    skillMode: "plain",
+    order: ["levels", "abilities", "resources", "combat", "skills"],
+    open: ["skills"],
+  },
+  GoblinSlayer: {
+    vitals: ["生命", "生命力", "呪文回数"],
+    abilityCols: "grid-cols-4 [@container_(min-width:40rem)]:grid-cols-7",
+    skillMode: "plain",
+    order: ["levels", "abilities", "abilities2", "resources", "skills", "spells", "arts"],
+    open: ["skills", "spells"],
+  },
+  Kamigakari: {
+    vitals: ["生命力", "行動値", "移動力"],
+    abilityCols: "grid-cols-3 [@container_(min-width:40rem)]:grid-cols-5",
+    skillMode: "plain",
+    order: ["levels", "abilities", "combat", "resources", "talents"],
+    open: ["talents"],
+  },
+  Nechronica: {
+    vitals: ["行動値"],
+    abilityCols: "grid-cols-3",
+    skillMode: "plain",
+    order: ["resources", "parts", "maneuvers", "roices", "carma", "kakera"],
+    open: ["parts", "roices"],
+  },
+  NightWizard3rd: {
+    vitals: [],
+    abilityCols: "grid-cols-3 [@container_(min-width:40rem)]:grid-cols-5",
+    skillMode: "plain",
+    order: ["levels", "abilities", "battle", "resources", "effects"],
+    open: ["effects"],
+  },
+  MagicaLogia: {
+    vitals: [],
+    abilityCols: "grid-cols-2 [@container_(min-width:30rem)]:grid-cols-4",
+    skillMode: "plain",
+    skillTable: MAGICALOGIA_SKILLS,
+    order: ["abilities", "resources", "skills", "library", "anchors", "duty", "trueform"],
+    open: ["library", "anchors"],
+  },
+  KillDeathBusiness: {
+    vitals: ["ソウル"],
+    abilityCols: "grid-cols-3",
+    skillMode: "plain",
+    skillTable: KILLDEATH_SKILLS,
+    order: ["resources", "skills", "abilities-list", "hellcyber", "relations", "subplot", "seasons"],
+    open: ["abilities-list"],
+  },
+  StellarKnights: {
+    vitals: ["耐久力", "防御力"],
+    abilityCols: "grid-cols-3",
+    skillMode: "plain",
+    order: ["resources", "skills", "sheath", "partner-bringer", "partner-sheath"],
+    open: ["skills"],
+  },
+  Satasupe: {
+    vitals: [],
+    abilityCols: "grid-cols-3 [@container_(min-width:40rem)]:grid-cols-5",
+    skillMode: "plain",
+    skillTable: SATASUPE_HOBBIES,
+    skillTableRows: "d6",
+    order: ["abilities", "gift", "power", "resources", "exp", "skills", "karma"],
+    open: ["karma"],
+  },
+  FutariSousa: {
+    vitals: [],
+    abilityCols: "grid-cols-3",
+    skillMode: "plain",
+    skillTable: FUTARISOUSA_SKILLS,
+    skillTableRows: "none",
+    order: ["resources", "skills", "quirks", "actions"],
+    open: ["quirks"],
+  },
+  GranCrest: {
+    vitals: ["HP", "MP"],
+    abilityCols: "grid-cols-3 [@container_(min-width:40rem)]:grid-cols-6",
+    skillMode: "plain",
+    skillsByAbility: true,
+    order: ["abilities", "resources", "skills", "classAbilities", "worksAbilities", "magic"],
+    open: ["classAbilities"],
+  },
+  MamonoScramble: {
+    vitals: ["耐久値"],
+    abilityCols: "grid-cols-3",
+    skillMode: "plain",
+    order: ["abilities", "resources", "attributes", "magi"],
+    open: ["attributes"],
+  },
+  KizunaBullet: {
+    vitals: ["耐久値"],
+    abilityCols: "grid-cols-3",
+    skillMode: "plain",
+    order: ["resources", "kizuna", "kizuato", "shougou", "partners"],
+    open: ["kizuna"],
+  },
 };
 const GENERIC: SheetLayout = {
   vitals: [],
@@ -130,7 +234,23 @@ const GENERIC: SheetLayout = {
 };
 
 /* 卓譜のシステムと結び付かない取り込み（systemId が汎用）は、キャラシの書いたシステム名で見せ方を選ぶ */
-const LAYOUT_BY_LABEL: Record<string, SheetLayout> = { "ソード・ワールド2.0": SW };
+const LAYOUT_BY_LABEL: Record<string, SheetLayout> = {
+  "ソード・ワールド2.0": SW,
+  ブラッドパス: {
+    vitals: ["耐久値"],
+    abilityCols: "grid-cols-2",
+    skillMode: "plain",
+    order: ["abilities", "resources", "bloodarts", "arts", "partners"],
+    open: ["bloodarts", "arts"],
+  },
+  "ヴィジランテ・コード": {
+    vitals: [],
+    abilityCols: "grid-cols-2 [@container_(min-width:30rem)]:grid-cols-4",
+    skillMode: "plain",
+    order: ["abilities", "resources", "battle", "equipment", "specialities"],
+    open: ["specialities"],
+  },
+};
 
 function sheetLayoutFor(systemId: string, sheet: CharacterSheet): SheetLayout {
   return SHEET_LAYOUTS[systemId] ?? LAYOUT_BY_LABEL[sheet.systemLabel ?? ""] ?? GENERIC;
@@ -265,7 +385,11 @@ function SectionBody({
       );
     case "skills":
       return layout.skillTable ? (
-        <SkillTableView entries={section.entries} table={layout.skillTable} />
+        <SkillTableView
+          entries={section.entries}
+          table={layout.skillTable}
+          rowsLabel={layout.skillTableRows}
+        />
       ) : (
         <SkillList
           entries={
@@ -555,8 +679,19 @@ function SkillList({
   );
 }
 
-/** 特技表（列 = 分野、行 = 2〜12）。判定は表の上の距離で決まるので、習得した特技を表の中で示す */
-function SkillTableView({ entries, table }: { entries: SheetEntry[]; table: SkillTable }) {
+/**
+ * 特技表（列 = 分野、行 = 2〜12）。判定は表の上の距離で決まるので、表を丸ごと出して習得した特技を示す。
+ * 表を丸ごと載せるのは運営者の判断（2026-11-27。TRPGライツ事務局のガイドラインの表の転載の項を確かめたうえで）
+ */
+function SkillTableView({
+  entries,
+  table,
+  rowsLabel = "2d6",
+}: {
+  entries: SheetEntry[];
+  table: SkillTable;
+  rowsLabel?: SheetLayout["skillTableRows"];
+}) {
   const learned = new Set(entries.map((e) => e.label));
   const rows = table[0]?.[1].length ?? 0;
   /* 分野ごとの習得（表が入らない幅） */
@@ -599,7 +734,7 @@ function SkillTableView({ entries, table }: { entries: SheetEntry[]; table: Skil
                 scope="row"
                 className="!border-0 !py-1 !pl-0 !pr-1 !text-right !text-xs font-normal tabular-nums text-ink2"
               >
-                {i + 2}
+                {rowsLabel === "none" ? "" : rowsLabel === "d6" ? i + 1 : i + 2}
               </th>
               {table.map(([field, names]) => {
                 const name = names[i] ?? "";
@@ -625,7 +760,29 @@ function SkillTableView({ entries, table }: { entries: SheetEntry[]; table: Skil
   );
 }
 
+/** 名前つきの行。分類（ネクロニカのパーツの部位・呪文の系統など）があれば、分類ごとに見出しを付けて並べる */
 function NamedList({ entries }: { entries: SheetEntry[] }) {
+  const groups: { group: string; items: SheetEntry[] }[] = [];
+  for (const e of entries) {
+    const g = e.group ?? "";
+    const last = groups.at(-1);
+    if (last && last.group === g) last.items.push(e);
+    else groups.push({ group: g, items: [e] });
+  }
+  if (groups.length <= 1) return <NamedRows entries={entries} />;
+  return (
+    <div className="space-y-3">
+      {groups.map((g, i) => (
+        <div key={`${g.group}-${i}`}>
+          {g.group && <div className="mb-1 text-xs font-bold text-ink2">{g.group}</div>}
+          <NamedRows entries={g.items} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NamedRows({ entries }: { entries: SheetEntry[] }) {
   return (
     <ul className="space-y-1.5 text-sm" data-user-content>
       {entries.map((e, i) => (

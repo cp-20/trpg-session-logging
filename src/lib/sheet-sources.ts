@@ -4,6 +4,7 @@
  */
 import type { ParsedCharacter } from "./ccfolia-character";
 import { INSANE_SKILLS, SHINOBIGAMI_SKILLS } from "./skill-tables";
+import { CHARASHEET_GAMES, SOUKO_GAMES, YTSHEET_GAMES, type GameReader } from "./sheet-games";
 import {
   buildSheet,
   compact,
@@ -20,6 +21,22 @@ import {
 } from "./sheet";
 
 type Rec = Record<string, unknown>;
+
+/** システムごとの読み取り（sheet-games）の結果をシートにする */
+export function sheetFromGame(
+  provider: SheetProvider,
+  reader: GameReader,
+  root: Rec,
+  url?: string,
+): CharacterSheet | undefined {
+  const parts = reader.read(root);
+  return buildSheet(provider, {
+    url,
+    systemLabel: parts.systemLabel || reader.label,
+    profile: parts.profile,
+    sections: parts.sections,
+  });
+}
 
 function rec(v: unknown): Rec | undefined {
   return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Rec) : undefined;
@@ -485,6 +502,8 @@ export function sheetFromCharasheet(root: unknown, url?: string): CharacterSheet
   const r = rec(root);
   if (!r || !textOf(r.pc_name)) return undefined;
   const game = (textOf(r.game) ?? "").toLowerCase();
+  const reader = CHARASHEET_GAMES[game];
+  if (reader) return sheetFromGame("charasheet", reader, r, url);
   const memo = textSection("memo", "メモ", r.pc_making_memo);
   const items = section(
     "items",
@@ -602,30 +621,35 @@ export function sheetFromCharasheet(root: unknown, url?: string): CharacterSheet
 
 const YTSHEET_SYSTEMS: Record<string, { id: string; label?: string }> = {
   "sw2.5": { id: "sw25" },
-  "sw2.0": { id: "general", label: "ソード・ワールド2.0" },
-  sw2: { id: "general", label: "ソード・ワールド2.0" },
-  dx3rd: { id: "general", label: "ダブルクロス The 3rd Edition" },
-  ar2e: { id: "general", label: "アリアンロッドRPG 2E" },
-  gc: { id: "general", label: "グランクレストRPG" },
-  gs: { id: "general", label: "ゴブリンスレイヤーTRPG" },
-  kiz: { id: "general", label: "キズナバレット" },
-  blp: { id: "general", label: "ブラッドパス" },
-  vc: { id: "general", label: "ヴィジランテ・コード" },
-  ms: { id: "general", label: "マモノスクランブル" },
+  "sw2.0": { id: "SwordWorld2.0", label: "ソード・ワールド2.0" },
+  sw2: { id: "SwordWorld2.0", label: "ソード・ワールド2.0" },
+  ...Object.fromEntries(
+    Object.entries(YTSHEET_GAMES).map(([path, g]) => [path, { id: g.id, label: g.label }]),
+  ),
 };
 
 /** URL のパス（/ytsheet/sw2.5/ など）からシステムを決める */
 export function ytsheetSystemFromUrl(url: string | undefined): { id: string; label?: string } | undefined {
+  const path = ytsheetPath(url);
+  return path ? YTSHEET_SYSTEMS[path] : undefined;
+}
+
+/** URL のうち、ゆとシートのシステムを表す道（sw2.5・dx3rd など） */
+function ytsheetPath(url: string | undefined): string | undefined {
   if (!url) return undefined;
   try {
     const parts = new URL(url).pathname.toLowerCase().split("/").filter(Boolean);
-    for (const p of parts.reverse()) {
-      if (YTSHEET_SYSTEMS[p]) return YTSHEET_SYSTEMS[p];
-    }
+    return parts.reverse().find((p) => YTSHEET_SYSTEMS[p]);
   } catch {
     /* 不正な URL は推定しない */
   }
   return undefined;
+}
+
+/** ソード・ワールド以外のゆとシートの読み取り（URL の道で決める） */
+export function ytsheetGameFromUrl(url: string | undefined): GameReader | undefined {
+  const path = ytsheetPath(url);
+  return path ? YTSHEET_GAMES[path] : undefined;
 }
 
 const SW_ABILITIES: [string, string, string][] = [
@@ -664,6 +688,8 @@ function ytDescriptionEntries(raw: unknown): SheetEntry[] {
 export function sheetFromYtsheet(root: unknown, url?: string): CharacterSheet | undefined {
   const r = rec(root);
   if (!r) return undefined;
+  const game = ytsheetGameFromUrl(url ?? textOf(r.sheetURL));
+  if (game) return sheetFromGame("ytsheet", game, r, url ?? httpsUrl(r.sheetURL));
   const sys =
     ytsheetSystemFromUrl(url ?? textOf(r.sheetURL)) ??
     (textOf(r.gameVersion) === "2.5" || r.sttDex !== undefined ? { id: "sw25" } : undefined);
@@ -773,7 +799,7 @@ export function sheetFromStats(
 
 /* ================= TRPGキャラクターシート倉庫（character-sheets.appspot.com） =================
  * 公開 JSON（/{システム}/display?ajax=1&key=…）を読む。JSON にシステムは入っていないので URL の道で決める。
- * 読み方を持つのはダブルクロス 3rd・シノビガミ・インセインだけ。ほかのシステムの URL は受け付けない（推測で埋めない）。
+ * 読み方を持つシステムだけを受け付ける（SOUKO_SYSTEMS。ほかのシステムの URL は推測で埋めない）。
  */
 
 /** 倉庫の道（/dx3/ など）→ 卓譜のシステム */
@@ -781,6 +807,7 @@ export const SOUKO_SYSTEMS: Record<string, { id: string; label: string }> = {
   dx3: { id: "DoubleCross", label: "ダブルクロス3rd" },
   shinobigami: { id: "ShinobiGami", label: "シノビガミ" },
   insane: { id: "Insane", label: "インセイン" },
+  ...Object.fromEntries(Object.entries(SOUKO_GAMES).map(([path, g]) => [path, { id: g.id, label: g.label }])),
 };
 
 /** 習得した特技（learned[].id = "skills.row{行}.name{列}"）。表にない番号は読まない */
@@ -932,7 +959,8 @@ export function parseSoukoJson(
   }
   const r = rec(root);
   const base = rec(r?.base);
-  const name = textOf(base?.name);
+  // マギカロギアは名前の欄が無く、表の名前（covername）と魔法名（magicname）を持つ
+  const name = textOf(base?.name) ?? textOf(base?.covername) ?? textOf(base?.magicname);
   const sys = SOUKO_SYSTEMS[systemPath];
   if (!r || !base || !name || r.error || !sys) return null;
   let parts: {
@@ -940,7 +968,9 @@ export function parseSoukoJson(
     sections: (SheetSection | null)[];
     stats?: Record<string, number>;
   };
-  if (systemPath === "dx3") parts = soukoDx3(r);
+  const game = SOUKO_GAMES[systemPath];
+  if (game) parts = game.read(r);
+  else if (systemPath === "dx3") parts = soukoDx3(r);
   else if (systemPath === "shinobigami") parts = soukoGrid(r, SHINOBIGAMI_SKILLS, "忍法");
   else {
     parts = soukoGrid(r, INSANE_SKILLS, "アビリティ");

@@ -20,6 +20,38 @@ describe("cloud boundaries", () => {
     expect(() => splitCloudData("x".repeat(24_000_000))).toThrow("大きさ");
   });
 
+  it("シークレットタブを「自分だけ」にしたセッションは、シークレットタブとシークレットダイスを共有の写しに入れない", () => {
+    const state = seedState();
+    const source = Object.values(state.logs).find((log) => log.hasLog && log.channels.some((c) => c.secret))!;
+    const log = structuredClone(source);
+    const main = log.channels.find((c) => !c.secret)!;
+    main.msgs.push({
+      id: "m_secret_roll",
+      ts: 1,
+      sp: "みかん",
+      kind: "KP",
+      type: "roll",
+      roll: { cmd: "SCC<=50", skill: "幸運", dice: "12", result: "成功", secret: true },
+    });
+    const secretText = log.channels.find((c) => c.secret)!.msgs.find((m) => m.text)!.text!;
+
+    // 既定は今までどおり見せる
+    const shared = JSON.stringify(sharedLogProjection(log, state));
+    expect(shared).toContain(secretText);
+    expect(shared).toContain("m_secret_roll");
+
+    log.secretTabs = "private";
+    const projected = sharedLogProjection(log, state);
+    const text = JSON.stringify(projected);
+    expect(projected.log.channels.some((c) => c.secret)).toBe(false);
+    expect(text).not.toContain(secretText);
+    expect(text).not.toContain("m_secret_roll");
+    // ふつうのタブの発言は残る
+    expect(projected.log.channels.find((c) => c.id === main.id)!.msgs.length).toBe(main.msgs.length - 1);
+    // 記録した人の手元のセッションは変わらない
+    expect(log.channels.some((c) => c.secret)).toBe(true);
+  });
+
   it("共有用の内容からは個人のアカウント情報を除き、チャンネルとメモは残す", () => {
     const state = seedState();
     const source = Object.values(state.logs).find((log) => log.hasLog && log.channels.some((c) => c.secret))!;

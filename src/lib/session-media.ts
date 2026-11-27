@@ -150,7 +150,7 @@ export interface DetectedLink {
   embedUrl?: string;
 }
 
-const SERVICE_LABEL: Record<MediaService, string> = {
+export const SERVICE_LABEL: Record<MediaService, string> = {
   youtube: "YouTube",
   niconico: "ニコニコ",
   twitch: "Twitch",
@@ -463,16 +463,12 @@ export function normalizeMediaUrl(raw: string): string | null {
   return detectMediaLink(withScheme) ? withScheme : null;
 }
 
-/** 追加で最初に選ぶ「どこにあるもの」か。none は URL のないもの（手元の録画など） */
-export type MediaSourceId =
-  | "youtube"
-  | "streaming"
-  | "storage"
-  | "secret"
-  | "x"
-  | "gallery"
-  | "other"
-  | "none";
+/**
+ * 追加で最初に選ぶ「どこにあるもの」か。題名・本文まで引いて見せられる 4 つ（YouTube・ニコニコ・ふせったー・X）を選ばせ、
+ * それ以外のサービス（Google ドライブ・Twitch・pixiv など）は「その他のリンク」にまとめる。保存済みのものはサービスの判定
+ * （detectMediaLink）で見せるので、選べなくなったサービスのものもそのまま表示できる。none は URL のないもの（手元の録画など）
+ */
+export type MediaSourceId = "youtube" | "niconico" | "fusetter" | "x" | "other" | "none";
 
 export interface MediaSource {
   id: MediaSourceId;
@@ -499,55 +495,52 @@ export const MEDIA_SOURCES: readonly MediaSource[] = [
     urlExample: "https://youtu.be/…",
   },
   {
-    id: "streaming",
-    label: "ニコニコ・Twitch・ツイキャス",
+    id: "niconico",
+    label: "ニコニコ",
     about: "配信・リプレイ動画",
-    services: ["niconico", "twitch", "twitcasting"],
-    kind: "stream",
+    services: ["niconico"],
+    kind: "replay",
     urlLabel: "動画の URL",
-    urlExample: "https://www.twitch.tv/videos/…",
+    urlExample: "https://www.nicovideo.jp/watch/sm…",
   },
   {
-    id: "storage",
-    label: "Google ドライブ・ギガファイル便",
-    about: "録画・録音などのファイル",
-    services: ["gdrive", "dropbox", "gigafile"],
-    kind: "recording",
-    urlLabel: "共有リンク",
-    urlExample: "https://drive.google.com/…",
-  },
-  {
-    id: "secret",
-    label: "ふせったー・Privatter",
+    id: "fusetter",
+    label: "ふせったー",
     about: "感想",
-    services: ["fusetter", "privatter"],
+    services: ["fusetter"],
     kind: "impression",
-    urlLabel: "感想の URL",
+    urlLabel: "投稿の URL",
     urlExample: "https://fusetter.com/tw/…",
   },
   {
     id: "x",
     label: "X",
-    about: "卓報告・感想",
+    about: "卓報告・感想・絵",
     services: ["x"],
     kind: "report",
     urlLabel: "ポストの URL",
     urlExample: "https://x.com/…/status/…",
   },
   {
-    id: "gallery",
-    label: "pixiv・ポイピク・Skeb",
-    about: "イラスト・漫画・小説",
-    services: ["pixiv", "poipiku", "fanbox", "skeb"],
-    kind: "art",
-    urlLabel: "作品の URL",
-    urlExample: "https://www.pixiv.net/artworks/…",
-  },
-  {
     id: "other",
     label: "その他のリンク",
-    about: "CCFOLIA・Notion など",
-    services: ["ccfolia", "notion", "discord", "web"],
+    about: "Google ドライブ・Twitch・pixiv など",
+    services: [
+      "twitch",
+      "twitcasting",
+      "gdrive",
+      "dropbox",
+      "gigafile",
+      "privatter",
+      "poipiku",
+      "notion",
+      "pixiv",
+      "fanbox",
+      "skeb",
+      "ccfolia",
+      "discord",
+      "web",
+    ],
     kind: "other",
     urlLabel: "URL",
     urlExample: "https://…",
@@ -590,20 +583,6 @@ export function resolveMediaSource(
   };
 }
 
-/** URL から題名を引ける問い合わせ先（oEmbed）。ブラウザから直接引けるのは YouTube だけ */
-export function mediaTitleLookupUrl(rawUrl: string): string | undefined {
-  const d = detectMediaLink(rawUrl);
-  if (d?.service !== "youtube" || !mediaThumbnail(rawUrl)) return undefined;
-  return `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(rawUrl.trim())}`;
-}
-
-/** oEmbed の応答から題名を取り出す */
-export function titleFromOembed(json: unknown): string | undefined {
-  if (!json || typeof json !== "object") return undefined;
-  const t = (json as { title?: unknown }).title;
-  return typeof t === "string" && t.trim() ? t.trim().slice(0, 200) : undefined;
-}
-
 /** 追加・編集で、種類によっては要る欄 */
 export type MediaField = "expiresAt" | "credits" | "parts" | "chapters" | "startedAt" | "pov" | "note";
 
@@ -627,6 +606,11 @@ export function mediaEditorFields(
   more.push("note");
   for (const f of filled) if (!main.includes(f) && !more.includes(f)) more.push(f);
   return { main, more };
+}
+
+/** ネタバレの既定。卓報告（結果だけを知らせるもの）は含まない、ほかは含む（伏せる側に倒す） */
+export function defaultSpoiler(kind: MediaKind): boolean {
+  return kind !== "report";
 }
 
 /** 同卓者の了承を確かめるか（録画・録音・配信を、自分以外にも見せるとき） */

@@ -237,7 +237,7 @@ type ExternalSheetResponse = {
 
 /** キャラシの URL を卓譜のサーバー経由で読む（P6: URL から読める構造化データだけ） */
 async function requestExternalSheet(url: string): Promise<ExternalSheetResponse> {
-  const origin = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.lolipop-now.app";
+  const origin = process.env.EXPO_PUBLIC_WEB_ORIGIN || "https://takufu.app";
   try {
     const res = await fetch(`${origin}/api/import/external`, {
       method: "POST",

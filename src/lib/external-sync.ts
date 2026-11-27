@@ -17,6 +17,7 @@ import {
   sheetFromCharasheet,
   sheetFromStats,
   sheetFromYtsheet,
+  ytsheetGameFromUrl,
   ytsheetSystemFromUrl,
 } from "./sheet-sources";
 
@@ -792,6 +793,9 @@ function withSheet(
     const sys = ytsheetSystemFromUrl(displayUrl);
     if (sys) next = { ...next, systemId: sys.id };
     const r = (root ?? {}) as Record<string, unknown>;
+    // ソード・ワールド以外は、そのシステムの読み取りが続く値を返す（SW 向けの能力値の推定を混ぜない）
+    const game = ytsheetGameFromUrl(displayUrl);
+    if (game) next = { ...next, stats: game.read(r).stats };
     if (next.systemId === "sw25") {
       const extra: Record<string, number> = {};
       for (const [key, field] of [

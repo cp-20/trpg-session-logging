@@ -41,7 +41,8 @@ export function statusSheet(
   if (carried.length === 0) return base;
   const left = new Map(carried.map((v) => [v.label, v]));
   const sections = (base?.sections ?? []).map((s) => {
-    if (s.kind !== "resources" && s.kind !== "levels") return s;
+    /* 続く値はシステムによって副能力値（SAN）にも能力値（サタスペの犯罪・生活…）にもある。書かれている所で今の値にする */
+    if (s.kind !== "resources" && s.kind !== "levels" && s.kind !== "abilities") return s;
     return {
       ...s,
       entries: s.entries.map((e) => {

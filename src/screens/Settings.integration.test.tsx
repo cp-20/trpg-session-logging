@@ -3,7 +3,6 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Settings, { UserDetail } from "./Settings";
-import { parseSavedState } from "../lib/state-schema";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -38,25 +37,19 @@ describe("Settings + UserDetail + ThemeSync + Backup 復元結合テスト", () 
     expect(persisted.users.u_mikan?.bio).toBe("週末夜に遊んでいます。");
   });
 
-  it("外観テーマの切り替えと JSON バックアップファイルの読み込み復元が連動する", async () => {
+  it("外観テーマの切り替えが画面と端末の設定に反映される", async () => {
     const user = userEvent.setup();
-    const view = renderWithStore(<Settings />, { initialPath: "/settings" });
+    renderWithStore(<Settings />, { initialPath: "/settings" });
 
     await user.click(screen.getByRole("radio", { name: "ダーク" }));
     expect(document.documentElement.getAttribute("data-theme")).toBe("takufuDark");
     expect(localStorage.getItem("takufu-theme")).toBe("dark");
+  });
 
-    // 記録の読み込み（parseSavedState を通して StoreProvider へ復元）
-    const exported = view.readPersistedState()!;
-    exported.users.u_mikan!.name = "バックアップ復元後";
-    const backupJson = JSON.stringify(exported);
-    expect(parseSavedState(backupJson)?.users.u_mikan?.name).toBe("バックアップ復元後");
-
-    const file = new File([backupJson], "takufu-backup.json", { type: "application/json" });
-    const fileInput = screen.getByLabelText("記録を読み込む");
-    await user.upload(fileInput, file);
-
-    await waitFor(() => expect(view.readPersistedState()?.users.u_mikan?.name).toBe("バックアップ復元後"));
+  it("記録のバックアップ（書き出し・読み込み）は設定に出さない", () => {
+    renderWithStore(<Settings />, { initialPath: "/settings" });
+    expect(screen.queryByText("バックアップ")).toBeNull();
+    expect(screen.queryByLabelText("記録を読み込む")).toBeNull();
   });
 
   it("Google カレンダーの機能を切っている間は、設定に欄を出さない", () => {

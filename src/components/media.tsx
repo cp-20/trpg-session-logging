@@ -13,7 +13,7 @@ import {
   IconBook,
   IconBooks,
   IconBroadcast,
-  IconDownload,
+  IconExternal,
   IconEye,
   IconFileText,
   IconLayoutList,
@@ -43,6 +43,7 @@ import {
   MEDIA_SCOPE_LABEL,
   MEDIA_SOURCES,
   MEDIA_SOURCE_MAP,
+  defaultSpoiler,
   detectMediaLink,
   embedAt,
   expiryState,
@@ -50,13 +51,11 @@ import {
   formatClock,
   mediaEditorFields,
   mediaThumbnail,
-  mediaTitleLookupUrl,
   needsConsentCheck,
   normalizeMediaUrl,
   parseChapters,
   resolveMediaSource,
   shouldHideSpoiler,
-  titleFromOembed,
   urlAt,
   visibleMedia,
   type MediaField,
@@ -66,6 +65,13 @@ import {
   type MediaViewer,
   type SessionMedia,
 } from "../lib/session-media";
+import {
+  previewRequestUrl,
+  readPreviewJson,
+  thumbnailCandidates,
+  titleRepeatsExcerpt,
+  type MediaPreview,
+} from "../lib/media-preview";
 import type { Log, State } from "../types";
 import { sessionStart, sessionDays } from "../lib/sittings";
 
@@ -91,11 +97,9 @@ const KIND_ICON: Record<MediaKind, Icon> = {
 /** 置き場所の印。サービスのロゴは使わず、そこに置かれるものの絵で示す（P17） */
 const SOURCE_ICON: Record<MediaSourceId, Icon> = {
   youtube: IconVideo,
-  streaming: IconBroadcast,
-  storage: IconDownload,
-  secret: IconMessageCircle,
+  niconico: IconMovie,
+  fusetter: IconMessageCircle,
   x: IconNotes,
-  gallery: IconPalette,
   other: IconLink,
   none: IconUnlink,
 };
@@ -127,6 +131,38 @@ function jstEpoch(date: string, time: string): number | undefined {
 
 function participantIds(log: Log): string[] {
   return [log.ownerId, ...Object.keys(log.players).filter((id) => id !== log.ownerId)];
+}
+
+/* ---------- 題名・本文の頭（サーバーの /api/media-preview から） ---------- */
+const previewCache = new Map<string, Promise<MediaPreview | null>>();
+
+function loadPreview(path: string): Promise<MediaPreview | null> {
+  let p = previewCache.get(path);
+  if (!p) {
+    p = fetch(path, { credentials: "omit" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: unknown) => readPreviewJson(json))
+      .catch(() => null);
+    previewCache.set(path, p);
+  }
+  return p;
+}
+
+/** 引ける URL（YouTube・ニコニコ・ふせったー・X）の題名・書いた人・本文の頭。enabled でないとき（伏せているとき）は引かない */
+function useMediaPreview(url: string | null | undefined, enabled = true): MediaPreview | null {
+  const path = enabled ? previewRequestUrl(url ?? undefined) : undefined;
+  const [got, setGot] = useState<{ path: string; value: MediaPreview | null } | null>(null);
+  useEffect(() => {
+    if (!path) return;
+    let alive = true;
+    void loadPreview(path).then((value) => {
+      if (alive) setGot({ path, value });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [path]);
+  return path && got?.path === path ? got.value : null;
 }
 
 /* ---------- 共通の小物 ---------- */
@@ -199,10 +235,25 @@ function PlayableCard({ m, state, viewer, canEdit, onEdit, onDelete }: ItemProps
   const hidden = shouldHideSpoiler(m, viewer) && !revealed;
   const current = parts[part];
   const link = current ? detectMediaLink(current.url) : null;
-  const [thumbFailed, setThumbFailed] = useState(false);
-  const thumb = thumbFailed ? undefined : mediaThumbnail(current?.url);
+  // ニコニコはサムネイルを、題名のない YouTube は題名を引く（伏せていてもサムネイルはぼかして出すので引く）
+  const preview = useMediaPreview(
+    current?.url,
+    link?.service === "niconico" || (link?.service === "youtube" && !m.title),
+  );
+  // サムネイルの読めなかったもの・小さいもの（古いニコニコなど）は URL ごとに覚える（パートを替えても持ち越さない）
+  const [thumbIssues, setThumbIssues] = useState<Record<string, "failed" | "small">>({});
+  const thumb = thumbnailCandidates(mediaThumbnail(current?.url) ?? preview?.thumbnail).find(
+    (u) => thumbIssues[u] !== "failed",
+  );
+  const smallThumb = Boolean(thumb && thumbIssues[thumb] === "small");
+  const markThumb = (u: string, issue: "failed" | "small") =>
+    setThumbIssues((cur) => (cur[u] === issue ? cur : { ...cur, [u]: issue }));
+  // 大きな再生面は、再生中か大きなサムネイルがあるときだけ。ほかは低い帯にして、空の 16:9 を出さない
+  const wide = (playingAt !== null && Boolean(link?.embedUrl)) || Boolean(thumb && !smallThumb);
   const chapters = (m.chapters ?? []).filter((c) => (c.part ?? 1) === part + 1);
-  const title = hidden ? `${def.label}（ネタバレを含みます）` : m.title || link?.label || def.label;
+  const title = hidden
+    ? `${def.label}（ネタバレを含みます）`
+    : m.title || preview?.title || link?.label || def.label;
   const pov = m.povUserId ? state.users[m.povUserId]?.name : undefined;
 
   function play(at: number) {
@@ -213,7 +264,7 @@ function PlayableCard({ m, state, viewer, canEdit, onEdit, onDelete }: ItemProps
   return (
     <article className="surface overflow-hidden" data-media-kind={m.kind}>
       {(link?.embedUrl || thumb) && (
-        <div className="relative aspect-video bg-base-200">
+        <div className={cx("relative overflow-hidden bg-base-200", wide && "aspect-video")}>
           {playingAt !== null && link?.embedUrl ? (
             <iframe
               key={`${part}-${playingAt}`}
@@ -226,26 +277,36 @@ function PlayableCard({ m, state, viewer, canEdit, onEdit, onDelete }: ItemProps
           ) : (
             <button
               type="button"
-              className="group absolute inset-0 flex size-full items-center justify-center"
+              className={cx(
+                "group flex size-full items-center justify-center",
+                wide ? "absolute inset-0" : "gap-4 px-4 py-6",
+              )}
               onClick={() => (hidden ? setRevealed(true) : play(0))}
               aria-label={hidden ? "ネタバレを表示する" : `${title} を再生`}
             >
               {thumb ? (
                 <img
+                  key={thumb}
                   src={thumb}
                   alt=""
                   loading="lazy"
-                  onError={() => setThumbFailed(true)}
+                  onError={() => markThumb(thumb, "failed")}
                   onLoad={(e) => {
+                    const w = e.currentTarget.naturalWidth;
                     // 存在しない動画は YouTube が 120px 幅の灰色の画像を返すので、それもアイコンに戻す
-                    if (e.currentTarget.naturalWidth <= 120) setThumbFailed(true);
+                    if (link?.service === "youtube" && w <= 120) markThumb(thumb, "failed");
+                    // 小さい画像は引き伸ばさず、そのままの大きさで出す
+                    else if (w < 240) markThumb(thumb, "small");
                   }}
-                  className={cx("absolute inset-0 size-full object-cover", hidden && "scale-110 blur-xl")}
+                  className={cx(
+                    wide ? "absolute inset-0 size-full object-cover" : "h-auto max-h-28 w-auto rounded-md",
+                    hidden && (wide ? "scale-110 blur-xl" : "blur-md"),
+                  )}
                 />
               ) : (
-                <KindIcon width={56} height={56} className="text-ink2" aria-hidden />
+                <KindIcon width={40} height={40} className="shrink-0 text-ink2" aria-hidden />
               )}
-              <span className="media-play relative flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-bold">
+              <span className="media-play relative flex shrink-0 items-center gap-2 rounded-full px-4 py-2.5 text-sm font-bold">
                 {hidden ? (
                   "ネタバレを表示する"
                 ) : (
@@ -284,6 +345,7 @@ function PlayableCard({ m, state, viewer, canEdit, onEdit, onDelete }: ItemProps
             <div className="meta mt-1 text-xs">
               <span>{def.label}</span>
               {link && link.service !== "web" && <span>{link.label}</span>}
+              {!hidden && preview?.author && <span data-user-content>{preview.author}</span>}
               {pov && <span>{pov} の視点</span>}
               <ScopeMeta m={m} state={state} />
               <ExpiryMeta m={m} />
@@ -344,39 +406,52 @@ function PlayableCard({ m, state, viewer, canEdit, onEdit, onDelete }: ItemProps
   );
 }
 
-/* ---------- それ以外（1 行の一覧） ---------- */
+/* ---------- それ以外（1 行の一覧） ----------
+ * ふせったー・X は、書いた人と本文の頭（公開の部分）まで見せて、押すと元の投稿を開く。伏せている間は引かない。
+ */
 function LinkRow({ m, state, viewer, canEdit, onEdit, onDelete }: ItemProps) {
   const def = MEDIA_KIND_MAP[m.kind];
   const KindIcon = KIND_ICON[m.kind];
   const [revealed, setRevealed] = useState(false);
   const hidden = shouldHideSpoiler(m, viewer) && !revealed;
   const link = m.url ? detectMediaLink(m.url) : null;
-  const title = hidden ? `ネタバレを含む${def.label}` : m.title || link?.label || def.label;
+  const preview = useMediaPreview(m.url, !hidden);
+  const excerpt = hidden ? undefined : preview?.excerpt;
+  // 題名が本文の 1 行目から作ったもの（追加のときに埋めたまま）なら、見出しは書いた人にして本文と重ねない
+  const ownTitle = m.title && !titleRepeatsExcerpt(m.title, excerpt) ? m.title : "";
+  const byline = !hidden && preview?.author ? preview.author : undefined;
+  const headline = hidden
+    ? `ネタバレを含む${def.label}`
+    : ownTitle || (excerpt ? byline : undefined) || m.title || preview?.title || link?.label || def.label;
+  const showByline = byline && headline !== byline;
 
   return (
-    <li className="flex items-center gap-3 px-4 py-3 sm:px-5" data-media-kind={m.kind}>
+    <li className="flex items-start gap-3 px-4 py-3 sm:px-5" data-media-kind={m.kind}>
       <span className="media-kind-mark" aria-hidden>
         <KindIcon width={18} height={18} />
       </span>
       <div className="min-w-0 flex-1">
         {m.url && !hidden ? (
-          <a
-            href={m.url}
-            target="_blank"
-            rel="noreferrer"
-            className="break-words text-sm font-bold underline-offset-2 hover:underline"
-            data-user-content
-          >
-            {title}
+          <a href={m.url} target="_blank" rel="noreferrer" className="group block" data-user-content>
+            <span className="break-words text-sm font-bold underline-offset-2 group-hover:underline">
+              {headline}
+              <IconExternal width={13} height={13} className="ml-1 inline-block align-[-1px] text-ink2" />
+            </span>
+            {excerpt && (
+              <span className="mt-1.5 line-clamp-3 whitespace-pre-line break-words border-l border-base-300 pl-3 text-xs leading-relaxed text-ink2">
+                {excerpt}
+              </span>
+            )}
           </a>
         ) : (
           <span className={cx("break-words text-sm font-bold", hidden && "text-ink2")} data-user-content>
-            {title}
+            {headline}
           </span>
         )}
         <div className="meta mt-0.5 text-xs">
           {!hidden && <span>{def.label}</span>}
           {link && link.service !== "web" && <span>{link.label}</span>}
+          {showByline && <span data-user-content>{byline}</span>}
           {!hidden && m.credits && <span data-user-content>{m.credits}</span>}
           <ScopeMeta m={m} state={state} />
           <ExpiryMeta m={m} />
@@ -412,6 +487,7 @@ interface Draft {
   audience: string[];
   povUserId: string;
   spoiler: boolean;
+  spoilerTouched: boolean;
   parts: string;
   chapters: string;
   startDate: string;
@@ -434,7 +510,8 @@ function toDraft(m: SessionMedia | null, log: Log): Draft {
     scope: m?.scope ?? "members",
     audience: m?.audience ?? [],
     povUserId: m?.povUserId ?? "",
-    spoiler: m?.spoiler ?? true,
+    spoiler: m?.spoiler ?? defaultSpoiler(m?.kind ?? "recording"),
+    spoilerTouched: Boolean(m),
     parts: (m?.parts ?? []).map((p) => (p.label ? `${p.label} ${p.url}` : p.url)).join("\n"),
     chapters: formatChapters(m?.chapters),
     startDate: parts.date,
@@ -443,6 +520,16 @@ function toDraft(m: SessionMedia | null, log: Log): Draft {
     credits: m?.credits ?? "",
     note: m?.note ?? "",
     consent: m?.consent ?? false,
+  };
+}
+
+/** 種類を変える。ネタバレを自分で選んでいなければ、種類に合う既定（卓報告は含まない）にそろえる */
+function withKind(d: Draft, kind: MediaKind, touched: boolean): Draft {
+  return {
+    ...d,
+    kind,
+    kindTouched: touched || d.kindTouched,
+    ...(d.spoilerTouched ? {} : { spoiler: defaultSpoiler(kind) }),
   };
 }
 
@@ -556,25 +643,17 @@ function MediaEditor({
   const [moreOpen, setMoreOpen] = useState(() => fields.more.some((f) => filled.includes(f)));
   const consentNeeded = needsConsentCheck(d.kind, d.scope);
 
-  // 題名を引ける置き場所（YouTube）なら引いて入れる。利用者が書いた題名は上書きしない
-  const lookup = url ? mediaTitleLookupUrl(url) : undefined;
-  useEffect(() => {
-    if (!lookup) return;
-    const ac = new AbortController();
-    fetch(lookup, { signal: ac.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((json: unknown) => {
-        const title = titleFromOembed(json);
-        if (title) setD((cur) => (cur.titleTouched ? cur : { ...cur, title }));
-      })
-      .catch(() => {});
-    return () => ac.abort();
-  }, [lookup]);
+  // 題名を引ける置き場所（YouTube・ニコニコ・ふせったー・X）なら引いて入れる。利用者が書いた題名は上書きしない
+  const preview = useMediaPreview(url);
+  // 書いていなければ、引けた題名を入れておく（書いたものは上書きしない）
+  // 動画の題名は書いていなければ入れておく。ポスト・ふせったーの本文は題名ではないので、入れずに見本として出すだけ
+  const titleIsPost = preview?.service === "x" || preview?.service === "fusetter";
+  const title = d.titleTouched || titleIsPost ? d.title : (preview?.title ?? d.title);
 
   function pick(id: MediaSourceId) {
     setPicked(id);
     setLastPicked(id);
-    setD((cur) => ({ ...cur, kind: MEDIA_SOURCE_MAP[id].kind, kindTouched: false }));
+    setD((cur) => withKind(cur, MEDIA_SOURCE_MAP[id].kind, false));
   }
 
   /** 選び直すときは、前の置き場所の URL とそこから引いた題名を持ち越さない */
@@ -590,7 +669,7 @@ function MediaEditor({
       setUrlBlurred(true);
       return setError(null);
     }
-    if (!url && !d.title.trim())
+    if (!url && !title.trim())
       return setError(
         withoutUrl
           ? "タイトルを入れてください。"
@@ -606,7 +685,7 @@ function MediaEditor({
     const m: SessionMedia = {
       id: initial?.id ?? uid("md_"),
       kind: d.kind,
-      title: d.title.trim(),
+      title: title.trim(),
       ...(url ? { url } : {}),
       ...(parts.length ? { parts } : {}),
       spoiler: d.spoiler,
@@ -771,9 +850,10 @@ function MediaEditor({
                 const link = hit ? detectMediaLink(hit) : null;
                 setError(null);
                 setD((cur) => ({
-                  ...cur,
+                  ...(cur.kindTouched
+                    ? cur
+                    : withKind(cur, resolveMediaSource(picked ?? "other", link).kind, false)),
                   url: raw,
-                  ...(cur.kindTouched ? {} : { kind: resolveMediaSource(picked ?? "other", link).kind }),
                 }));
               }}
             />
@@ -789,15 +869,18 @@ function MediaEditor({
               <Select
                 value={d.kind}
                 options={KIND_OPTIONS}
-                onChange={(kind) => setD((cur) => ({ ...cur, kind, kindTouched: true }))}
+                onChange={(kind) => setD((cur) => withKind(cur, kind, true))}
                 className="w-full"
               />
             </Field>
             <Field label="タイトル">
               <input
                 className="input input-bordered w-full"
-                placeholder={detected?.label && detected.service !== "web" ? detected.label : def.label}
-                value={d.title}
+                placeholder={
+                  (titleIsPost ? preview?.title : undefined) ??
+                  (detected?.label && detected.service !== "web" ? detected.label : def.label)
+                }
+                value={title}
                 onChange={(e) => setD((cur) => ({ ...cur, title: e.target.value, titleTouched: true }))}
               />
             </Field>
@@ -821,7 +904,7 @@ function MediaEditor({
                     { v: "yes", label: "含む" },
                     { v: "no", label: "含まない" },
                   ]}
-                  onChange={(v) => set("spoiler", v === "yes")}
+                  onChange={(v) => setD((cur) => ({ ...cur, spoiler: v === "yes", spoilerTouched: true }))}
                 />
               </div>
             </Field>

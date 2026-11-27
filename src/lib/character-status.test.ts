@@ -59,6 +59,24 @@ describe("ステータス（閲覧専用）", () => {
     expect(sheetSection(got, "resources")?.entries).toEqual([{ label: "名誉点", value: 40 }]);
   });
 
+  it("能力値に書かれている続く値（サタスペの犯罪など）は、その場で今の値にして副能力値に重ねない", () => {
+    const sheet = buildSheet("souko", {
+      sections: [
+        section("abilities", "能力値", "abilities", [
+          { label: "犯罪", value: 3 },
+          { label: "生活", value: 1 },
+        ]),
+        section("power", "戦闘力", "resources", [{ label: "反応力", value: 9 }]),
+      ],
+    })!;
+    const got = statusSheet(character({ systemId: "Satasupe", sheet, stats: { crime: 4, life: 1 } }));
+    expect(sheetSection(got, "abilities")?.entries).toEqual([
+      { label: "犯罪", value: 4 },
+      { label: "生活", value: 1 },
+    ]);
+    expect(sheetSection(got, "power")?.entries).toEqual([{ label: "反応力", value: 9 }]);
+  });
+
   it("キャラシがなければ続く値と、成長した技能の今の値で作る。続かない値は出さない", () => {
     const got = statusSheet(
       character({
