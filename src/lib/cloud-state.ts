@@ -16,6 +16,7 @@ import {
   type Firestore,
 } from "firebase/firestore";
 import { getTakufuFirestore } from "./firebase";
+import { validateSharedPayload, type AcceptedShare } from "./accept-share";
 import { mediaForSharedPage } from "./session-media";
 import { identiconDataUri } from "./identicon";
 import type {
@@ -664,6 +665,8 @@ export async function fetchSharedCharacter(id: string): Promise<SharedCharacterD
 
 export interface SharedInvite {
   slug: string;
+  /** 招待を出した人（= 共有の持ち主）。受け取った中身の持ち主と照らし合わせる */
+  ownerId: string;
   /** セッションの呼び名（= シナリオの題名） */
   title: string;
   systemId: string;
@@ -699,10 +702,11 @@ export async function getSharedInvite(token: string): Promise<SharedInvite | nul
   });
   if (!snapshot) return null;
   if (!snapshot.exists()) return null;
-  const { slug, title, systemId, scenarioTitle, expiresAt } = snapshot.data();
+  const { slug, ownerId, title, systemId, scenarioTitle, expiresAt } = snapshot.data();
   if (!(expiresAt instanceof Timestamp) || expiresAt.toMillis() <= Date.now()) return null;
   return {
     slug,
+    ownerId,
     // 以前の招待はセッションの名前とシナリオの題名を別に持つ。呼び名はシナリオの題名
     title: scenarioTitle || title,
     systemId,
@@ -714,7 +718,10 @@ export async function getSharedInvite(token: string): Promise<SharedInvite | nul
  * 招待を受け取る。me（記録の中の自分）を渡すと、はじめの設定で決めた表示名・アイコンを参加者として載せる
  * （画像がなければユーザー ID から作った印。Google の画像は本人が選んだときだけ）
  */
-export async function acceptSharedInvite(token: string, me?: User): Promise<SharedLogData> {
+export async function acceptSharedInvite(
+  token: string,
+  me?: User,
+): Promise<{ share: AcceptedShare; slug: string; ownerId: string }> {
   const resolved = await resolveCurrentUserAndProfile();
   const { user } = resolved;
   const profile =
@@ -746,7 +753,10 @@ export async function acceptSharedInvite(token: string, me?: User): Promise<Shar
   await updateDoc(ref, { inviteId: "" });
   const shared = await fetchSharedLog(invite.slug);
   if (!shared) throw new Error("この記録は共有を終了しています。");
-  return shared;
+  // 中身は共有した人が書いたもの。形を確かめてから渡す（src/lib/accept-share.ts）
+  const share = validateSharedPayload(shared, user.uid);
+  if (!share) throw new Error("共有された記録を読み取れませんでした。招待した人に確かめてください。");
+  return { share, slug: invite.slug, ownerId: invite.ownerId };
 }
 
 export async function updateSharedMembership(

@@ -41,6 +41,7 @@ import { fmtDates, sessionDays } from "../lib/time";
 import type { Msg } from "../types";
 import { IconBooks, IconCheck, IconUserPlus } from "../components/icons";
 import { getSharedInvite, acceptSharedInvite, type SharedInvite } from "../lib/cloud-state";
+import { mergeAcceptedShare } from "../lib/accept-share";
 import { authErrorMessage, signInWithGoogle } from "../lib/auth";
 import { isFirebaseConfigured } from "../lib/firebase";
 import { destinationLabel, safeNextPath } from "../lib/next-path";
@@ -152,21 +153,11 @@ function RemoteClaimInvite({ token }: { token: string }) {
             setBusy(true);
             setError(null);
             try {
-              const shared = await acceptSharedInvite(token, state.users[state.me]);
-              update((s) => {
-                const me = s.users[s.me];
-                Object.assign(s.users, shared.users);
-                s.users[s.me] = me;
-                s.logs[shared.log.id] = {
-                  ...shared.log,
-                  players: {
-                    ...shared.log.players,
-                    [s.me]: { linked: true, hidden: s.prefs.hideSelfOnShare, characterIds: [] },
-                  },
-                };
-                if (shared.scenario) s.scenarios[shared.scenario.id] = shared.scenario;
-              });
-              nav({ to: `/sessions/${shared.log.id}` });
+              const { share, slug, ownerId } = await acceptSharedInvite(token, state.users[state.me]);
+              // 自分の記録や、知っている人・シナリオは上書きしない。入れられなければ何も変えずに知らせる
+              mergeAcceptedShare(structuredClone(state), share, { slug, ownerId });
+              update((s) => mergeAcceptedShare(s, share, { slug, ownerId }));
+              nav({ to: `/sessions/${share.log.id}` });
             } catch (cause) {
               setError(authErrorMessage(cause));
             } finally {

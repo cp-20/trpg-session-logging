@@ -95,7 +95,7 @@ it.skipIf(process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATORS !== "true")(
     expect((await getSharedInvite(invite))?.slug).toBe(log.slug);
     await signInWithEmailAndPassword(auth, secondEmail, password);
     await expect(fetchSharedLog(log.slug)).rejects.toMatchObject({ code: "permission-denied" });
-    expect((await acceptSharedInvite(invite)).log.id).toBe(log.id);
+    expect((await acceptSharedInvite(invite)).share.log.id).toBe(log.id);
     expect((await fetchSharedLog(log.slug))?.users[second.uid]?.name).toMatch(/\S/);
     await updateSharedMembership(log.slug, { linked: true, hidden: true });
     expect((await fetchSharedLog(log.slug))?.log.players[second.uid]).toBeUndefined();
