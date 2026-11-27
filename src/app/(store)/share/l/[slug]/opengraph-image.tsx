@@ -14,7 +14,12 @@ export default async function Image({ params }: { params: Promise<{ slug: string
       ? sessionCard(page.data)
       : {
           kind: "generic",
-          heading: page.status === "limited" ? "参加者だけが読める記録" : "セッションの記録",
+          heading:
+            page.status !== "limited"
+              ? "セッションの記録"
+              : page.scope === "passed"
+                ? "通過した人だけが読める記録"
+                : "参加者だけが読める記録",
         },
   );
 }

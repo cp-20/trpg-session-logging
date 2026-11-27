@@ -22,7 +22,7 @@ import {
 export type SharedPage<T> =
   | { status: "public"; data: T }
   /** あるが、参加者・合言葉を通った人だけが読める */
-  | { status: "limited" }
+  | { status: "limited"; scope?: "members" | "passed" }
   | { status: "missing" };
 
 /** 文書 ID として読めるもの（区切りの / や . だけのものは除く） */
@@ -42,7 +42,8 @@ async function loadLog(c: RestConfig, slug: string): Promise<SharedPage<SharedLo
   const manifest = await restGet(c, `sharedLogs/${slug}`);
   if (!manifest || manifest.revision === "revoked" || typeof manifest.revision !== "string")
     return { status: "missing" };
-  if (manifest.scope !== "public") return { status: "limited" };
+  if (manifest.scope !== "public")
+    return { status: "limited", scope: manifest.scope === "passed" ? "passed" : "members" };
   const payload = (await readChunks(
     c,
     `sharedLogs/${slug}`,

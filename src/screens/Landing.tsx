@@ -146,11 +146,10 @@ function ReportStack() {
             <span className="whitespace-nowrap">クトゥルフ神話TRPG 7版</span>{" "}
             <span className="whitespace-nowrap">9月26日（土）</span>
           </div>
-          <div className="mt-3 flex items-center gap-1.5">
-            <Portrait name="" file="rei" size={32} />
-            <Portrait name="" file="mio" size={32} />
-            <Portrait name="" file="natsu" size={32} />
-            <span className="pst-tile-meta ml-1.5 whitespace-nowrap">KP みかん</span>
+          {/* 卓報告カードは人の画像を載せない（src/lib/report-card.ts）。見本も名前だけにそろえる */}
+          <div className="pst-tile-meta mt-3">
+            <span className="whitespace-nowrap">KP みかん</span>{" "}
+            <span className="whitespace-nowrap">PC 白瀬怜・灯堂澪・桐生那津</span>
           </div>
         </div>
         <div className="pst-tile pst-tile-quote">
@@ -247,7 +246,7 @@ const FAQ: { q: string; a: ReactNode }[] = [
   },
   {
     q: "スマホだけでも読めますか？",
-    a: "ブラウザで開く Web アプリなので、インストールは要りません。共有リンクはスマホでそのまま読めます。スマホアプリ（iOS・Android）も実装予定です。",
+    a: "ブラウザで開く Web アプリなので、インストールは要りません。共有リンクはスマホでそのまま読めます。",
   },
   {
     q: "お金はかかりますか？",

@@ -46,7 +46,14 @@ it.skipIf(process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATORS !== "true")(
     log.scope = "members";
     await publishSharedLog(log, state);
     await signOut(auth);
-    expect(await sharedLogPage(log.slug)).toEqual({ status: "limited" });
+    expect(await sharedLogPage(log.slug)).toEqual({ status: "limited", scope: "members" });
+
+    // 通過した人に共有したものは、見出し画像で「通過した人だけ」と言い分けられるよう範囲を返す（題名は返さない）
+    await signInWithEmailAndPassword(auth, email, password);
+    log.scope = "passed";
+    await publishSharedLog(log, state);
+    await signOut(auth);
+    expect(await sharedLogPage(log.slug)).toEqual({ status: "limited", scope: "passed" });
 
     await signInWithEmailAndPassword(auth, email, password);
     log.scope = "public";
