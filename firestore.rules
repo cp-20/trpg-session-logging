@@ -161,12 +161,17 @@ service cloud.firestore {
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.ics is string && request.resource.data.ics.size() <= 900000
         && request.resource.data.updatedAt is timestamp;
-      allow update: if owner(resource.data)
-        && request.resource.data.keys().hasOnly(['ownerId', 'ics', 'updatedAt'])
-        && request.resource.data.ownerId == request.auth.uid
-        && request.resource.data.ics is string && request.resource.data.ics.size() <= 900000
-        && request.resource.data.updatedAt is timestamp;
-      allow delete: if owner(resource.data);
+      // 作り直したリンクは消さずに失効の印（revokedAt）だけを残す。消すと、古いリンクを知る人が
+      // 同じトークンで自分の予定を作り、前の購読者に配れてしまうため。失効したものは戻せない
+      allow update: if owner(resource.data) && !('revokedAt' in resource.data) && (
+        (request.resource.data.keys().hasOnly(['ownerId', 'ics', 'updatedAt'])
+          && request.resource.data.ownerId == request.auth.uid
+          && request.resource.data.ics is string && request.resource.data.ics.size() <= 900000
+          && request.resource.data.updatedAt is timestamp)
+        || (request.resource.data.keys().hasOnly(['ownerId', 'revokedAt'])
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.revokedAt == request.time));
+      allow delete: if false;
     }
     // ユーザー ID: 半角の英小文字・数字・_ で 3〜20 文字。handles と userHandles を同じ書き込みで一度だけ作り、変えも消しもできない（P14）。
     // handles は ID が空いているかの確かめとプロフィールの URL のために 1 件ずつ読める（一覧は不可。名前では探せない）
@@ -204,7 +209,7 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/tableInvites/$(token)).data;
     }
     function inviteOpen(data) {
-      return !('expiresAt' in data) || data.expiresAt > request.time;
+      return !('revokedAt' in data) && (!('expiresAt' in data) || data.expiresAt > request.time);
     }
     function validTableInvite() {
       let data = request.resource.data;
@@ -218,13 +223,30 @@ service cloud.firestore {
         && (!('expiresAt' in data) || (data.expiresAt is timestamp && data.expiresAt > request.time
           && data.expiresAt <= request.time + duration.value(31, 'd')));
     }
+    // 卓を作った人の印。卓の中身は作った人の非公開の記録にあるので、サーバー（Discord 連携）はこれで持ち主を確かめる。
+    // 最初の 1 回だけ、自分を持ち主にして作れる。書き換えも削除もできない（src/lib/cloud-people.ts の claimTableOwnership）
+    match /tableOwners/{tableId} {
+      allow get: if signedIn() || isBot();
+      allow list: if false;
+      allow create: if signedIn() && tableId.size() <= 100
+        && request.resource.data.keys().hasOnly(['ownerId', 'createdAt'])
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
     match /tableInvites/{token} {
       allow get: if signedIn() && (owner(resource.data) || inviteOpen(resource.data));
       allow list: if false;
       allow create: if signedIn() && token.size() >= 32 && validTableInvite();
-      allow update: if owner(resource.data) && validTableInvite()
-        && request.resource.data.tableId == resource.data.tableId;
-      allow delete: if owner(resource.data);
+      // 取り消しは消さずに印（revokedAt）だけを残し、卓の名前やメンバーは落とす。消すと、古いトークンを知る人が
+      // 自分を持ち主にして作り直し、残っていた参加の記録（joins）を読めてしまうため。取り消したものは戻せない
+      allow update: if owner(resource.data) && !('revokedAt' in resource.data) && (
+        (validTableInvite() && request.resource.data.tableId == resource.data.tableId)
+        || (request.resource.data.keys().hasOnly(['ownerId', 'tableId', 'revokedAt'])
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.tableId == resource.data.tableId
+          && request.resource.data.revokedAt == request.time));
+      allow delete: if false;
       match /joins/{userId} {
         allow get: if ownUser(userId) || owner(tableInvite(token));
         allow list: if owner(tableInvite(token));

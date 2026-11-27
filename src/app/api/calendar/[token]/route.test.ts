@@ -44,10 +44,10 @@ describe("GET /api/calendar/{token}", () => {
     expect(res.headers.get("Content-Type")).toBe("text/calendar; charset=utf-8");
   });
 
-  it("カレンダーアプリが数分は使い回せるように返す", async () => {
+  it("カレンダーアプリには数分の使い回しを許すが、CDN には持たせない（作り直したリンクがすぐ止まるように）", async () => {
     const res = await call(`${TOKEN}.ics`);
 
-    expect(res.headers.get("Cache-Control")).toBe("public, max-age=300, stale-while-revalidate=600");
+    expect(res.headers.get("Cache-Control")).toBe("private, max-age=300");
   });
 
   it("末尾の .ics を除いた鍵で、既定のデータベースの calendarFeeds を読む", async () => {

@@ -23,6 +23,11 @@ export type SyncResult =
   | { ok: false; status: number; error: string };
 
 const NOT_MEMBER: SyncResult = { ok: false, status: 403, error: "この卓のメンバーではありません。" };
+const NOT_EDITOR: SyncResult = {
+  ok: false,
+  status: 403,
+  error: "予定を変えられるのは、予定を作った人と卓を作った人だけです。",
+};
 
 function isGone(error: unknown): boolean {
   return (
@@ -106,6 +111,7 @@ async function syncPollLocked(ctx: DiscordContext, poll: PollDoc): Promise<SyncR
       title: poll.title,
       start: sitting.start,
       end: sitting.end,
+      createdBy: poll.ownerId,
     });
     return { ok: true, linked: true, changed: changed || r };
   }
@@ -209,6 +215,7 @@ export async function upsertConfirmed(
   post.title = ev.title;
   post.startMs = startMs;
   post.endMs = endMs;
+  if (!post.createdBy && ev.createdBy) post.createdBy = ev.createdBy;
   await ctx.store.setEventPost(ev.eventId, post);
   ctx.onEventsChanged?.();
   return true;
@@ -251,6 +258,13 @@ export async function syncEventFromApp(
   const link = await ctx.store.getTableLink(input.tableId);
   if (!link) return { ok: true, linked: false };
   if (!isTableMember(link, uid)) return NOT_MEMBER;
+  // 画面と同じ条件（src/lib/schedule.ts の canConfirmPoll）: 予定を作った人と、卓を作った人だけが変えられる。
+  // ほかの卓の予定の番号を持ち込んでも、その卓の知らせは書き換えさせない
+  const prev = await ctx.store.getEventPost(input.eventId);
+  if (prev) {
+    if (prev.tableId !== input.tableId) return NOT_EDITOR;
+    if (uid !== link.ownerId && prev.createdBy !== uid) return NOT_EDITOR;
+  }
   if (input.deleted)
     return {
       ok: true,
@@ -267,6 +281,7 @@ export async function syncEventFromApp(
       title: input.title ?? "",
       start: range.start / 1000,
       end: range.end / 1000,
+      createdBy: uid,
     }),
   );
   return { ok: true, linked: true, changed };

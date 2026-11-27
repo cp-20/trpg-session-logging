@@ -616,7 +616,33 @@ await check(
   await fs("PATCH", tableInvitePath, A.token, { ...tableInviteDoc, tableId: "t_other" }),
   403,
 );
-await check("owner can revoke the invite", await fs("DELETE", tableInvitePath, A.token), 200);
+await check(
+  "owner cannot delete the invite (the token would be reusable)",
+  await fs("DELETE", tableInvitePath, A.token),
+  403,
+);
+// 取り消しは、卓の名前やメンバーを落とした失効の印に置き換える（revokedAt はサーバーの時刻）
+await check(
+  "owner can revoke the invite",
+  await req(
+    FIRESTORE_PORT,
+    `/v1/projects/${PROJECT}/databases/${DATABASE}/documents:commit`,
+    "POST",
+    {
+      writes: [
+        {
+          update: {
+            name: `projects/${PROJECT}/databases/${DATABASE}/documents/${tableInvitePath}`,
+            ...fields({ ownerId: tableInviteDoc.ownerId, tableId: tableInviteDoc.tableId }),
+          },
+          updateTransforms: [{ fieldPath: "revokedAt", setToServerValue: "REQUEST_TIME" }],
+        },
+      ],
+    },
+    A.token,
+  ),
+  200,
+);
 await check("revoked invites cannot be opened", await fs("GET", tableInvitePath, B.token), 403);
 await check(
   "revoked invites cannot be joined",

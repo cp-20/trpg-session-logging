@@ -43,8 +43,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
     headers: {
       "Content-Type": "text/calendar; charset=utf-8",
       "Content-Disposition": 'inline; filename="takufu.ics"',
-      // カレンダーアプリは数時間おきに取りに来る。数分は使い回してよい
-      "Cache-Control": "public, max-age=300, stale-while-revalidate=600",
+      // 予定は本人のもので、リンクを作り直したら止まらなければならない。CDN には持たせない
+      "Cache-Control": "private, max-age=300",
     },
   });
 }

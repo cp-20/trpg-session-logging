@@ -103,8 +103,21 @@ describe("卓とチャンネルをつなぐ", () => {
       requestedBy: "d",
       expiresAt: t.clock.now + 600_000,
     });
+    // 卓を作った人の印（tableOwners）。画面が連携の前に書く
+    t.store.data.tableOwners.set("t1", "u_owner");
     return { t, code };
   }
+
+  it("卓を作った人の印がない卓・ほかの人の印がある卓はつなげず、コードも使われない", async () => {
+    const { t, code } = await withCode();
+    t.store.data.tableOwners.delete("t1");
+    expect(await completeChannelLink(t.ctx, "u_owner", code, T1)).toMatchObject({ ok: false, status: 403 });
+
+    t.store.data.tableOwners.set("t1", "u_owner");
+    expect(await completeChannelLink(t.ctx, "u_pl", code, T1)).toMatchObject({ ok: false, status: 403 });
+    expect(t.store.data.tables.has("t1")).toBe(false);
+    expect(await previewChannelLink(t.ctx, code)).toMatchObject({ channelName: "卓" });
+  });
 
   it("卓の名前とメンバーは画面から受け取り、つないだ人はいつもメンバー。コードは一回きり", async () => {
     const { t, code } = await withCode();

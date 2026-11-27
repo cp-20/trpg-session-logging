@@ -2213,8 +2213,9 @@ function CalendarSyncDialog({ onClose }: { onClose: () => void }) {
     setFeedError(null);
     const token = newFeedToken();
     try {
+      // 古いリンクを先に止める。止められなければ作り直さない（古いリンクが知らないうちに生き残らないように）
+      if (feedToken) await revokeFeed(feedToken);
       await publishFeed(token, authUser.uid, buildFeedIcs(state, today));
-      if (feedToken) await revokeFeed(feedToken).catch(() => {});
       update((s) => {
         s.prefs.calendarFeedToken = token;
       });

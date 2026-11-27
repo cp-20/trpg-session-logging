@@ -141,6 +141,10 @@ export async function completeChannelLink(
   const existing = await ctx.store.getTableLink(tableId);
   if (existing && existing.ownerId !== uid)
     return { ok: false, status: 403, error: "自分が作った卓だけをつなげます。" };
+  // 卓の中身は作った人の非公開の記録にあり、サーバーは読めない。卓 ID を知っているだけの人が
+  // 他人の卓を自分のチャンネルにつながないよう、卓を作った人の印（tableOwners）で確かめる
+  if ((await ctx.store.getTableOwner(tableId)) !== uid)
+    return { ok: false, status: 403, error: "自分が作った卓だけをつなげます。" };
   const data = await ctx.store.consumeLinkCode(code);
   if (!data || data.expiresAt <= ctx.now())
     return {

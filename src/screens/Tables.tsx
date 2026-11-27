@@ -646,7 +646,8 @@ function TableInvitePanel({ table }: { table: Table }) {
         expiresAt: inviteExpiresAt(expiry),
       };
       if (cloud) {
-        if (table.invite) await cloud.revokeTableInvite(table.invite.token).catch(() => {});
+        // 古いリンクを止められなければ、新しいリンクも作らない（古いリンクが知らないうちに生き残らないように）
+        if (table.invite) await cloud.revokeTableInvite(table.invite.token);
         await cloud.publishTableInvite(next.token, table, state.users, state.me, next.expiresAt);
       }
       update((s) => {

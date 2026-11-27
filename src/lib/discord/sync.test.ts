@@ -104,10 +104,44 @@ describe("確定した予定を映す", () => {
     const t = makeCtx();
     linkTable(t.store);
     expect(await syncEventFromApp(t.ctx, "u_owner", ev)).toMatchObject({ changed: true });
-    expect(await syncEventFromApp(t.ctx, "u_pl", ev)).toMatchObject({ changed: false });
+    expect(await syncEventFromApp(t.ctx, "u_owner", ev)).toMatchObject({ changed: false });
     await syncEventFromApp(t.ctx, "u_owner", { ...ev, startTime: "21:00", endTime: "24:30" });
     expect(ops(t)).toEqual(["createScheduledEvent", "createMessage", "editScheduledEvent", "editMessage"]);
     expect(t.store.data.posts.get("ev9")?.endMs).toBe(Date.parse("2026-11-25T15:30:00Z"));
+  });
+
+  it("予定を変え・消せるのは、予定を作った人と卓を作った人だけ（ほかのメンバーは 403）", async () => {
+    const t = makeCtx();
+    linkTable(t.store, { memberIds: ["u_owner", "u_pl", "u_other"] });
+    expect(await syncEventFromApp(t.ctx, "u_pl", ev)).toMatchObject({ ok: true, changed: true });
+
+    expect(await syncEventFromApp(t.ctx, "u_other", { ...ev, title: "乗っ取り" })).toMatchObject({
+      ok: false,
+      status: 403,
+    });
+    expect(await syncEventFromApp(t.ctx, "u_other", { ...ev, deleted: true })).toMatchObject({
+      ok: false,
+      status: 403,
+    });
+    expect(await syncEventFromApp(t.ctx, "u_pl", { ...ev, title: "題名を直した" })).toMatchObject({
+      ok: true,
+    });
+    expect(await syncEventFromApp(t.ctx, "u_owner", { ...ev, deleted: true })).toMatchObject({
+      ok: true,
+      changed: true,
+    });
+  });
+
+  it("ほかの卓の予定の番号を持ち込んでも、その知らせは書き換えられない", async () => {
+    const t = makeCtx();
+    linkTable(t.store);
+    await syncEventFromApp(t.ctx, "u_owner", ev);
+    linkTable(t.store, { tableId: "t2", channelId: "ch2" });
+
+    expect(await syncEventFromApp(t.ctx, "u_owner", { ...ev, tableId: "t2", title: "x" })).toMatchObject({
+      ok: false,
+      status: 403,
+    });
   });
 
   it("確定の同期が日程調整と予定の両方から同時に届いても、イベントとメッセージは 1 つずつ", async () => {

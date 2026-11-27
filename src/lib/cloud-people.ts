@@ -104,6 +104,7 @@ export async function publishTableInvite(
   ownerId: string,
   expiresAt?: string,
 ): Promise<void> {
+  await claimTableOwnership(table.id, ownerId).catch(() => {});
   await setDoc(doc(database(), "tableInvites", token), {
     ownerId,
     tableId: table.id,
@@ -115,8 +116,29 @@ export async function publishTableInvite(
   });
 }
 
+/**
+ * 招待を取り消す。参加の記録（名前・ハンドル・画像）を消してから、招待は失効の印だけにする。
+ * 文書ごと消さないのは、古いトークンで別の人が招待を作り直せないようにするため（firestore.rules）
+ */
 export async function revokeTableInvite(token: string): Promise<void> {
-  await deleteDoc(doc(database(), "tableInvites", token));
+  const db = database();
+  const ref = doc(db, "tableInvites", token);
+  const current = await getDocFromServer(ref);
+  if (!current.exists() || "revokedAt" in current.data()) return;
+  const joins = await getDocs(collection(db, "tableInvites", token, "joins"));
+  await Promise.all(joins.docs.map((j) => deleteDoc(j.ref)));
+  const { ownerId, tableId } = current.data();
+  await setDoc(ref, { ownerId, tableId, revokedAt: serverTimestamp() });
+}
+
+/**
+ * 卓を作った人の印（tableOwners/{tableId}）を、まだなければ書く。Discord 連携のサーバーはこれで持ち主を確かめる。
+ * 最初の 1 回だけ書けて、だれも書き換えられない
+ */
+export async function claimTableOwnership(tableId: string, ownerId: string): Promise<void> {
+  const ref = doc(database(), "tableOwners", tableId);
+  if ((await getDocFromServer(ref)).exists()) return;
+  await setDoc(ref, { ownerId, createdAt: serverTimestamp() });
 }
 
 /** 招待の中身。期限切れ・無効にされたもの・読めないものは null */
@@ -127,6 +149,7 @@ export async function fetchTableInvite(token: string): Promise<TableInviteView |
   });
   if (!snap?.exists()) return null;
   const data = snap.data();
+  if ("revokedAt" in data) return null;
   const expiresAt = data.expiresAt instanceof Timestamp ? data.expiresAt.toDate().toISOString() : undefined;
   if (expiresAt && Date.parse(expiresAt) <= Date.now()) return null;
   return {

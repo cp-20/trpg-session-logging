@@ -233,6 +233,16 @@ export function DiscordChannelLink() {
     if (!table) return;
     setBusy(true);
     setError(null);
+    // サーバーは卓の中身を読めないので、卓を作った人の印（tableOwners）で持ち主を確かめる。まだなければここで書く
+    const claimed = await import("../lib/cloud-people")
+      .then((cloud) => cloud.claimTableOwnership(table.id, state.me))
+      .then(() => true)
+      .catch(() => false);
+    if (!claimed) {
+      setBusy(false);
+      setError("卓の持ち主を確かめられませんでした。もう一度お試しください。");
+      return;
+    }
     const r = await discordClient.linkTable(code, table);
     setBusy(false);
     if (r.ok) setLinked(state.tables[tableId] ?? null);

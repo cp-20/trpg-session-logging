@@ -66,6 +66,10 @@ export async function publishFeed(token: string, ownerId: string, ics: string): 
 }
 
 export async function revokeFeed(token: string): Promise<void> {
-  const { deleteDoc } = await import("firebase/firestore");
-  await deleteDoc(await feedDoc(token));
+  // 消さずに失効の印だけを残す（同じトークンを別の人に取り直させない。firestore.rules）
+  const { getDoc, serverTimestamp, setDoc } = await import("firebase/firestore");
+  const ref = await feedDoc(token);
+  const current = await getDoc(ref);
+  if (!current.exists() || "revokedAt" in current.data()) return;
+  await setDoc(ref, { ownerId: current.data().ownerId, revokedAt: serverTimestamp() });
 }

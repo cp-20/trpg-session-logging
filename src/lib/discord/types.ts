@@ -69,6 +69,8 @@ export interface EventPost {
   endMs?: number;
   /** 確定を知らせた時刻（ミリ秒） */
   confirmedAt?: number;
+  /** 予定を作った人（卓譜の uid）。変えたり消したりできるのは、この人と卓を作った人だけ */
+  createdBy?: string;
 }
 
 /**
@@ -110,6 +112,8 @@ export interface DiscordStore {
   getLinkCode(code: string): Promise<ChannelLinkCode | null>;
   consumeLinkCode(code: string): Promise<ChannelLinkCode | null>;
 
+  /** 卓を作った人（tableOwners/{tableId}。卓を作った人の画面が最初に書く。だれも書き換えられない） */
+  getTableOwner(tableId: string): Promise<string | null>;
   getTableLink(tableId: string): Promise<TableLink | null>;
   findTableLinkByChannel(channelId: string): Promise<TableLink | null>;
   setTableLink(link: TableLink): Promise<void>;

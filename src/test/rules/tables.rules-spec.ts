@@ -100,6 +100,71 @@ describe("tableInvites/{token}", () => {
     await assertFails(setDoc(ref, tableInvite({ ownerId: BOB })));
     await assertFails(deleteDoc(ref));
   });
+
+  describe("取り消した招待", () => {
+    const tombstone = { ownerId: ALICE, tableId: "table1" };
+
+    it("持ち主は、卓の名前やメンバーを落とした失効の印に書き換えて取り消す（消すことはできない）", async () => {
+      await seedInvite();
+      const ref = doc(as(ALICE), "tableInvites", TOKEN);
+
+      await assertFails(deleteDoc(ref));
+      await assertFails(setDoc(ref, { ...tombstone, tableId: "other", revokedAt: serverTimestamp() }));
+      await assertSucceeds(setDoc(ref, { ...tombstone, revokedAt: serverTimestamp() }));
+    });
+
+    it("取り消したあとは、だれも同じトークンで招待を作り直せず、持ち主も戻せない", async () => {
+      await seedInvite({ ...tombstone, revokedAt: Timestamp.now() });
+
+      await assertFails(setDoc(doc(as(BOB), "tableInvites", TOKEN), tableInvite({ ownerId: BOB })));
+      await assertFails(setDoc(doc(as(ALICE), "tableInvites", TOKEN), tableInvite()));
+    });
+
+    it("取り消したあとは、リンクを知っていても読めず、加われない", async () => {
+      await seed(async (db) => {
+        await setDoc(doc(db, "tableInvites", TOKEN), { ...tombstone, revokedAt: Timestamp.now() });
+        await setDoc(doc(db, "userHandles", BOB), { handle: "bob_01", createdAt: Timestamp.now() });
+      });
+
+      await assertFails(getDoc(doc(as(BOB), "tableInvites", TOKEN)));
+      await assertFails(setDoc(doc(as(BOB), "tableInvites", TOKEN, "joins", BOB), join()));
+    });
+  });
+});
+
+describe("tableOwners/{tableId}（卓を作った人の印）", () => {
+  it("最初の 1 回だけ、自分を持ち主にして作れる", async () => {
+    await assertFails(
+      setDoc(doc(as(BOB), "tableOwners", "table1"), { ownerId: ALICE, createdAt: serverTimestamp() }),
+    );
+    await assertSucceeds(
+      setDoc(doc(as(ALICE), "tableOwners", "table1"), { ownerId: ALICE, createdAt: serverTimestamp() }),
+    );
+    await assertFails(
+      setDoc(doc(as(BOB), "tableOwners", "table1"), { ownerId: BOB, createdAt: serverTimestamp() }),
+    );
+  });
+
+  it("書き換えも消しもできない（持ち主本人でも）", async () => {
+    await seed((db) =>
+      setDoc(doc(db, "tableOwners", "table1"), { ownerId: ALICE, createdAt: Timestamp.now() }),
+    );
+    const ref = doc(as(ALICE), "tableOwners", "table1");
+
+    await assertFails(setDoc(ref, { ownerId: ALICE, createdAt: serverTimestamp() }));
+    await assertFails(deleteDoc(ref));
+  });
+
+  it("ログインした人とボットは 1 件ずつ読めるが、一覧はできない", async () => {
+    await seed((db) =>
+      setDoc(doc(db, "tableOwners", "table1"), { ownerId: ALICE, createdAt: Timestamp.now() }),
+    );
+
+    await assertSucceeds(getDoc(doc(as(BOB), "tableOwners", "table1")));
+    await assertSucceeds(getDoc(doc(bot(), "tableOwners", "table1")));
+    await assertFails(getDoc(doc(anon(), "tableOwners", "table1")));
+    await assertFails(getDocs(collection(as(BOB), "tableOwners")));
+  });
 });
 
 describe("tableInvites/{token}/joins/{userId}", () => {

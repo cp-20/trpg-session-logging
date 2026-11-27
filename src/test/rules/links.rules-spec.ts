@@ -6,6 +6,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  serverTimestamp,
   setDoc,
   updateDoc,
   writeBatch,
@@ -50,12 +51,23 @@ describe("calendarFeeds/{token}", () => {
     await assertFails(getDocs(collection(anon(), "calendarFeeds")));
   });
 
-  it("持ち主は購読を書き換え、消せる", async () => {
+  it("持ち主は購読を書き換えられ、止めるときは消さずに失効の印だけを残す", async () => {
     await seed((db) => setDoc(doc(db, "calendarFeeds", TOKEN), feed()));
     const ref = doc(as(ALICE), "calendarFeeds", TOKEN);
 
     await assertSucceeds(setDoc(ref, feed({ ics: "BEGIN:VCALENDAR\nEND:VCALENDAR" })));
-    await assertSucceeds(deleteDoc(ref));
+    await assertFails(deleteDoc(ref));
+    await assertFails(setDoc(ref, { ownerId: ALICE, revokedAt: Timestamp.fromMillis(0) }));
+    await assertSucceeds(setDoc(ref, { ownerId: ALICE, revokedAt: serverTimestamp() }));
+  });
+
+  it("止めた購読は、持ち主も別の人も同じトークンで作り直せない", async () => {
+    await seed((db) =>
+      setDoc(doc(db, "calendarFeeds", TOKEN), { ownerId: ALICE, revokedAt: Timestamp.now() }),
+    );
+
+    await assertFails(setDoc(doc(as(ALICE), "calendarFeeds", TOKEN), feed()));
+    await assertFails(setDoc(doc(as(BOB), "calendarFeeds", TOKEN), feed({ ownerId: BOB })));
   });
 
   it("他人の購読は書き換えも横取りも消しもできない", async () => {

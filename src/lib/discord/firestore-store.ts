@@ -117,6 +117,7 @@ export function createFirestoreStore(db: Firestore): DiscordStore {
     states: (id: string) => doc(db, "discordOAuthStates", id),
     codes: (id: string) => doc(db, "discordLinkCodes", id),
     tables: (id: string) => doc(db, "tableDiscord", id),
+    tableOwners: (id: string) => doc(db, "tableOwners", id),
     polls: (id: string) => doc(db, "tablePolls", id),
     posts: (id: string) => doc(db, "discordEvents", id),
     reminders: (id: string) => doc(db, "discordReminders", id),
@@ -237,6 +238,11 @@ export function createFirestoreStore(db: Firestore): DiscordStore {
         tx.delete(snap.ref);
         return toCode(snap.data());
       });
+    },
+    async getTableOwner(tableId) {
+      const snap = await getDoc(ref.tableOwners(tableId));
+      const ownerId = snap.exists() ? snap.data().ownerId : null;
+      return typeof ownerId === "string" ? ownerId : null;
     },
     async getTableLink(tableId) {
       const snap = await getDoc(ref.tables(tableId));

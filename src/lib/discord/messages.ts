@@ -254,6 +254,8 @@ export interface ConfirmedEvent {
   /** epoch 秒 */
   start: number;
   end: number;
+  /** 予定を作った人（はじめて知らせるときに EventPost へ残す） */
+  createdBy?: string;
 }
 
 function eventUrl(guildId: string, scheduledEventId?: string): string | null {

@@ -17,6 +17,7 @@ export interface MemoryStoreData {
   states: Map<string, { uid: string; expiresAt: number }>;
   codes: Map<string, ChannelLinkCode>;
   tables: Map<string, TableLink>;
+  tableOwners: Map<string, string>;
   polls: Map<string, PollDoc>;
   posts: Map<string, EventPost>;
   reminders: Map<string, "sending" | "sent">;
@@ -31,6 +32,7 @@ export function createMemoryStore(): DiscordStore & { data: MemoryStoreData } {
     states: new Map(),
     codes: new Map(),
     tables: new Map(),
+    tableOwners: new Map(),
     polls: new Map(),
     posts: new Map(),
     reminders: new Map(),
@@ -79,6 +81,9 @@ export function createMemoryStore(): DiscordStore & { data: MemoryStoreData } {
       const v = data.codes.get(code) ?? null;
       data.codes.delete(code);
       return v;
+    },
+    async getTableOwner(tableId) {
+      return data.tableOwners.get(tableId) ?? null;
     },
     async getTableLink(tableId) {
       return clone(data.tables.get(tableId) ?? null);
