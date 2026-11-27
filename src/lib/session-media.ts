@@ -32,6 +32,8 @@ export type MediaScope = "self" | "people" | "members" | "passed" | "public";
 export interface MediaPart {
   url: string;
   label?: string;
+  /** このパートの動画の 0 秒の時刻（epoch 秒）。ログと合わせたときに入る（src/lib/recording-sync.ts） */
+  startedAt?: number;
 }
 
 export interface MediaChapter {
@@ -362,13 +364,6 @@ export function formatChapters(chapters: readonly MediaChapter[] | undefined): s
     lines.push(`${formatClock(c.at)} ${c.label}`);
   }
   return lines.join("\n");
-}
-
-/** 録画の開始時刻から、ログの発言時刻（epoch 秒）が録画の何秒目かを出す。録画の外なら null */
-export function mediaOffsetAt(m: SessionMedia, epochSec: number, maxLengthSec = 16 * 3600): number | null {
-  if (m.startedAt === undefined) return null;
-  const off = epochSec - m.startedAt;
-  return off >= 0 && off <= maxLengthSec ? off : null;
 }
 
 /** 秒数付きで開ける URL（YouTube・ニコニコ・Twitch）。開けないサービスは元の URL */

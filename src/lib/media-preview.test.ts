@@ -4,8 +4,10 @@ import {
   decodeEntities,
   htmlToText,
   parseFusetterPost,
+  parseIsoDuration,
   parseNicoThumbInfo,
   parsePreviewResponse,
+  parseYoutubeWatchTiming,
   parseXOembed,
   parseYoutubeOembed,
   previewRequestUrl,
@@ -23,6 +25,7 @@ describe("問い合わせ先", () => {
       id: "abcdefghijk",
       fetchUrl:
         "https://www.youtube.com/oembed?format=json&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dabcdefghijk",
+      timingUrl: "https://www.youtube.com/watch?v=abcdefghijk",
     });
     expect(previewTarget("https://www.nicovideo.jp/watch/sm9?from=30")?.fetchUrl).toBe(
       "https://ext.nicovideo.jp/api/getthumbinfo/sm9",
@@ -211,6 +214,56 @@ describe("ニコニコ・YouTube", () => {
     });
     expect(parseYoutubeOembed({ title: "" })).toBeNull();
   });
+
+  it("getthumbinfo の長さ（1:02:03・12:34）を秒にする", () => {
+    const withLength = (l: string) => xml.replace("<description>", `<length>${l}</length><description>`);
+    expect(parseNicoThumbInfo(withLength("1:02:03"), "sm1")?.durationSec).toBe(3723);
+    expect(parseNicoThumbInfo(withLength("12:34"), "sm1")?.durationSec).toBe(754);
+    expect(parseNicoThumbInfo(withLength("不明"), "sm1")).not.toHaveProperty("durationSec");
+  });
+
+  it("YouTube の動画のページから、配信の開始時刻と長さを読む（時差つきの日時だけ）", () => {
+    const page = (meta: string) => `<div>${meta}</div>`;
+    const live = page(
+      '<meta itemprop="duration" content="PT3H2M1S"><meta itemprop="isLiveBroadcast" content="True"><meta itemprop="startDate" content="2026-11-20T21:00:56+09:00"><meta itemprop="endDate" content="2026-11-21T00:03:00+09:00">',
+    );
+    expect(parseYoutubeWatchTiming(live)).toEqual({
+      startedAt: Math.floor(Date.parse("2026-11-20T12:00:56Z") / 1000),
+      durationSec: 3 * 3600 + 2 * 60 + 1,
+    });
+    // 長さがまだ載っていない配信は、終了 − 開始
+    expect(
+      parseYoutubeWatchTiming(
+        page(
+          '<meta itemprop="isLiveBroadcast" content="True"><meta itemprop="startDate" content="2026-11-20T12:00:00+00:00"><meta itemprop="endDate" content="2026-11-20T13:30:00+00:00">',
+        ),
+      ),
+    ).toEqual({ startedAt: Math.floor(Date.parse("2026-11-20T12:00:00Z") / 1000), durationSec: 5400 });
+    // 配信でない動画は、投稿日時を開始時刻にしない
+    expect(
+      parseYoutubeWatchTiming(
+        page(
+          '<meta itemprop="duration" content="PT3M34S"><meta itemprop="uploadDate" content="2009-10-24T23:57:33-07:00">',
+        ),
+      ),
+    ).toEqual({ durationSec: 214 });
+    // 時差のない日時は読まない
+    expect(
+      parseYoutubeWatchTiming(
+        page(
+          '<meta itemprop="isLiveBroadcast" content="True"><meta itemprop="startDate" content="2026-11-20T21:00:00">',
+        ),
+      ),
+    ).toEqual({});
+  });
+
+  it("ISO 8601 の期間", () => {
+    expect(parseIsoDuration("PT1H")).toBe(3600);
+    expect(parseIsoDuration("P1DT1S")).toBe(86401);
+    expect(parseIsoDuration("PT0S")).toBeUndefined();
+    expect(parseIsoDuration("PT")).toBeUndefined();
+    expect(parseIsoDuration("1:00")).toBeUndefined();
+  });
 });
 
 describe("画面で受け取るとき", () => {
@@ -221,6 +274,17 @@ describe("画面で受け取るとき", () => {
     });
     expect(readPreviewJson({ service: "web", title: "a" })).toBeNull();
     expect(readPreviewJson({ ok: false, error: "x" })).toBeNull();
+  });
+
+  it("開始時刻・長さは、ありうる範囲の整数だけ", () => {
+    const base = { service: "youtube", title: "a" };
+    expect(readPreviewJson({ ...base, startedAt: 1_795_000_000, durationSec: 7200 })).toEqual({
+      ...base,
+      startedAt: 1_795_000_000,
+      durationSec: 7200,
+    });
+    expect(readPreviewJson({ ...base, startedAt: "1795000000", durationSec: -1 })).toEqual(base);
+    expect(readPreviewJson({ ...base, startedAt: 12, durationSec: 1.5 })).toEqual(base);
   });
 
   it("題名が本文の頭なら重ねて出さない", () => {

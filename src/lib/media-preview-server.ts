@@ -4,11 +4,15 @@
  * - 出るのは PREVIEW_UPSTREAM_HOSTS の https だけ。転送（3xx）は追わない
  * - 時間（既定 5 秒）と大きさ（既定 1MB）に上限。閲覧者のクッキー・IP・Referer は付けない
  * - 結果は 10 分だけ覚える（同じ投稿を見る人が続いても、相手のサービスを何度も叩かない）
+ * - YouTube は動画のページの頭も引き、配信の開始時刻と長さを足す（構造化データを読み終えたら、残りは読まない）。
+ *   読めなくても題名は返す
  */
 import {
   PREVIEW_UPSTREAM_HOSTS,
   parsePreviewResponse,
+  parseYoutubeWatchTiming,
   previewTarget,
+  youtubeTimingComplete,
   type MediaPreview,
 } from "./media-preview";
 import { SITE_URL } from "./site";
@@ -17,6 +21,8 @@ export interface MediaPreviewDeps {
   fetchFn?: typeof fetch;
   timeoutMs?: number;
   maxBytes?: number;
+  /** 動画のページ（開始時刻・長さ）を読む上限 */
+  timingMaxBytes?: number;
   now?: () => number;
   cache?: Map<string, { at: number; value: MediaPreview | null }>;
 }
@@ -58,6 +64,53 @@ async function readLimited(res: Response, maxBytes: number): Promise<string | nu
     offset += c.byteLength;
   }
   return new TextDecoder("utf-8", { fatal: false }).decode(merged);
+}
+
+/** 本文の頭だけを読む。done が真になるか maxBytes に届いたら、そこまでを返す */
+async function readPrefix(res: Response, maxBytes: number, done: (text: string) => boolean): Promise<string> {
+  if (!res.body) return (await res.text()).slice(0, maxBytes);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: false });
+  let text = "";
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { done: end, value } = await reader.read();
+      if (end) break;
+      total += value.byteLength;
+      text += decoder.decode(value, { stream: true });
+      if (done(text)) break;
+    }
+    await reader.cancel().catch(() => {});
+  } finally {
+    reader.releaseLock();
+  }
+  return text;
+}
+
+async function fetchYoutubeTiming(
+  url: string,
+  deps: MediaPreviewDeps,
+): Promise<Pick<MediaPreview, "startedAt" | "durationSec">> {
+  const u = new URL(url);
+  if (u.protocol !== "https:" || !PREVIEW_UPSTREAM_HOSTS.has(u.hostname)) return {};
+  try {
+    const res = await (deps.fetchFn ?? fetch)(u.toString(), {
+      method: "GET",
+      redirect: "manual",
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
+      cache: "no-store",
+      signal: AbortSignal.timeout(deps.timeoutMs ?? 5000),
+      headers: { "User-Agent": USER_AGENT, Accept: "text/html", "Accept-Language": "ja" },
+    });
+    if (!res.ok) return {};
+    // 構造化データはページの 900KB あたりにある
+    const html = await readPrefix(res, deps.timingMaxBytes ?? 2_000_000, youtubeTimingComplete);
+    return parseYoutubeWatchTiming(html);
+  } catch {
+    return {};
+  }
 }
 
 const NOT_FOUND: MediaPreviewResult = { ok: false, status: 404, error: "読み取れませんでした。" };
@@ -103,6 +156,8 @@ export async function handleMediaPreview(
     const body = await readLimited(res, deps.maxBytes ?? 1_000_000).catch(() => null);
     if (body === null) return { ok: false, status: 502, error: "読み取れませんでした。" };
     value = parsePreviewResponse(target, body);
+    if (value && target.timingUrl)
+      value = { ...value, ...(await fetchYoutubeTiming(target.timingUrl, deps)) };
   } else if (res.status >= 500 || res.status === 429) {
     return { ok: false, status: 502, error: "相手のサービスが応答しませんでした。" };
   }

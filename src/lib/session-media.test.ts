@@ -16,7 +16,6 @@ import {
   normalizeMediaUrl,
   embedAt,
   formatClock,
-  mediaOffsetAt,
   parseChapters,
   parseClock,
   parseTimeParam,
@@ -140,11 +139,7 @@ describe("目次と時刻", () => {
     expect(parseChapters(formatChapters(chapters))).toEqual(chapters);
   });
 
-  it("ログの発言時刻から録画の位置を出し、その位置で開く URL を作る", () => {
-    const m = { ...base, startedAt: 1_000_000 };
-    expect(mediaOffsetAt(m, 1_000_754)).toBe(754);
-    expect(mediaOffsetAt(m, 999_999)).toBeNull();
-    expect(mediaOffsetAt(base, 1_000_754)).toBeNull();
+  it("録画の位置で開く URL を作る", () => {
     expect(urlAt("https://youtu.be/abcdefghijk", 754)).toBe("https://youtu.be/abcdefghijk?t=754s");
     expect(urlAt("https://drive.google.com/file/d/x", 754)).toBe("https://drive.google.com/file/d/x");
   });
