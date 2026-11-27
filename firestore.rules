@@ -2,6 +2,11 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
+    // 記録・共有の切れ端: 番号は 0000〜0199、1 つは 12 万字まで（src/lib/cloud-state.ts の splitCloudData と同じ上限）
+    function validChunk(chunkId) {
+      return chunkId.matches('^[0-9]{4}$') && int(chunkId) < 200
+        && request.resource.data.data is string && request.resource.data.data.size() <= 120000;
+    }
     function ownUser(userId) { return signedIn() && request.auth.uid == userId; }
     function owner(data) { return signedIn() && data.ownerId == request.auth.uid; }
     // Discord 連携のサーバーがログインする「ボットの利用者」（メールとパスワード。src/lib/discord/bot-account.ts）。
@@ -27,7 +32,7 @@ service cloud.firestore {
         allow read, delete: if ownUser(userId);
         allow create: if ownUser(userId)
           && request.resource.data.keys().hasOnly(['data'])
-          && request.resource.data.data is string;
+          && validChunk(chunkId);
       }
     }
 
@@ -98,7 +103,7 @@ service cloud.firestore {
         allow create: if signedIn()
           && request.resource.data.keys().hasOnly(['data', 'ownerId'])
           && request.resource.data.ownerId == request.auth.uid
-          && request.resource.data.data is string
+          && validChunk(chunkId)
           && (!exists(/databases/$(database)/documents/sharedLogs/$(slug)) || owner(share(slug)));
         allow delete: if owner(resource.data);
       }
@@ -384,7 +389,7 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/sharedCharacters/$(characterId)).data.revision == revision);
         allow create: if signedIn()
           && request.resource.data.keys().hasOnly(['data', 'ownerId'])
-          && request.resource.data.ownerId == request.auth.uid && request.resource.data.data is string
+          && request.resource.data.ownerId == request.auth.uid && validChunk(chunkId)
           && (!exists(/databases/$(database)/documents/sharedCharacters/$(characterId))
             || owner(get(/databases/$(database)/documents/sharedCharacters/$(characterId)).data));
         allow delete: if owner(resource.data);

@@ -17,6 +17,7 @@ import {
 } from "./links";
 import { postSession, syncEventFromApp, syncPollFromApp } from "./sync";
 import { verifyDiscordSignature } from "./verify";
+import { readBodyWithLimit, readJsonWithLimit } from "../http-limit";
 
 export interface HandlerDeps {
   ctx: () => DiscordContext | null;
@@ -40,9 +41,14 @@ function fail(status: number, error: string): Response {
 const UNCONFIGURED = () => fail(503, "Discord 連携を準備しています。");
 const SIGNED_OUT = () => fail(401, "ログインし直してください。");
 
+/** 卓譜の画面からの要求は小さい（卓のメンバーは 500 人まで）。それより大きいものは読まない */
+const APP_BODY_LIMIT = 64 * 1024;
+/** Discord からの interaction は数 KB。余裕を見て 256KB まで */
+const INTERACTION_BODY_LIMIT = 256 * 1024;
+
 async function readJson(req: Request): Promise<unknown> {
   try {
-    return await req.json();
+    return await readJsonWithLimit(req, APP_BODY_LIMIT);
   } catch {
     return undefined;
   }
@@ -72,7 +78,12 @@ async function withUser(
 export async function interactions(req: Request, deps: HandlerDeps): Promise<Response> {
   const ctx = deps.ctx();
   if (!ctx || !ctx.config.publicKey) return new Response("Not configured", { status: 503 });
-  const body = await req.text();
+  let body: string;
+  try {
+    body = await readBodyWithLimit(req, INTERACTION_BODY_LIMIT);
+  } catch {
+    return new Response("Payload too large", { status: 413 });
+  }
   const ok = await verifyDiscordSignature({
     publicKey: ctx.config.publicKey,
     signature: req.headers.get("x-signature-ed25519"),

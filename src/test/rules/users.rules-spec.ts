@@ -70,7 +70,7 @@ describe("users/{userId}/workspace/manifest", () => {
 
 describe("users/{userId}/revisions/{revision}/chunks/{chunkId}", () => {
   it("自分の切れ端は data だけなら作れ、読め、消せる", async () => {
-    const ref = doc(as(ALICE), "users", ALICE, "revisions", "r1", "chunks", "0");
+    const ref = doc(as(ALICE), "users", ALICE, "revisions", "r1", "chunks", "0000");
 
     await assertSucceeds(setDoc(ref, { data: "xxx" }));
     await assertSucceeds(getDoc(ref));
@@ -78,23 +78,23 @@ describe("users/{userId}/revisions/{revision}/chunks/{chunkId}", () => {
   });
 
   it("切れ端は書いたあと書き換えられない", async () => {
-    await seed((db) => setDoc(doc(db, "users", ALICE, "revisions", "r1", "chunks", "0"), { data: "old" }));
-    const ref = doc(as(ALICE), "users", ALICE, "revisions", "r1", "chunks", "0");
+    await seed((db) => setDoc(doc(db, "users", ALICE, "revisions", "r1", "chunks", "0000"), { data: "old" }));
+    const ref = doc(as(ALICE), "users", ALICE, "revisions", "r1", "chunks", "0000");
 
     await assertFails(updateDoc(ref, { data: "new" }));
   });
 
   it("切れ端に data 以外の欄があると作れない", async () => {
-    const ref = doc(as(ALICE), "users", ALICE, "revisions", "r1", "chunks", "0");
+    const ref = doc(as(ALICE), "users", ALICE, "revisions", "r1", "chunks", "0000");
 
     await assertFails(setDoc(ref, { data: "x", ownerId: ALICE }));
   });
 
   it("他人の切れ端は読めず、作れない", async () => {
-    await seed((db) => setDoc(doc(db, "users", ALICE, "revisions", "r1", "chunks", "0"), { data: "x" }));
+    await seed((db) => setDoc(doc(db, "users", ALICE, "revisions", "r1", "chunks", "0000"), { data: "x" }));
     const bob = as(BOB);
 
-    await assertFails(getDoc(doc(bob, "users", ALICE, "revisions", "r1", "chunks", "0")));
-    await assertFails(setDoc(doc(bob, "users", ALICE, "revisions", "r1", "chunks", "1"), { data: "x" }));
+    await assertFails(getDoc(doc(bob, "users", ALICE, "revisions", "r1", "chunks", "0000")));
+    await assertFails(setDoc(doc(bob, "users", ALICE, "revisions", "r1", "chunks", "0001"), { data: "x" }));
   });
 });

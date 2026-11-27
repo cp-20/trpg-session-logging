@@ -30,7 +30,8 @@ const KEY_RE = /^(?!\.\.?$)[^/]{1,200}$/;
 
 async function readChunks(c: RestConfig, parent: string, revision: string, count: unknown): Promise<unknown> {
   if (typeof count !== "number" || !Number.isInteger(count) || count < 1 || count > 200) return null;
-  const rows = await restList(c, `${parent}/revisions/${revision}/chunks`, 300);
+  // 見出しが言う数だけを読む（持ち主が余分な切れ端を足しても、読む量は増えない）
+  const rows = await restList(c, `${parent}/revisions/${revision}/chunks`, count);
   const pieces = new Map(rows.map((r) => [r.id, r.data.data]));
   const chunks = Array.from({ length: count }, (_, i) => pieces.get(String(i).padStart(4, "0")));
   if (chunks.some((x) => typeof x !== "string")) return null;

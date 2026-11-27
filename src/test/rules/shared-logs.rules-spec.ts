@@ -48,7 +48,7 @@ function invite(overrides: Record<string, unknown> = {}) {
   };
 }
 const chunkRef = (db: Firestore, revision = "r1") =>
-  doc(db, "sharedLogs", SLUG, "revisions", revision, "chunks", "0");
+  doc(db, "sharedLogs", SLUG, "revisions", revision, "chunks", "0000");
 
 async function seedShare(overrides: Record<string, unknown> = {}) {
   await seed(async (db) => {
@@ -131,6 +131,16 @@ describe("sharedLogs/{slug}/revisions/{revision}/chunks", () => {
     await seed((db) => setDoc(doc(db, "sharedLogs", SLUG), share()));
 
     await assertFails(setDoc(chunkRef(as(BOB), "r2"), { data: "x", ownerId: BOB }));
+  });
+
+  it("切れ端は 0000〜0199 の番号で、12 万字までしか作れない", async () => {
+    await seed((db) => setDoc(doc(db, "sharedLogs", SLUG), share()));
+    const chunk = (id: string) => doc(as(ALICE), "sharedLogs", SLUG, "revisions", "r2", "chunks", id);
+
+    await assertSucceeds(setDoc(chunk("0199"), { data: "x".repeat(120_000), ownerId: ALICE }));
+    await assertFails(setDoc(chunk("0200"), { data: "x", ownerId: ALICE }));
+    await assertFails(setDoc(chunk("extra"), { data: "x", ownerId: ALICE }));
+    await assertFails(setDoc(chunk("0001"), { data: "x".repeat(120_001), ownerId: ALICE }));
   });
 
   it("切れ端は書き換えられない", async () => {

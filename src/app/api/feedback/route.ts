@@ -1,5 +1,6 @@
 import { handleFeedback } from "../../../lib/feedback";
 import { clientIp, createRateLimiter } from "../../../lib/rate-limit";
+import { BodyTooLargeError, readJsonWithLimit } from "../../../lib/http-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -15,8 +16,11 @@ export async function POST(req: Request): Promise<Response> {
   }
   let body: unknown;
   try {
-    body = await req.json();
-  } catch {
+    // ご意見の本文は数千字まで（src/lib/feedback-kinds.ts）。それを大きく超える本文は読まない
+    body = await readJsonWithLimit(req, 64 * 1024);
+  } catch (error) {
+    if (error instanceof BodyTooLargeError)
+      return Response.json({ ok: false, error: "送る内容が長すぎます。" }, { status: 413 });
     return Response.json({ ok: false, error: "リクエスト形式が正しくありません。" }, { status: 400 });
   }
   const result = await handleFeedback(body, { webhookUrl: process.env.DISCORD_FEEDBACK_WEBHOOK_URL });

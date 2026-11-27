@@ -22,7 +22,7 @@ function character(overrides: Record<string, unknown> = {}) {
   return { ownerId: ALICE, enabled: true, revision: "r1", chunkCount: 1, ...overrides };
 }
 const chunkRef = (db: Firestore, revision = "r1") =>
-  doc(db, "sharedCharacters", CHAR, "revisions", revision, "chunks", "0");
+  doc(db, "sharedCharacters", CHAR, "revisions", revision, "chunks", "0000");
 
 async function seedCharacter(overrides: Record<string, unknown> = {}) {
   await seed(async (db) => {

@@ -550,8 +550,8 @@ export async function renderOgCard(card: OgCard): Promise<Response> {
     ...OG_SIZE,
     fonts: loaded,
     headers: {
-      // 共有の中身は書き換わる。SNS 側も覚えるので、こちらは短めに
-      "Cache-Control": "public, max-age=600, stale-while-revalidate=86400",
+      // 共有の中身は書き換わり、範囲を狭めたら出さなくなる。CDN に古い画像を長く持たせない
+      "Cache-Control": "public, max-age=300",
     },
   });
 }

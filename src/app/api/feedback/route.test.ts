@@ -62,6 +62,15 @@ describe("POST /api/feedback", () => {
     expect(await res.json()).toEqual({ ok: false, error: "リクエスト形式が正しくありません。" });
   });
 
+  it("本文が 64KB を超えるなら 413 を返し、送らない", async () => {
+    const POST = await loadPost();
+
+    const res = await send(POST, { ...valid, body: "あ".repeat(30_000) });
+
+    expect(res.status).toBe(413);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("内容が空なら 400 と理由を返す", async () => {
     const POST = await loadPost();
 
