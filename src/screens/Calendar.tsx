@@ -1455,8 +1455,9 @@ const MonthCalendar = memo(function MonthCalendar({
                           onClick={() => (e.kind === "own" ? onSelectDay(dayStr) : openEntry(e))}
                           className={cx(
                             "block w-full truncate rounded px-1.5 py-0.5 text-left text-xs leading-tight",
+                            // 地は不透明に混ぜた色にする。半透明だと選んだ日（今日）の升の色と重なって濃くなり、文字のコントラストが足りなくなる
                             e.kind === "event" &&
-                              "bg-primary/10 font-semibold text-primary hover:bg-primary/15",
+                              "bg-[color-mix(in_oklab,oklch(var(--p))_10%,oklch(var(--b1)))] font-semibold text-primary hover:bg-[color-mix(in_oklab,oklch(var(--p))_15%,oklch(var(--b1)))]",
                             e.kind === "poll" &&
                               "border border-dashed border-warning/60 text-base-content/80 hover:bg-base-200",
                             e.kind === "log" && "bg-base-200 text-ink2 hover:bg-base-300/60",
