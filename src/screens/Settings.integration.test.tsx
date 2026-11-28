@@ -1,5 +1,5 @@
-import { renderWithStore } from "../test/integration-harness";
-import { screen, waitFor } from "@testing-library/react";
+import { renderWithStore, resetTestNav } from "../test/integration-harness";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Settings, { UserDetail } from "./Settings";
@@ -35,6 +35,20 @@ describe("Settings + UserDetail + ThemeSync + Backup 復元結合テスト", () 
     const persisted = view.readPersistedState()!;
     expect(persisted.users.u_mikan?.name).toBe("みかん（GM練習中）");
     expect(persisted.users.u_mikan?.bio).toBe("週末夜に遊んでいます。");
+  });
+
+  it("同じ人の URL（古い uid の URL → ID の URL）に置き換わっても、開いた編集を閉じない", async () => {
+    const user = userEvent.setup();
+    renderWithStore(<UserDetail />, { initialPath: "/users/mikan", params: { id: "mikan" } });
+    await user.click(screen.getByRole("button", { name: /プロフィールを編集/ }));
+    expect((await screen.findByRole("dialog", { name: "プロフィールを編集" })).textContent).toContain(
+      "表示名",
+    );
+
+    // 古い uid の URL で開き直された（画面は ID の URL へ置き換え直す）
+    act(() => resetTestNav("/users/u_mikan", { id: "u_mikan" }));
+
+    expect(screen.getByRole("dialog", { name: "プロフィールを編集" }).textContent).toContain("表示名");
   });
 
   it("外観テーマの切り替えが画面と端末の設定に反映される", async () => {

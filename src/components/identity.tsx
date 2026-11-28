@@ -1,7 +1,7 @@
 /**
  * 人・キャラクター・発言者の表示（顔アイコン、顔の重なり、ブランドアイコン、参加者の選択）。
  */
-import { useMemo, useRef, useState } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 const boothIconUrl = "/booth-icon.png";
 const taltoIconUrl = "/talto-icon.png";
@@ -18,7 +18,11 @@ import {
   IconUserPlus,
   IconX,
 } from "./icons";
-import { Combobox, Select, cx } from "./ui";
+import { Combobox, Select, SysBadge, cx } from "./ui";
+import { Link } from "../lib/router";
+import { SYSTEMS } from "../data/systems";
+import { fmtDateShort } from "../lib/time";
+import { carriedValues, lastPlayed } from "../lib/character-growth";
 import type { ComboboxOption } from "./ui";
 import { userFacingError } from "../lib/user-error";
 
@@ -773,3 +777,33 @@ export function GoogleSignInButton({
     </>
   );
 }
+
+/** 顔を主役にしたキャラクターカード。一覧とユーザーページで共通に使う */
+export const CharacterCard = memo(function CharacterCard({ c }: { c: Character }) {
+  const sys = SYSTEMS[c.systemId];
+  const last = lastPlayed(c);
+  /* カードには卓をまたいで続く値（SAN など）だけを出す。続かない値（HP・幸運・共鳴など）は出さない */
+  const stats = carriedValues(c);
+  return (
+    <Link to={`/characters/${c.id}`} className="card-interactive overflow-hidden p-0">
+      <div className="flex items-start gap-4 p-4">
+        <CharAvatar c={c} size={72} />
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-base font-bold leading-snug">{c.name}</h3>
+          {c.archetype && <p className="truncate text-sm text-ink2">{c.archetype}</p>}
+          <div className="meta mt-2 text-xs">
+            <SysBadge sys={sys} />
+          </div>
+          <div className="meta mt-1 text-xs tabular-nums">
+            {stats.map((st) => (
+              <span key={st.key}>
+                {st.label} <b className="text-base-content">{st.value}</b>
+              </span>
+            ))}
+            <span>{last ? `${fmtDateShort(last)} に遊んだ` : "まだ遊んでいない"}</span>
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+});

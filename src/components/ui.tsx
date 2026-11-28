@@ -1635,6 +1635,19 @@ export function FieldError({ text, id }: { text: string | null | undefined; id?:
 }
 
 /* ---------- 共通レイアウトパーツ ---------- */
+/**
+ * 画面の読み込み中。すぐ済む待ち（0.4 秒まで）では何も見せず、長引いたときだけ印を出す（.page-loading）。
+ * 一瞬だけ出て消える印は、待ちを長く感じさせる
+ */
+export function PageLoading({ label = "読み込んでいます", full }: { label?: string; full?: boolean }) {
+  return (
+    <div role="status" className={cx("grid place-items-center", full ? "min-h-screen" : "min-h-[40vh]")}>
+      <span className="page-loading loading loading-spinner loading-sm text-primary" aria-hidden="true" />
+      <span className="sr-only">{label}</span>
+    </div>
+  );
+}
+
 export function Empty({ children }: { children: ReactNode }) {
   return <p className="px-5 py-10 text-center text-sm leading-7 text-ink2">{children}</p>;
 }

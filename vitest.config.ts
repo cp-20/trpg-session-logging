@@ -20,6 +20,8 @@ export default defineConfig({
   test: {
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
+    // プロセスより軽いスレッドで動かす（4 コアで forks 25 秒 → threads 22 秒）。各ファイルの分離は保つ
+    pool: "threads",
     css: false,
     // vi.stubEnv / vi.stubGlobal で変えたものを、テストごとに元へ戻す
     unstubEnvs: true,

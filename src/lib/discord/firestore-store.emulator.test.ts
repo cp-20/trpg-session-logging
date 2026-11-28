@@ -3,7 +3,7 @@ import { createUserWithEmailAndPassword, signInWithEmailAndPassword, type User }
 import { deleteDoc, doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import * as lite from "firebase/firestore/lite";
 import { getTakufuAuth } from "../auth";
-import { getTakufuFirestore } from "../firebase";
+import { getTakufuFirestore } from "../firestore";
 import { BOT_UID } from "./bot-account";
 import { connectBot, type BotConnection } from "./bot-connection";
 import type { DiscordStore } from "./types";

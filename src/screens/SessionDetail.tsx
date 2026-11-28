@@ -66,12 +66,7 @@ import {
   type ReportCard,
   type ReportCardOptions,
 } from "../lib/report-card";
-import {
-  createSharedInvite,
-  fetchSharedLog,
-  revokeSharedMember,
-  type SharedLogData,
-} from "../lib/cloud-state";
+import type { SharedLogData } from "../lib/cloud-state";
 import { sessionTitle } from "../lib/session-scenario";
 
 export default function SessionDetail() {
@@ -115,7 +110,9 @@ export default function SessionDetail() {
   useEffect(() => {
     if (!authUid || !syncLogId || !syncSlug) return;
     let alive = true;
-    fetchSharedLog(syncSlug)
+    // Firestore の SDK は画面を出したあとに読む（記録はこの端末にあるので、描画はクラウドを待たない）
+    import("../lib/cloud-state")
+      .then(({ fetchSharedLog }) => fetchSharedLog(syncSlug))
       .then((shared) => {
         if (alive && shared) mergeSharedPlayers(syncLogId, shared);
       })
@@ -756,7 +753,7 @@ function MembersTab({ log }: { log: Log }) {
     setRemoveError(null);
     try {
       if (authUser) {
-        await revokeSharedMember(log.slug, uid2);
+        await (await import("../lib/cloud-state")).revokeSharedMember(log.slug, uid2);
       }
       update((s) => {
         delete s.logs[log.id].players[uid2];
@@ -1052,7 +1049,9 @@ function MembersTab({ log }: { log: Log }) {
                     setInviting(true);
                     setInviteError(null);
                     try {
-                      const token = authUser ? await createSharedInvite(log, state) : log.id;
+                      const token = authUser
+                        ? await (await import("../lib/cloud-state")).createSharedInvite(log, state)
+                        : log.id;
                       const url = `${location.origin}/invite/${token}`;
                       setInviteUrl(url);
                       if (!authUser) {

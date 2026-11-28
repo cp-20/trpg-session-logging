@@ -1,7 +1,19 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { download, todayStr } from "../lib/time";
-import { getTakufuAuth } from "../lib/auth";
-import { backupLocalCopy } from "../lib/local-copy";
+
+/**
+ * 控えの書き出しに要るもの（Firebase Auth を含む）は、押したときに読む。
+ * この部品はすべての画面（LP・規約も）を包むので、ここで静的に import すると公開ページの JS に Firebase が載る
+ */
+async function downloadBackup() {
+  const [{ download, todayStr }, { getTakufuAuth }, { backupLocalCopy }] = await Promise.all([
+    import("../lib/time"),
+    import("../lib/auth"),
+    import("../lib/local-copy"),
+  ]);
+  // 今の人の控えだけ（共用の端末で、ほかのアカウントの記録まで書き出さない）
+  const backup = backupLocalCopy(localStorage, getTakufuAuth()?.currentUser?.uid ?? null);
+  download(`takufu-backup-${todayStr()}.json`, JSON.stringify(backup, null, 2));
+}
 
 interface Props {
   children: ReactNode;
@@ -45,18 +57,7 @@ export class ErrorBoundary extends Component<Props, State> {
             >
               再読み込み
             </button>
-            <button
-              className="btn btn-sm"
-              onClick={() => {
-                try {
-                  // 今の人の控えだけ（共用の端末で、ほかのアカウントの記録まで書き出さない）
-                  const backup = backupLocalCopy(localStorage, getTakufuAuth()?.currentUser?.uid ?? null);
-                  download(`takufu-backup-${todayStr()}.json`, JSON.stringify(backup, null, 2));
-                } catch {
-                  /* noop */
-                }
-              }}
-            >
+            <button className="btn btn-sm" onClick={() => void downloadBackup().catch(() => {})}>
               記録をダウンロード
             </button>
           </div>

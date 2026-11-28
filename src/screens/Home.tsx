@@ -14,7 +14,7 @@ import { myScheduleView, pollCandidates, relativeDayLabel } from "../lib/schedul
 import { sessionsOfMe, useStore } from "../store";
 import type { TableEvent, User } from "../types";
 import { EventDetailModal, EventRow, PollDetailModal } from "./Calendar";
-import { lastPlayed } from "./Characters";
+import { lastPlayed } from "../lib/character-growth";
 import { carriedValues } from "../lib/character-growth";
 import { SessionRow } from "./Sessions";
 import { sessionStart } from "../lib/sittings";

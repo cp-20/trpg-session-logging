@@ -974,26 +974,127 @@ function checkSelectedStateAndContact(violations: Violation[]): void {
 }
 
 /**
+ * entry から静的な import（import() と import type は除く）をたどり、読み込まれる各ファイルの import を visit に渡す。
+ * visit が true を返した import の先はたどらない。chain は entry からそのファイルまでの道筋
+ */
+function walkStaticImports(
+  entry: string,
+  visit: (
+    from: string,
+    line: number,
+    spec: string,
+    target: string | null,
+    chain: () => string,
+  ) => boolean | void,
+): void {
+  const staticImport = /^\s*(?:import|export)\s+(?!type\b)(?:[^"';]*?\sfrom\s+)?["']([^"']+)["']/gm;
+  const resolve = (from: string, spec: string): string | null => {
+    const base = path.join(path.dirname(path.join(ROOT_DIR, from)), spec);
+    for (const cand of [
+      base,
+      `${base}.ts`,
+      `${base}.tsx`,
+      path.join(base, "index.ts"),
+      path.join(base, "index.tsx"),
+    ]) {
+      if (fs.existsSync(cand) && fs.statSync(cand).isFile()) return path.relative(ROOT_DIR, cand);
+    }
+    return null;
+  };
+  if (!fs.existsSync(path.join(ROOT_DIR, entry))) return;
+  const via = new Map<string, string | null>([[entry, null]]);
+  const chainOf = (file: string) => {
+    const chain: string[] = [];
+    for (let f: string | null = file; f; f = via.get(f) ?? null) chain.unshift(f);
+    return chain.join(" → ");
+  };
+  const queue = [entry];
+  while (queue.length) {
+    const file = queue.shift()!;
+    const text = fs.readFileSync(path.join(ROOT_DIR, file), "utf8");
+    for (const m of text.matchAll(staticImport)) {
+      const spec = m[1];
+      const target = spec.startsWith(".") ? resolve(file, spec) : null;
+      if (target && via.has(target)) continue;
+      if (target) via.set(target, file);
+      const stop = visit(file, lineAt(text, m.index), spec, target, () => chainOf(target ?? file));
+      if (target && !stop) queue.push(target);
+    }
+  }
+}
+
+/**
  * 公開ページ（Landing.tsx: LP・規約・ご意見）はサーバーで描画し、記録と Firebase を読み込まない。
  * ここから store・Firebase・zod を読むと、LP の JS に数百 KB が載る（LP の速度の指摘）。
+ * 直接の import だけでなく、静的な import をたどった先も調べる（ErrorBoundary → lib/auth で Firebase が全画面に載っていた）。
+ * Sentry の SDK もすべての画面に載るので、静的に読まない（src/lib/sentry-client.ts があとから読む）
  */
 function checkPublicPagesStayLight(violations: Violation[]): void {
-  // ルートの layout と BaseProviders もすべての画面に載るので同じ扱い
-  for (const rel of ["src/screens/Landing.tsx", "src/app/layout.tsx", "src/app/providers.tsx"]) {
-    const lines = fs.readFileSync(path.join(ROOT_DIR, rel), "utf8").split(/\r?\n/);
-    // ルートの layout はアプリ本体の書体（@fontsource の Noto）を読むので、@fontsource は Landing だけで禁止
-    const banned = new RegExp(
-      `(from |import )"(\\.\\.?/store|\\.\\.?/workspace|\\./store-providers|\\.\\./lib/(auth|firebase|cloud-state|feedback)|firebase/[^"]*|zod${rel.endsWith("Landing.tsx") ? '|@fontsource[^"]*' : ""})"`,
-    );
-    lines.forEach((line, i) => {
-      if (banned.test(line)) {
-        violations.push({
-          file: rel,
-          line: i + 1,
-          message:
-            "Public pages must not import the store, Firebase, zod or @fontsource (keeps the LP server-rendered and light); put sign-in flows in Entry.tsx.",
-        });
+  // ルートの layout・BaseProviders・エラー画面・instrumentation-client もすべての画面に載るので同じ扱い
+  const entries = [
+    "src/screens/Landing.tsx",
+    "src/app/layout.tsx",
+    "src/app/providers.tsx",
+    "src/app/not-found.tsx",
+    "src/app/error.tsx",
+    "src/app/global-error.tsx",
+    "src/instrumentation-client.ts",
+  ];
+  const bannedLocal =
+    /^src\/(store|workspace|app\/store-providers|lib\/(auth|firebase|firestore|cloud-state|feedback))\.tsx?$/;
+  for (const entry of entries) {
+    const bannedPackage = (spec: string) =>
+      /^firebase(\/|$)/.test(spec) ||
+      spec === "zod" ||
+      spec === "@sentry/nextjs" ||
+      (entry.endsWith("Landing.tsx") && spec.startsWith("@fontsource"));
+    walkStaticImports(entry, (file, line, spec, target, chain) => {
+      if (!target) {
+        if (!spec.startsWith(".") && bannedPackage(spec))
+          violations.push({
+            file,
+            line,
+            message: `Every page loads this file; do not statically import "${spec}" (${chain()}). import() it where it is used (Sentry: src/lib/sentry-client.ts), or put sign-in flows in Entry.tsx.`,
+          });
+        return;
       }
+      if (bannedLocal.test(target)) {
+        violations.push({
+          file,
+          line,
+          message: `Public pages must not load the store or Firebase (${chain()}); import() it where it is used.`,
+        });
+        return true;
+      }
+    });
+  }
+}
+
+/**
+ * 記録の画面を開くときは、端末の控えを先に出し、Firestore（gzip で約 160KB）はクラウドと照合するときに読む（src/workspace.tsx）。
+ * ストアの土台・アプリの枠から Firestore を静的に読むと、最初の描画がその JS を待つ（auth → firebase.ts → Firestore で載っていた）
+ */
+function checkAppStartupSkipsFirestore(violations: Violation[]): void {
+  const entries = [
+    "src/app/(store)/layout.tsx",
+    "src/app/(store)/(app)/layout.tsx",
+    "src/app/(store)/(app)/loading.tsx",
+    "src/app/(store)/(app)/home/page.tsx",
+    "src/app/(store)/signin/page.tsx",
+  ];
+  const bannedLocal = /^src\/lib\/(firestore|cloud-state|cloud-people|table-polls)\.tsx?$/;
+  for (const entry of entries) {
+    walkStaticImports(entry, (file, line, spec, target, chain) => {
+      const hit = target
+        ? bannedLocal.test(target)
+        : spec === "firebase/firestore" || spec.startsWith("@firebase/firestore");
+      if (!hit) return;
+      violations.push({
+        file,
+        line,
+        message: `Opening the app must not wait for the Firestore SDK (${chain()}); import() it where it is used.`,
+      });
+      return true;
     });
   }
 }
@@ -1551,6 +1652,7 @@ checkPagesCohesion(violations);
 checkSelectedStateAndContact(violations);
 checkLpSelectedFill(violations);
 checkPublicPagesStayLight(violations);
+checkAppStartupSkipsFirestore(violations);
 checkServerCatalog(violations);
 checkComboboxForGrowingOptions(violations);
 checkCommaSeparatedInput(violations);

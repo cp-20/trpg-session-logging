@@ -16,6 +16,7 @@ import {
   SysBadge,
   TableMark,
   cx,
+  PageLoading,
 } from "../components/ui";
 import {
   Avatar,
@@ -28,19 +29,14 @@ import {
 } from "../components/identity";
 import { alternateHandle, HANDLE_MAX, handleProblem, normalizeHandle, suggestHandle } from "../lib/handle";
 import { applyJoinedTable, findLocalInvite, handleTakenLocally, type TableInviteView } from "../lib/people";
-import {
-  claimHandle,
-  fetchHandleOwner,
-  fetchOwnHandle,
-  fetchTableInvite,
-  joinTableInvite,
-} from "../lib/cloud-people";
+/** ユーザー ID・卓の招待の照会は Firestore を使うので、要るときに読む（ログイン画面の JS に Firestore を載せない） */
+const cloudPeople = () => import("../lib/cloud-people");
 import { SYSTEMS } from "../data/systems";
 import { roleLabel } from "../lib/roles";
 import { fmtDates, sessionDays } from "../lib/time";
 import type { Msg } from "../types";
 import { IconBooks, IconCheck, IconUserPlus } from "../components/icons";
-import { getSharedInvite, acceptSharedInvite, type SharedInvite } from "../lib/cloud-state";
+import type { SharedInvite } from "../lib/cloud-state";
 import { mergeAcceptedShare } from "../lib/accept-share";
 import { authErrorMessage, signInWithGoogle } from "../lib/auth";
 import { isFirebaseConfigured } from "../lib/firebase";
@@ -101,7 +97,9 @@ function RemoteClaimInvite({ token }: { token: string }) {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    getSharedInvite(token)
+    // Firestore の SDK は、招待を開いたときに読む（ログイン画面など、この画面の他の部分の JS に載せない）
+    import("../lib/cloud-state")
+      .then(({ getSharedInvite }) => getSharedInvite(token))
       .then((value) => {
         if (alive) setInvite(value);
       })
@@ -153,6 +151,7 @@ function RemoteClaimInvite({ token }: { token: string }) {
             setBusy(true);
             setError(null);
             try {
+              const { acceptSharedInvite } = await import("../lib/cloud-state");
               const { share, slug, ownerId } = await acceptSharedInvite(token, state.users[state.me]);
               // 自分の記録や、知っている人・シナリオは上書きしない。入れられなければ何も変えずに知らせる
               mergeAcceptedShare(structuredClone(state), share, { slug, ownerId });
@@ -427,6 +426,9 @@ function LocalClaimInvite() {
   );
 }
 
+/** 体験版の見本（約 480KB）を先に読んでおく。読み終えたものは import() が使い回す */
+const preloadDemo = () => void import("../data/seed").catch(() => {});
+
 /* ================= サンプルの開始（/demo） =================
  * LP は記録を読まずに描画するので、サンプルを始める操作はこの画面（記録を読む側）で行う。
  */
@@ -434,10 +436,15 @@ export function DemoStart() {
   const { state, enterDemo } = useStore();
   const nav = useNavigate();
   useEffect(() => {
+    // 見本は始めるときに読む（非同期）。入り終えてからホームへ（先に移ると、入る前の画面としてログインへ送られる）
     if (!state.entered) enterDemo();
-    nav({ to: "/home", replace: true });
+    else nav({ to: "/home", replace: true });
   }, [state.entered, enterDemo, nav]);
-  return null;
+  return (
+    <main>
+      <PageLoading full label="サンプルを準備しています" />
+    </main>
+  );
 }
 
 /* ================= ログイン（/signin） ================= */
@@ -509,10 +516,10 @@ export function SignIn() {
               <button
                 type="button"
                 className="btn mt-3"
-                onClick={() => {
-                  enterDemo();
-                  nav({ to: next, replace: true });
-                }}
+                // 見本は押されそうになったら読み始める（押してからの待ちを縮める）
+                onPointerEnter={preloadDemo}
+                onFocus={preloadDemo}
+                onClick={() => void enterDemo().then(() => nav({ to: next, replace: true }))}
               >
                 サンプルデータをそのまま見る
               </button>
@@ -646,7 +653,8 @@ function useHandleStatus(
     if (!needsRemote) return;
     let alive = true;
     const timer = window.setTimeout(() => {
-      fetchHandleOwner(handle)
+      cloudPeople()
+        .then((p) => p.fetchHandleOwner(handle))
         .then((owner) => {
           if (alive)
             setChecked({
@@ -693,7 +701,8 @@ export function Welcome() {
   useEffect(() => {
     if (!uid || hasHandle) return;
     let alive = true;
-    fetchOwnHandle(uid)
+    cloudPeople()
+      .then((p) => p.fetchOwnHandle(uid))
       .then((handle) => {
         if (!alive || !handle) return;
         update((s) => {
@@ -777,7 +786,9 @@ function WelcomeHandle({ onDone }: { onDone: () => void }) {
     void (async () => {
       for (let i = 0; i <= 3; i++) {
         const candidate = i === 0 ? suggested : alternateHandle(suggested, i);
-        const owner = await fetchHandleOwner(candidate).catch(() => uid);
+        const owner = await cloudPeople()
+          .then((p) => p.fetchHandleOwner(candidate))
+          .catch(() => uid);
         if (!alive) return;
         if (!owner || owner === uid) {
           if (!touched.current) setDraft(candidate);
@@ -803,7 +814,7 @@ function WelcomeHandle({ onDone }: { onDone: () => void }) {
     try {
       let fixed = handle;
       if (authUser) {
-        const res = await claimHandle(authUser.uid, handle);
+        const res = await cloudPeople().then((p) => p.claimHandle(authUser.uid, handle));
         if (!res.ok && res.reason === "taken") {
           setError(HANDLE_TAKEN);
           return;
@@ -997,7 +1008,8 @@ export function JoinTable() {
   useEffect(() => {
     if (local || !authUser) return;
     let alive = true;
-    fetchTableInvite(token)
+    cloudPeople()
+      .then((p) => p.fetchTableInvite(token))
       .then((v) => alive && setRemote(v))
       .catch(() => alive && setError("招待を読み込めませんでした。通信状態を確認してください。"))
       .finally(() => alive && setLoading(false));
@@ -1052,7 +1064,7 @@ export function JoinTable() {
     setError(null);
     try {
       if (view.remote) {
-        await joinTableInvite(token, state.users[state.me]!);
+        await cloudPeople().then((p) => p.joinTableInvite(token, state.users[state.me]!));
         update((s) => {
           applyJoinedTable(s, view.remote!);
         });

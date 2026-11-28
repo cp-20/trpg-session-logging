@@ -749,6 +749,11 @@ main#main-content:focus {
   animation: tk-rise 460ms var(--ease-pop) calc(var(--t0) + 1360ms + var(--i) * 90ms) backwards;
 }
 
+/* 読み込み中の印（PageLoading）: 0.4 秒たっても待っているときだけ現れる */
+.page-loading {
+  animation: tk-fade 200ms ease-out 400ms backwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

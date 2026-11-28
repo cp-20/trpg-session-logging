@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "../lib/router";
+import { Link, replaceUrlInPlace, useNavigate, useParams } from "../lib/router";
 import { IconChevronRight, IconLock, IconPencil, IconSearch, IconSettings } from "../components/icons";
 import {
   EmptyState,
@@ -16,7 +16,7 @@ import {
   cx,
   useVisibleCount,
 } from "../components/ui";
-import { Avatar, ImageUploadField, ProviderIcon } from "../components/identity";
+import { Avatar, CharacterCard, ImageUploadField, ProviderIcon } from "../components/identity";
 import { findUserByRef, userHref } from "../lib/people";
 import { authErrorMessage, linkXAccount, signOutAccount, unlinkXAccount } from "../lib/auth";
 import { LEGAL_LINKS } from "../lib/rights";
@@ -25,7 +25,7 @@ import { features } from "../lib/features";
 import { DiscordAccountRow } from "../components/discord";
 import { sessionStart } from "../lib/time";
 import { resetData, useStore } from "../store";
-import { CharacterCard } from "./Characters";
+
 import { SessionRow } from "./Sessions";
 import { applyTheme, currentThemeMode, type ThemeMode } from "../lib/theme";
 
@@ -312,8 +312,14 @@ const USER_LOG_STEP = 20;
 
 export function UserDetail() {
   const { id } = useParams<{ id?: string }>();
-  /* 別の人のページへ移ったら、編集中の内容・検索・表示件数をすべて最初に戻す */
-  return <UserDetailView key={id ?? ""} id={id} />;
+  const { state } = useStore();
+  /*
+   * 別の人のページへ移ったら、編集中の内容・検索・表示件数をすべて最初に戻す。
+   * 区別は URL の文字ではなく人で行う: 古い uid の URL は開いた直後に ID の URL へ置き換わる（同じ人）ので、
+   * URL で区別すると、その間に開いた編集が消えていた
+   */
+  const person = findUserByRef(state, id ?? "")?.id ?? id ?? "";
+  return <UserDetailView key={person} id={id} />;
 }
 
 function UserDetailView({ id }: { id: string | undefined }) {
@@ -330,11 +336,11 @@ function UserDetailView({ id }: { id: string | undefined }) {
 
   // URL はユーザー ID（/users/<handle>）。古い uid の URL は ID の URL に置き換える
   const user = findUserByRef(state, id ?? "");
-  const nav = useNavigate();
   const canonical = user ? userHref(user) : null;
   useEffect(() => {
-    if (canonical && id && canonical !== `/users/${id}`) nav({ to: canonical, replace: true });
-  }, [canonical, id, nav]);
+    // 同じ人の URL なので、画面を作り直さずにアドレス欄だけを置き換える
+    if (canonical && id && canonical !== `/users/${id}`) replaceUrlInPlace(canonical);
+  }, [canonical, id]);
   const chars = useMemo(
     () => (user ? Object.values(state.characters).filter((c) => c.ownerId === user.id) : []),
     [user, state.characters],

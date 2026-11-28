@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scrubEvent, scrubText } from "./sentry-scrub";
+import { scrubEvent, scrubSpan, scrubText } from "./sentry-scrub";
 
 describe("scrubText（鍵になる URL を伏せる）", () => {
   it.each([
@@ -44,6 +44,36 @@ describe("scrubEvent", () => {
       request: { url: "https://takufu.example/join/:token" },
       exception: { values: [{ value: "failed /api/calendar/:token" }] },
       breadcrumbs: [{ message: "nav", data: { to: "/share/l/:id", from: "/home" } }],
+    });
+  });
+});
+
+describe("scrubSpan（性能の計測の span）", () => {
+  it("名前と属性の URL に入った鍵を伏せ、利用者・ヘッダー・問い合わせの属性を消す", () => {
+    const span = scrubSpan({
+      name: "GET /join/abc",
+      attributes: {
+        "url.full": "https://takufu.example/share/l/s1?x=1",
+        "http.target": { value: "/api/calendar/tok.ics", type: "string" },
+        "url.query": "token=1",
+        "user.id": "u_1",
+        "client.address": "203.0.113.1",
+        "http.request.header.cookie": "session=x",
+        "http.response.status_code": 200,
+        "sentry.op": "pageload",
+      },
+      links: [{ attributes: { "url.full": "/invite/t_1" } }],
+    });
+
+    expect(span).toEqual({
+      name: "GET /join/:token",
+      attributes: {
+        "url.full": "https://takufu.example/share/l/:id",
+        "http.target": { value: "/api/calendar/:token", type: "string" },
+        "http.response.status_code": 200,
+        "sentry.op": "pageload",
+      },
+      links: [{ attributes: { "url.full": "/invite/:token" } }],
     });
   });
 });

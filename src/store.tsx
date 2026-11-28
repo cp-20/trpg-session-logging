@@ -54,6 +54,17 @@ export function emptyState(user: User): State {
   };
 }
 
+/**
+ * まだ何も始めていない人（記録の控えがない・ログインしていない）の記録。共有ページを初めて開いた人など。
+ * 体験版の見本（src/data/seed.ts、約 480KB）は、体験版を始めたとき（enterDemo）に読む
+ */
+export function guestState(): State {
+  return {
+    ...emptyState({ id: "u_guest", name: "ゲスト", color: "#0e7490", accounts: [] }),
+    entered: false,
+  };
+}
+
 function minimalFallbackState(): State {
   return {
     ...emptyState({ id: "u_mikan", name: "みかん", color: "#b85d27", accounts: [] }),
@@ -118,7 +129,7 @@ export interface StoreStateApi {
   update: (fn: (s: State) => void) => void;
   toast: (msg: string) => void;
   authUser: FirebaseUser | null;
-  enterDemo: (userId?: string) => void;
+  enterDemo: (userId?: string) => Promise<void>;
   refreshProfile: () => void;
 }
 
@@ -146,6 +157,7 @@ export function StoreProvider({
   storageKey = KEY,
   authUser = null,
   cloudRevision = null,
+  cloudHold = false,
 }: {
   children: ReactNode;
   initialState?: State;
@@ -153,6 +165,8 @@ export function StoreProvider({
   storageKey?: string;
   authUser?: FirebaseUser | null;
   cloudRevision?: string | null;
+  /** true の間はクラウドへ書かない（端末の控えを先に出し、クラウドの版と照合している間。src/workspace.tsx） */
+  cloudHold?: boolean;
 }) {
   const initial = useMemo<RestoreResult>(() => {
     const restored: RestoreResult = initialState
@@ -236,7 +250,7 @@ export function StoreProvider({
 
   /* 卓の日程調整: 自分が回答できる共有の文書を見張り、回答と確定を記録へ取り込む（src/lib/table-polls.ts） */
   useEffect(() => {
-    if (!authUser) return;
+    if (!authUser || cloudHold) return;
     let cancelled = false;
     let stop: (() => void) | null = null;
     void import("./lib/table-polls").then(({ TablePollSync }) => {
@@ -263,7 +277,7 @@ export function StoreProvider({
       stop?.();
       pollSync.current = null;
     };
-  }, [authUser]);
+  }, [authUser, cloudHold]);
   const staleRef = useRef(false);
   const blockedRef = useRef(persistBlocked || initial.issue === "corrupt");
 
@@ -313,6 +327,13 @@ export function StoreProvider({
     }
   }, [storageKey, authUser]);
 
+  /* 使い始めた（体験版に入った）ときは待たずに書き出す。入った直後に読み込み直しても、入る前に戻らない */
+  const wasEntered = useRef(initial.state.entered);
+  useEffect(() => {
+    if (state.entered && !wasEntered.current) void persist();
+    wasEntered.current = state.entered;
+  }, [state.entered, persist]);
+
   /* アイドル時デバウンス書き込み: ローカル更新が起きたときだけ実行 */
   useEffect(() => {
     if (!dirtyLocalRef.current) return;
@@ -338,7 +359,7 @@ export function StoreProvider({
 
   /* クラウド同期: 中身の変わった部品・共有ページだけを送る（src/lib/workspace-parts.ts） */
   useEffect(() => {
-    if (!authUser || blockedRef.current || staleRef.current) return;
+    if (!authUser || cloudHold || blockedRef.current || staleRef.current) return;
     if (state === lastSavedState.current && retry === 0) return;
 
     setCloudStatus("saving");
@@ -449,7 +470,7 @@ export function StoreProvider({
       });
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [state, retry, authUser, storageKey, persist]);
+  }, [state, retry, authUser, cloudHold, storageKey, persist]);
 
   useEffect(() => {
     alive.current = true;
@@ -507,7 +528,8 @@ export function StoreProvider({
     });
   }, []);
 
-  const enterDemo = useCallback((userId = "u_mikan") => {
+  /** 体験版に入る。見本（src/data/seed.ts）は初めて入るときに読むので、入り終えるのを待ってから画面を移る */
+  const enterDemo = useCallback((userId = "u_mikan"): Promise<void> => {
     dirtyLocalRef.current = true;
     if (stateRef.current.users[userId]) {
       setState((prev) =>
@@ -517,10 +539,12 @@ export function StoreProvider({
           draft.entered = true;
         }),
       );
-      return;
+      return Promise.resolve();
     }
-    void import("./data/seed").then(({ seedState }) => {
+    return import("./data/seed").then(({ seedState }) => {
       if (!alive.current) return;
+      // 読み込みを待つ間に遅延保存が走ると「保存待ち」が下りるので、入れる直前に立て直す（でないと見本が保存されない）
+      dirtyLocalRef.current = true;
       setState((prev) => {
         if (prev.users[userId]) {
           return produceDraft(prev, (draft) => {

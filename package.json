@@ -18,7 +18,7 @@
     "test:e2e:discord": "playwright test -c playwright.discord.config.ts",
     "test:rules": "firebase emulators:exec --config src/test/rules/firebase.json --only firestore --project takufu-app \"vitest run -c vitest.rules.config.ts\"",
     "review": "node scripts/ops.ts review",
-    "check": "pnpm run lint && pnpm run typecheck && pnpm run mobile:typecheck && pnpm run test && NEXT_SKIP_TYPECHECK=1 pnpm run build",
+    "check": "node scripts/check.ts",
     "test:mutation": "stryker run",
     "mobile:device": "node scripts/mobile-device.ts",
     "mobile:device:dev": "node scripts/mobile-device.ts --dev-client",
