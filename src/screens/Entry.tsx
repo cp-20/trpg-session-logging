@@ -442,15 +442,16 @@ export function DemoStart() {
 
 /* ================= ログイン（/signin） ================= */
 export function SignIn() {
-  const { state, enterDemo } = useStore();
+  const { state, authUser, enterDemo } = useStore();
   const nav = useNavigate();
   const next = safeNextPath(useSearchParam("next"));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // もう使い始めている（ログイン済み・サンプル中）なら、ログインの画面を挟まず行き先へ送る
+  // ログイン済みなら、ログインの画面を挟まず行き先へ送る。サンプル中はログインできるように画面を出す（サンプルの帯の「ログインして始める」）
+  const inSample = state.entered && !authUser;
   useEffect(() => {
-    if (state.entered) nav({ to: next, replace: true });
-  }, [state.entered, next, nav]);
+    if (state.entered && authUser) nav({ to: next, replace: true });
+  }, [state.entered, authUser, next, nav]);
   return (
     <PublicFrame width="max-w-md" hideLogin>
       <section aria-labelledby="signin-title">
@@ -460,7 +461,7 @@ export function SignIn() {
         <p className="mt-2 text-sm leading-relaxed text-ink2">
           記録はアカウントに保存され、どの端末からでも開けます。
         </p>
-        {state.entered ? (
+        {state.entered && authUser ? (
           <Link to={next} className="btn btn-primary mt-6">
             ホームを開く
           </Link>
@@ -501,22 +502,30 @@ export function SignIn() {
               </Link>
               に同意したことになります。
             </p>
-            <div className="mt-8 border-t border-base-300 pt-6">
-              <h2 className="text-sm font-bold">アカウントを作らずに試す</h2>
-              <p className="mt-1 text-xs leading-relaxed text-ink2">
-                サンプルの卓とキャラクターが入った状態で開きます。変更はこのブラウザにだけ保存されます。
-              </p>
-              <button
-                type="button"
-                className="btn mt-3"
-                onClick={() => {
-                  enterDemo();
-                  nav({ to: next, replace: true });
-                }}
-              >
-                サンプルデータをそのまま見る
-              </button>
-            </div>
+            {inSample ? (
+              <div className="mt-8 border-t border-base-300 pt-6">
+                <Link to={next} className="btn">
+                  サンプルに戻る
+                </Link>
+              </div>
+            ) : (
+              <div className="mt-8 border-t border-base-300 pt-6">
+                <h2 className="text-sm font-bold">アカウントを作らずに試す</h2>
+                <p className="mt-1 text-xs leading-relaxed text-ink2">
+                  サンプルの卓とキャラクターが入った状態で開きます。変更はこのブラウザにだけ保存されます。
+                </p>
+                <button
+                  type="button"
+                  className="btn mt-3"
+                  onClick={() => {
+                    enterDemo();
+                    nav({ to: next, replace: true });
+                  }}
+                >
+                  サンプルデータをそのまま見る
+                </button>
+              </div>
+            )}
           </div>
         )}
       </section>

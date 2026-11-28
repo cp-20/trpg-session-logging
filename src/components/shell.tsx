@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 import { buildFeedIcs, publishFeed } from "../lib/calendar-feed";
-import { Link, usePathname } from "../lib/router";
+import { Link, useNavigate, usePathname } from "../lib/router";
 import { download, todayStr, sessionStart } from "../lib/time";
 import { useStoreState, useSyncStatus } from "../store";
 import {
@@ -97,6 +97,36 @@ function SaveBanners() {
   );
 }
 
+/**
+ * サンプルを見ている間、画面の枠の上に出す帯。サンプルの出口（ログインして始める・終える）を設定の奥に隠さない。
+ * ログインはサンプルのままログイン画面へ（ログインすると自分の記録に切り替わり、サンプルの変更はこのブラウザに残る）
+ */
+function SampleBanner() {
+  const { authUser, update } = useStoreState();
+  const nav = useNavigate();
+  if (authUser) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-base-300 bg-base-100 px-4 py-2.5 text-sm sm:px-8">
+      <span className="min-w-0 grow basis-full font-bold sm:basis-auto">サンプルの卓を見ています</span>
+      <Link to="/signin?next=%2Fhome" className="btn btn-sm">
+        ログインして始める
+      </Link>
+      <button
+        type="button"
+        className="btn btn-sm btn-quiet"
+        onClick={() => {
+          update((s) => {
+            s.entered = false;
+          });
+          nav({ to: "/" });
+        }}
+      >
+        サンプルを終える
+      </button>
+    </div>
+  );
+}
+
 function SyncStatus() {
   const { cloudStatus } = useSyncStatus();
   const { authUser } = useStoreState();
@@ -157,7 +187,7 @@ function SideLink({
 }
 
 function Sidebar() {
-  const { state, authUser } = useStoreState();
+  const { state } = useStoreState();
   const isActive = useActive();
   const me = state.users[state.me]!;
 
@@ -215,9 +245,6 @@ function Sidebar() {
           <LogoMark size={24} className="text-primary" />
           <span className="text-lg font-bold tracking-tight">卓譜</span>
         </Link>
-        {!authUser && (
-          <span className="ml-auto rounded-md bg-base-200 px-2 py-0.5 text-xs text-ink2">サンプル</span>
-        )}
       </div>
 
       <Link to="/upload" className="btn btn-primary w-full mb-5 shrink-0">
@@ -286,7 +313,7 @@ function Sidebar() {
 }
 
 function MobileTopBar() {
-  const { state, authUser } = useStoreState();
+  const { state } = useStoreState();
   const me = state.users[state.me]!;
   return (
     <header className="lg:hidden sticky top-0 z-30 flex min-h-14 items-center gap-1.5 sm:gap-2 border-b border-base-300 bg-base-100/95 px-3 sm:px-4 backdrop-blur">
@@ -294,11 +321,6 @@ function MobileTopBar() {
         <LogoMark size={22} className="text-primary shrink-0" />
         <span className="text-base font-bold tracking-tight whitespace-nowrap">卓譜</span>
       </Link>
-      {!authUser && (
-        <span className="shrink-0 rounded-md bg-base-200 px-2 py-0.5 text-xs text-ink2 whitespace-nowrap">
-          サンプル
-        </span>
-      )}
       <Link to="/upload" className="btn btn-primary btn-sm ml-auto shrink-0 whitespace-nowrap">
         <IconPlus width={16} height={16} /> 記録
       </Link>
@@ -386,6 +408,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileTopBar />
+        <SampleBanner />
         <SaveBanners />
         <main
           id="main-content"

@@ -15,7 +15,8 @@ test("公開ページはログインなしで開け、デザイン検査に通�
   for (const route of PUBLIC_ROUTES) {
     await page.goto(route);
     await page.locator("main h1").first().waitFor();
-    expect(await auditPage(page, { explanationBudget: false }), route).toEqual([]);
+    // LP の文は 1 段落 1 文・60 字まで（説明が冗長という指摘、2026-11-28）。規約などの公開ページは長い文が要るので除く
+    expect(await auditPage(page, { explanationBudget: route === "/" }), route).toEqual([]);
     const legal = page.getByRole("navigation", { name: "規約とライセンス" });
     await expect(legal.getByRole("link", { name: "ライセンス・権利表記" })).toBeVisible();
     await expect(legal.getByRole("link", { name: "利用規約" })).toBeVisible();
@@ -175,9 +176,35 @@ test("ログイン前にアプリの画面を開くとログイン画面に送�
   await expect(google.locator('img[src="/google-g.png"]')).toHaveCount(1);
   await page.getByRole("button", { name: "サンプルデータをそのまま見る" }).click();
   await expect(page).toHaveURL(/\/sessions$/);
-  // 使い始めたあとにログインの画面を開くと、画面を挟まず行き先へ送られる
+  // サンプル中にログインの画面を開くと、ログインでき、サンプルにも戻れる
   await page.goto("/signin?next=%2Fcalendar");
+  await expect(page.getByRole("button", { name: "Google でログイン" })).toBeVisible();
+  await page.getByRole("link", { name: "サンプルに戻る" }).click();
   await expect(page).toHaveURL(/\/calendar$/);
+});
+
+test("サンプル中は画面の上の帯から、ログインへ進むことも、サンプルを終えることもできる", async ({ page }) => {
+  await page.goto("/demo");
+  await page.waitForURL(/\/home$/);
+  const banner = page.getByText("サンプルの卓を見ています");
+  await expect(banner).toBeVisible();
+  await page.getByRole("link", { name: "ログインして始める" }).click();
+  await expect(page).toHaveURL(/\/signin\?next=%2Fhome$/);
+  await expect(page.getByRole("button", { name: "Google でログイン" })).toBeVisible();
+  await page.getByRole("link", { name: "サンプルに戻る" }).click();
+  await expect(page).toHaveURL(/\/home$/);
+
+  // 終えると LP に戻る（以前は記録の画面の送り先と競合して、ログインの画面に着いていた）
+  await page.goto("/sessions");
+  await page.getByRole("button", { name: "サンプルを終える" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("link", { name: "ログイン" })).toBeVisible();
+  // 設定から終えても同じ
+  await page.goto("/demo");
+  await page.waitForURL(/\/home$/);
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "終える", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
 });
 
 test("共有ページは SNS 向けの題名と OG 画像を head に持ち、読めない記録は中身に触れない札になる", async ({

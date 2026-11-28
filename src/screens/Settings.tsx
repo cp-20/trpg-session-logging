@@ -136,9 +136,9 @@ export default function Settings() {
             </button>
           )}
         </SettingRow>
-        <SettingRow title={authUser ? "ログアウト" : "お試しを終える"}>
+        <SettingRow title={authUser ? "ログアウト" : "サンプルを終える"}>
           <button className="btn btn-sm" disabled={busy} onClick={signOut}>
-            {authUser ? "ログアウト" : "最初の画面へ"}
+            {authUser ? "ログアウト" : "終える"}
           </button>
         </SettingRow>
       </div>
