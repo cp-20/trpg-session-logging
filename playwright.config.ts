@@ -19,7 +19,8 @@ export default defineConfig({
   },
   webServer: process.env.CI
     ? {
-        command: "pnpm run build && pnpm exec next start -H 127.0.0.1 -p 4178",
+        // standalone の写し（pnpm run build の後半）は next start では使わないので、next build だけ
+        command: "pnpm exec next build && pnpm exec next start -H 127.0.0.1 -p 4178",
         url: "http://127.0.0.1:4178",
         reuseExistingServer: false,
         timeout: 120_000,

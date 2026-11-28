@@ -1,7 +1,6 @@
-/** ブラウザで最初に動く（Next.js の instrumentation-client）。Sentry に画面の例外を送る */
-import * as Sentry from "@sentry/nextjs";
-import { sentryOptions } from "./lib/sentry-options";
+/** ブラウザで最初に動く（Next.js の instrumentation-client）。Sentry に画面の例外を送る（SDK はあとから読む。src/lib/sentry-client.ts） */
+import { captureRouterTransitionStart, startSentry } from "./lib/sentry-client";
 
-Sentry.init(sentryOptions());
+startSentry();
 
-export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;
+export const onRouterTransitionStart = captureRouterTransitionStart;

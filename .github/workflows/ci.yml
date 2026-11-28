@@ -1,5 +1,6 @@
 # pnpm run check（lint・型・単体テスト・ビルド）、E2E（全画面のデザイン検査を含む）、Firebase エミュレータでの
 # ルールと Discord 連携の検査を、main への push とプルリクエストごとに流す。本番の Firebase・Discord には繋がない。
+# ジョブはすべて同時に走る。いちばん長いものが全体の待ち時間になるので、長いもの（E2E）は分けて並べる。
 name: CI
 
 on:
@@ -35,9 +36,17 @@ jobs:
       - run: pnpm run check
 
   e2e:
-    name: E2E・デザイン検査
+    # 3 つに分けて並べて流す（1 台 2 並列で 2.5 分かかっていた）。ビルドはそれぞれで行う（30 秒ほど。成果物の受け渡しより速い）
+    name: E2E・デザイン検査 (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    env:
+      # 型の検査は check のジョブで済ませている
+      NEXT_SKIP_TYPECHECK: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -46,11 +55,21 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      # ブラウザは Playwright の版ごとにキャッシュし、headless で使う shell だけを入れる（全部入りの Chromium は使わない）。
+      # ランナーには Chromium の動作に要るライブラリが入っているので、キャッシュに当たれば何もしない
+      - id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-shell
+      - if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps --only-shell chromium
       # CI=true なので playwright.config.ts が本番ビルドを 4178 で立てて検査する。
       # 共有シナリオ一覧（/api/scenarios）は本番の Firestore を読むので、ブラウザ用の Firebase 設定を渡す。
       # これは全ページの JS に入っている公開の値で、秘密ではない（読むのは誰でも読める共有シナリオ一覧だけ）
-      - run: pnpm run test:e2e
+      - run: pnpm run test:e2e --shard=${{ matrix.shard }}/3
         env:
           NEXT_PUBLIC_FIREBASE_API_KEY: "AIzaSyCerWqQYV2c56CYgzLGPbS36tnrx75hoWw"
           NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "takufu-app.firebaseapp.com"
@@ -62,12 +81,47 @@ jobs:
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-results
+          name: e2e-results-${{ matrix.shard }}
           path: test-results/
           retention-days: 7
 
+  rules:
+    # ルールの検査（エミュレータ 8080）と、保存・Discord 連携（同じ番号を使う）は同時に流せないので、ジョブを分けて並べる
+    name: Firestore ルール（エミュレータ）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: pnpm install --frozen-lockfile
+      # firebase-tools は npm のキャッシュから入れる（毎回取りに行くと 15 秒かかっていた）
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-firebase-tools-${{ runner.os }}-15
+      - run: npm install -g firebase-tools@15 --prefer-offline --no-audit --no-fund
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}-15
+      - run: pnpm run test:rules
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rules-results
+          path: firestore-debug.log
+          retention-days: 7
+
   emulator:
-    name: Firestore ルール・保存・Discord 連携（エミュレータ）
+    name: 保存・Discord 連携（エミュレータ）
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -82,13 +136,25 @@ jobs:
           distribution: temurin
           java-version: "21"
       - run: pnpm install --frozen-lockfile
-      - run: npm install -g firebase-tools@15
+      # firebase-tools は npm のキャッシュから入れる（毎回取りに行くと 15 秒かかっていた）
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-firebase-tools-${{ runner.os }}-15
+      - run: npm install -g firebase-tools@15 --prefer-offline --no-audit --no-fund
       - uses: actions/cache@v4
         with:
           path: ~/.cache/firebase/emulators
           key: firebase-emulators-${{ runner.os }}-15
-      - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm run test:rules
+      - id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-shell
+      - if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps --only-shell chromium
       - run: pnpm run test:emulator -- --discord
       - if: failure()
         uses: actions/upload-artifact@v4

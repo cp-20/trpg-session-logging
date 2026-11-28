@@ -1,6 +1,6 @@
 "use client";
 
-import * as Sentry from "@sentry/nextjs";
+import { captureException } from "../lib/sentry-client";
 import { useEffect } from "react";
 
 /** 画面の描画中に投げられた例外。ルートの layout は残るので、テーマと書体はそのまま使える */
@@ -12,7 +12,7 @@ export default function ErrorPage({
   reset: () => void;
 }) {
   useEffect(() => {
-    Sentry.captureException(error);
+    captureException(error);
     console.error("[app] render error", error);
   }, [error]);
   return (

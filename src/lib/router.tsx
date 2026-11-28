@@ -52,6 +52,16 @@ export function useNavigate() {
   );
 }
 
+/**
+ * 同じものを指す別の URL（古い uid の URL → ID の URL など）へ、アドレス欄だけを置き換える。
+ * nav で置き換えると、Next.js は URL の [id] が変わったものとして画面を作り直す（開いた編集などが消え、サーバーとも往復する）。
+ * window.history.replaceState は Next.js の router に取り込まれ、usePathname などは新しい URL になる
+ */
+export function replaceUrlInPlace(href: string): void {
+  if (typeof window === "undefined" || `${location.pathname}${location.search}` === href) return;
+  window.history.replaceState(window.history.state, "", href);
+}
+
 export function useParams<T extends Record<string, string | undefined>>(): T {
   return (useNextParams() ?? {}) as T;
 }

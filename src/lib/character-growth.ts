@@ -164,3 +164,14 @@ export function carriedDeltas(
     return d ? [{ key: st.key, label: st.label, before: d.before, after: d.after }] : [];
   });
 }
+
+const lastPlayedCache = new WeakMap<Character, string | undefined>();
+
+/** いちばん最近遊んだ日（まだ遊んでいなければ undefined） */
+export function lastPlayed(c: Character): string | undefined {
+  if (lastPlayedCache.has(c)) return lastPlayedCache.get(c);
+  let last: string | undefined;
+  for (const s of c.sessions) if (!last || s.date > last) last = s.date;
+  lastPlayedCache.set(c, last);
+  return last;
+}

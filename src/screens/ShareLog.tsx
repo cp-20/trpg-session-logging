@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+"use client";
+/* 共有ページ。サーバーの page.tsx が、誰にでも見せてよい記録を読んで initial で渡す（ブラウザで読み直さない） */
+import { Suspense, use, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams } from "../lib/router";
 import { IconBooks, IconExternal, IconLock, IconTrendingUp } from "../components/icons";
@@ -16,14 +18,10 @@ import { SheetView } from "../components/sheet";
 import { SYSTEM_RIGHTS } from "../lib/rights";
 import { roleLabel } from "../lib/roles";
 import { authErrorMessage, signInWithGoogle } from "../lib/auth";
-import {
-  confirmPlayedLog,
-  fetchSharedCharacter,
-  fetchSharedLog,
-  getSharedLogAccess,
-  type SharedCharacterData,
-  type SharedLogData,
-} from "../lib/cloud-state";
+import type { SharedCharacterData, SharedLogData } from "../lib/cloud-state";
+
+/** Firestore の SDK は、サーバーから受け取れなかった記録を読むときだけ読む（誰にでも見せてよい記録の共有ページには載せない） */
+const cloud = () => import("../lib/cloud-state");
 import { isFirebaseConfigured } from "../lib/firebase";
 import { evaluateShareGate, visibleShareMembers } from "../lib/share-gate";
 import { fmtDate, fmtDur, fmtSessionWhen, sessionPlayMinutes } from "../lib/time";
@@ -78,40 +76,67 @@ function ShareFrame({
   );
 }
 
-export default function ShareLog() {
+/**
+ * initial: サーバーが読んだ、誰にでも見せてよい記録（題名・OG 画像に使うのと同じ）。あれば Firestore を読まずにすぐ出す。
+ * サーバーは待たずに HTML を返し、記録は届きしだい流れてくる（Promise を use で待つ）。
+ * 参加者だけの記録・サーバーで読めなかったとき（null）は、ブラウザがログインした立場で読む
+ */
+export default function ShareLog({ initial }: { initial?: Promise<SharedLogData | null> }) {
   const { slug } = useParams<{ slug?: string; id?: string }>();
   const { state, authUser } = useStore();
   const log = Object.values(state.logs).find((l) => l.slug === slug || l.id === slug);
   if (log && (!authUser || log.ownerId === authUser.uid)) return <ShareLogView state={state} log={log} />;
-  return <RemoteShare slug={slug ?? ""} />;
+  if (!initial) return <RemoteShare slug={slug ?? ""} />;
+  return (
+    <Suspense fallback={<ShareLoading>共有ページを読み込んでいます…</ShareLoading>}>
+      <ServerShare slug={slug ?? ""} initial={initial} />
+    </Suspense>
+  );
 }
 
-function RemoteShare({ slug }: { slug: string }) {
+function ServerShare({ slug, initial }: { slug: string; initial: Promise<SharedLogData | null> }) {
+  return <RemoteShare slug={slug} initial={use(initial) ?? undefined} />;
+}
+
+function ShareLoading({ narrow, children }: { narrow?: boolean; children: ReactNode }) {
+  return (
+    <ShareFrame narrow={narrow}>
+      <p className="flex items-center gap-2 text-sm text-ink2" role="status">
+        <span className="loading loading-spinner loading-sm" aria-hidden />
+        {children}
+      </p>
+    </ShareFrame>
+  );
+}
+
+function RemoteShare({ slug, initial }: { slug: string; initial?: SharedLogData }) {
   const { state, authUser } = useStore();
-  const [shared, setShared] = useState<SharedLogData | null>(null);
-  const [scope, setScope] = useState<"members" | "passed" | "public" | null>(null);
+  const [shared, setShared] = useState<SharedLogData | null>(initial ?? null);
+  const [scope, setScope] = useState<"members" | "passed" | "public" | null>(initial ? "public" : null);
   const canFetch = isFirebaseConfigured && Boolean(slug);
+  const firstStatus = () => (initial && retry === 0 ? "ready" : canFetch ? "loading" : "missing");
+  const [retry, setRetry] = useState(0);
   const [status, setStatus] = useState<"loading" | "missing" | "gate" | "ready" | "error">(
-    canFetch ? "loading" : "missing",
+    initial ? "ready" : canFetch ? "loading" : "missing",
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [retry, setRetry] = useState(0);
 
   /* 読み込み直す条件が変わったら、描画中に読み込み中へ戻す（Effect で戻すと古い結果が一瞬映る） */
   const fetchKey = JSON.stringify([slug, authUser?.uid ?? null, retry]);
   const [statusKey, setStatusKey] = useState(fetchKey);
   if (statusKey !== fetchKey) {
     setStatusKey(fetchKey);
-    setStatus(canFetch ? "loading" : "missing");
+    setStatus(firstStatus());
   }
 
   useEffect(() => {
     let alive = true;
-    if (!isFirebaseConfigured || !slug) return;
+    // 誰にでも見せてよい記録はサーバーから受け取り済み（見る人によって中身は変わらない）
+    if (!isFirebaseConfigured || !slug || (initial && retry === 0)) return;
     (async () => {
       try {
-        const access = await getSharedLogAccess(slug);
+        const access = await (await cloud()).getSharedLogAccess(slug);
         if (!alive) return;
         if (!access) {
           setStatus("missing");
@@ -119,7 +144,7 @@ function RemoteShare({ slug }: { slug: string }) {
         }
         setScope(access.scope);
         try {
-          const data = await fetchSharedLog(slug);
+          const data = await (await cloud()).fetchSharedLog(slug);
           if (alive) {
             setShared(data);
             setStatus(data ? "ready" : "missing");
@@ -139,17 +164,9 @@ function RemoteShare({ slug }: { slug: string }) {
     return () => {
       alive = false;
     };
-  }, [slug, authUser?.uid, retry]);
+  }, [slug, authUser?.uid, retry, initial]);
 
-  if (status === "loading")
-    return (
-      <ShareFrame>
-        <p className="flex items-center gap-2 text-sm text-ink2" role="status">
-          <span className="loading loading-spinner loading-sm" aria-hidden />
-          共有ページを読み込んでいます…
-        </p>
-      </ShareFrame>
-    );
+  if (status === "loading") return <ShareLoading>共有ページを読み込んでいます…</ShareLoading>;
   if (status === "missing")
     return (
       <ShareFrame>
@@ -206,7 +223,7 @@ function RemoteShare({ slug }: { slug: string }) {
                     setBusy(true);
                     setError(null);
                     try {
-                      await confirmPlayedLog(slug);
+                      await (await cloud()).confirmPlayedLog(slug);
                       setRetry((n) => n + 1);
                     } catch {
                       setError("記録を開けませんでした。もう一度お試しください。");
@@ -442,20 +459,30 @@ function ShareLogView({
 }
 
 /* ================= キャラクターの共有ページ ================= */
-export function ShareChar() {
+/** initial: サーバーが読んだ共有中のキャラクター（届きしだい流れてくる）。あれば Firestore を読まずにすぐ出す */
+export function ShareChar({ initial }: { initial?: Promise<SharedCharacterData | null> }) {
   const { id } = useParams<{ slug?: string; id?: string }>();
   const { state } = useStore();
   const c = state.characters[id ?? ""];
   if (c) return <ShareCharView state={state} c={c} />;
-  return <RemoteCharacter id={id ?? ""} />;
+  if (!initial) return <RemoteCharacter id={id ?? ""} />;
+  return (
+    <Suspense fallback={<ShareLoading narrow>キャラクターを読み込んでいます…</ShareLoading>}>
+      <ServerCharacter id={id ?? ""} initial={initial} />
+    </Suspense>
+  );
 }
 
-function RemoteCharacter({ id }: { id: string }) {
+function ServerCharacter({ id, initial }: { id: string; initial: Promise<SharedCharacterData | null> }) {
+  return <RemoteCharacter id={id} initial={use(initial) ?? undefined} />;
+}
+
+function RemoteCharacter({ id, initial }: { id: string; initial?: SharedCharacterData }) {
   const { state } = useStore();
-  const [data, setData] = useState<SharedCharacterData | null>(null);
+  const [data, setData] = useState<SharedCharacterData | null>(initial ?? null);
   const canFetch = isFirebaseConfigured && Boolean(id);
   const [status, setStatus] = useState<"loading" | "ready" | "missing" | "error">(
-    canFetch ? "loading" : "missing",
+    initial ? "ready" : canFetch ? "loading" : "missing",
   );
   const [retry, setRetry] = useState(0);
   /* 読み込み直す条件が変わったら、描画中に読み込み中へ戻す */
@@ -463,12 +490,13 @@ function RemoteCharacter({ id }: { id: string }) {
   const [statusKey, setStatusKey] = useState(fetchKey);
   if (statusKey !== fetchKey) {
     setStatusKey(fetchKey);
-    setStatus(canFetch ? "loading" : "missing");
+    setStatus(initial && retry === 0 ? "ready" : canFetch ? "loading" : "missing");
   }
   useEffect(() => {
     let alive = true;
-    if (!isFirebaseConfigured || !id) return;
-    fetchSharedCharacter(id)
+    if (!isFirebaseConfigured || !id || (initial && retry === 0)) return;
+    cloud()
+      .then((m) => m.fetchSharedCharacter(id))
       .then((shared) => {
         if (alive) {
           setData(shared);
@@ -481,17 +509,9 @@ function RemoteCharacter({ id }: { id: string }) {
     return () => {
       alive = false;
     };
-  }, [id, retry]);
+  }, [id, retry, initial]);
 
-  if (status === "loading")
-    return (
-      <ShareFrame narrow>
-        <p className="flex items-center gap-2 text-sm text-ink2" role="status">
-          <span className="loading loading-spinner loading-sm" aria-hidden />
-          キャラクターを読み込んでいます…
-        </p>
-      </ShareFrame>
-    );
+  if (status === "loading") return <ShareLoading narrow>キャラクターを読み込んでいます…</ShareLoading>;
   if (status === "error") {
     return (
       <ShareFrame narrow>

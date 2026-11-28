@@ -26,7 +26,7 @@ type Scrubbable = {
   tags?: Record<string, unknown>;
 };
 
-/** beforeSend / beforeSendTransaction で通す。持ち主の特定につながる欄も消す */
+/** beforeSend で通す（例外などの出来事）。持ち主の特定につながる欄も消す */
 export function scrubEvent<T extends Scrubbable>(event: T): T {
   if (event.message) event.message = scrubText(event.message);
   if (event.transaction) event.transaction = scrubText(event.transaction);
@@ -48,4 +48,48 @@ export function scrubEvent<T extends Scrubbable>(event: T): T {
   delete event.user;
   if (typeof event.tags?.url === "string") event.tags.url = scrubText(event.tags.url);
   return event;
+}
+
+/** 利用者や要求の中身につながる span の属性（名前の頭で見る）。値ごと消す */
+const DROPPED_SPAN_ATTRIBUTES = [
+  /^user\./,
+  /^client\.address$/,
+  /^http\.request\.header\./,
+  /^http\.response\.header\./,
+  /^url\.query$/,
+  /^http\.query$/,
+  /cookie/i,
+];
+
+type ScrubbableSpan = {
+  name?: string;
+  attributes?: Record<string, unknown>;
+  links?: { attributes?: Record<string, unknown> }[];
+};
+
+function scrubAttributes(attributes: Record<string, unknown> | undefined): void {
+  if (!attributes) return;
+  for (const key of Object.keys(attributes)) {
+    if (DROPPED_SPAN_ATTRIBUTES.some((re) => re.test(key))) {
+      delete attributes[key];
+      continue;
+    }
+    const value = attributes[key];
+    if (typeof value === "string") attributes[key] = scrubText(value);
+    else if (value && typeof value === "object" && typeof (value as { value?: unknown }).value === "string") {
+      const v = value as { value: string };
+      v.value = scrubText(v.value);
+    }
+  }
+}
+
+/**
+ * beforeSendSpan で通す。性能の計測は span 1 つずつで送られ（Sentry v11 の既定）、beforeSendTransaction は呼ばれない。
+ * span の名前（"GET /join/<token>" など）と属性（url.full・http.target など）に入った鍵を伏せ、利用者・ヘッダー・問い合わせの属性を消す
+ */
+export function scrubSpan<T extends ScrubbableSpan>(span: T): T {
+  if (span.name) span.name = scrubText(span.name);
+  scrubAttributes(span.attributes);
+  for (const link of span.links ?? []) scrubAttributes(link.attributes);
+  return span;
 }

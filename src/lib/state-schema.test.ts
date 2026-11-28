@@ -205,6 +205,41 @@ describe("validateSavedState: 読めないデータは State として扱わな�
     expect(validateSavedState(state)).toBeNull();
   });
 
+  it.each([
+    ["id が文字列でない", { id: 1 }],
+    ["ts が有限の数でない", { ts: Number.POSITIVE_INFINITY }],
+    ["ts が文字列", { ts: "1700000000" }],
+    ["発言者がない", { sp: undefined }],
+    ["kind が知らないもの", { kind: "BOSS" }],
+    ["type が知らないもの", { type: "image" }],
+    [
+      "roll の中身が文字列でない",
+      { type: "roll", roll: { cmd: "1d100", skill: "目星", dice: 42, result: "成功" } },
+    ],
+    ["roll が配列", { type: "roll", roll: [] }],
+  ])("発言の形が違えば null（%s）", (_name, patch) => {
+    const state = saved();
+    const ok = { id: "m_ok", ts: 1_700_000_000, sp: "x", kind: "PC", type: "text" };
+    state.logs.s01.channels[0].msgs[0] = { ...ok, ...patch };
+
+    expect(validateSavedState(state)).toBeNull();
+  });
+
+  it("発言の知らない項目と roll の null はそのまま残す", () => {
+    const state = saved();
+    state.logs.s01.channels[0].msgs[0] = {
+      id: "m_ok",
+      ts: 1_700_000_000,
+      sp: "x",
+      kind: "PC",
+      type: "text",
+      roll: null,
+      future: "keep",
+    };
+
+    expect(validateSavedState(state)?.logs.s01!.channels[0]!.msgs[0]).toMatchObject({ future: "keep" });
+  });
+
   it("外部連携の provider が知らないものなら null", () => {
     const state = saved();
     state.characters[firstKey(state.characters)].externalSync = {

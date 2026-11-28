@@ -1,5 +1,4 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
-import { getFirestore, connectFirestoreEmulator, type Firestore } from "firebase/firestore";
 
 /**
  * Firebase 接続。
@@ -7,6 +6,8 @@ import { getFirestore, connectFirestoreEmulator, type Firestore } from "firebase
  *   アプリはモック(localStorage)運用で動き続ける。
  * - ログ本文は名前付きデータベース `takufu`(NEXT_PUBLIC_FIREBASE_DATABASE_ID)に分離する。
  *   (default) DB を作らない運用のため、Firestore 呼び出しは必ず DB ID を明示する。
+ * - Firestore の接続は ./firestore.ts。ここ（ログインが読む）から Firestore の SDK（gzip で約 160KB）を読まない。
+ *   画面は記録の控えを先に出し、Firestore はクラウドと照合するときに読む（src/workspace.tsx）
  */
 
 export const firebaseConfig = {
@@ -24,28 +25,11 @@ export const FIRESTORE_DATABASE_ID = process.env.NEXT_PUBLIC_FIREBASE_DATABASE_I
 export const isFirebaseConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 
 let app: FirebaseApp | null = null;
-let fs: Firestore | null = null;
 
 export function getFirebaseApp(): FirebaseApp | null {
   if (!isFirebaseConfigured) return null;
   if (!app) app = getApps().length ? getApp() : initializeApp(firebaseConfig);
   return app;
-}
-
-/** takufu 用の Firestore(名前付き DB)。未設定なら null */
-export function getTakufuFirestore(): Firestore | null {
-  const a = getFirebaseApp();
-  if (!a) return null;
-  if (!fs) {
-    fs = getFirestore(a, FIRESTORE_DATABASE_ID);
-    if (process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATORS === "true")
-      connectFirestoreEmulator(
-        fs,
-        process.env.NEXT_PUBLIC_FIRESTORE_EMULATOR_HOST || "127.0.0.1",
-        Number(process.env.NEXT_PUBLIC_FIRESTORE_EMULATOR_PORT || 8080),
-      );
-  }
-  return fs;
 }
 
 /** 状態表示用の要約 */

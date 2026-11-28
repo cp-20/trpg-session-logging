@@ -16,7 +16,7 @@ import {
   type DocumentReference,
   type Firestore,
 } from "firebase/firestore";
-import { getTakufuFirestore } from "./firebase";
+import { getTakufuFirestore } from "./firestore";
 import { validateSharedPayload, type AcceptedShare } from "./accept-share";
 import { sanitizeEditChanges } from "./edit-request";
 import { mediaForSharedPage } from "./session-media";
@@ -288,14 +288,21 @@ export async function fetchCloudWorkspaceManifest(uid: string): Promise<CloudWor
   return workspaceManifest((await getDocFromServer(workspaceRef(database(), uid))).data());
 }
 
-/** 記録を読む。この端末に控え（cached）があれば、中身の同じ部品はそれを使い、違う部品だけを読む */
-export async function loadCloudState(uid: string, cached?: State | null): Promise<CloudWorkspace | null> {
+/**
+ * 記録を読む。この端末に控え（cached）があれば、中身の同じ部品はそれを使い、違う部品だけを読む。
+ * いま読んだ見出し（known manifest）を渡すと、1 回目はそれを使い、見出しを読み直す往復を省く
+ */
+export async function loadCloudState(
+  uid: string,
+  cached?: State | null,
+  firstManifest?: CloudWorkspaceManifest | null,
+): Promise<CloudWorkspace | null> {
   const db = database();
   const known = new Map<string, unknown>();
   if (cached?.me === uid)
     for (const [key, content] of splitWorkspace(cached)) known.set(`${key} ${contentTag(content)}`, content);
   for (let attempt = 0; attempt < 3; attempt++) {
-    const manifest = await fetchCloudWorkspaceManifest(uid);
+    const manifest = attempt === 0 && firstManifest ? firstManifest : await fetchCloudWorkspaceManifest(uid);
     if (!manifest) return null;
     const contents = new Map<string, unknown>();
     try {

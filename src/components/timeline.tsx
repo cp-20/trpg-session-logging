@@ -1,4 +1,13 @@
-import { createContext, memo, useContext, useDeferredValue, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  memo,
+  useContext,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 import { identiconDataUri } from "../lib/identicon";
 import { logSpeakers, splitSpeakers } from "../lib/log-speakers";
@@ -15,6 +24,12 @@ export interface SpeakerMeta {
   color: string;
   plName?: string;
   roleLabel: string;
+}
+
+function sameSpeakerMeta(a: SpeakerMeta, b: SpeakerMeta): boolean {
+  return (
+    a.iconUrl === b.iconUrl && a.color === b.color && a.plName === b.plName && a.roleLabel === b.roleLabel
+  );
 }
 
 /** 誰とも結び付かない発言者の顔。発言者名を種にした既定の画像（GM 側は人の姿、ほかはキャラの姿） */
@@ -180,14 +195,13 @@ const MessageRow = memo(function MessageRow({
   row,
   meta,
   grouped,
-  children,
 }: {
   row: Row;
   meta: SpeakerMeta;
   /** 直前と同じ発言者の続き。顔と名前を省いて読みやすくする */
   grouped: boolean;
-  children: ReactNode;
 }) {
+  // 中身はここで作る（children で受けると、毎回新しい要素になって memo が効かず、記録が変わるたびに全行を描き直す）
   const { m, chName, secret } = row;
   const isNarratorText = m.type === "text" && (m.kind === "KP" || m.kind === "GM");
   return (
@@ -198,6 +212,8 @@ const MessageRow = memo(function MessageRow({
         // ホバーの面が上下対称になるよう、行の余白は上下同じにする。発言者の切り替わりは行の外（margin）で空ける。
         // シークレットは左の帯ではなく、薄い地の色と SecretMark で示す
         "group flex gap-3 rounded-lg px-2 py-1 sm:px-3 transition-colors",
+        // 画面の外の行は描かない（長いログで、行が増えてもスクロール・再描画を重くしない）
+        TIMELINE_ROW_LAZY,
         !grouped && "mt-2",
         secret ? "bg-warning/[0.06] hover:bg-warning/10" : "hover:bg-base-200/50",
         NOW_ROW,
@@ -245,7 +261,7 @@ const MessageRow = memo(function MessageRow({
                 <SecretMark name={chName} />
               </span>
             )}
-            {children}
+            {m.type === "roll" ? <RollMessage m={m} /> : m.text}
           </div>
           {grouped && (
             <MsgTime
@@ -274,6 +290,9 @@ export interface RecordingSync {
 }
 
 export const RecordingSyncContext = createContext<RecordingSync | null>(null);
+
+/** 画面の外の行の描画を省く。高さは一度描いた値を覚え、まだのものは 1 行ぶんで見積もる */
+const TIMELINE_ROW_LAZY = "[content-visibility:auto] [contain-intrinsic-size:auto_3rem]";
 
 /** 再生中の発言の地。行ごとの見た目（ホバー・シークレット）より上に重ねる */
 const NOW_ROW = "data-[now]:bg-primary/10 data-[now]:hover:bg-primary/15 scroll-mt-40 scroll-mb-40";
@@ -756,14 +775,19 @@ export function SessionTimeline({
   }, [rows, setVisibleCount]);
 
   const speakerIdx = useMemo(() => buildSpeakerNameIndex(state), [state]);
+  // 中身の同じ発言者の情報は前の物を使い回す（記録のどこかが変わるたびに、全行の memo を外さない）
+  const previousMetas = useRef(new Map<string, SpeakerMeta>());
   const speakerMap = useMemo(() => {
     const map = new Map<string, SpeakerMeta>();
     for (const { m } of rows) {
       const key = `${m.kind}:${m.sp}`;
       if (!map.has(key)) {
-        map.set(key, resolveSpeakerMetaWithIndex(m.sp, m.kind, log, state, speakerIdx));
+        const next = resolveSpeakerMetaWithIndex(m.sp, m.kind, log, state, speakerIdx);
+        const before = previousMetas.current.get(key);
+        map.set(key, before && sameSpeakerMeta(before, next) ? before : next);
       }
     }
+    previousMetas.current = map;
     return map;
   }, [rows, log, state, speakerIdx]);
 
@@ -807,11 +831,7 @@ export function SessionTimeline({
       p.chName === row.chName &&
       m.ts - p.m.ts < 5 * 60;
     const meta = speakerMap.get(`${m.kind}:${m.sp}`)!;
-    out.push(
-      <MessageRow key={m.id} row={row} meta={meta} grouped={grouped}>
-        {m.type === "roll" ? <RollMessage m={m} /> : m.text}
-      </MessageRow>,
-    );
+    out.push(<MessageRow key={m.id} row={row} meta={meta} grouped={grouped} />);
     prev = row;
   });
 

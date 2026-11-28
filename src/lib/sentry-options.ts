@@ -7,7 +7,7 @@
  * 画面の録画（Session Replay）は使わない。
  */
 import type { init } from "@sentry/nextjs";
-import { scrubEvent, scrubText } from "./sentry-scrub";
+import { scrubEvent, scrubSpan, scrubText } from "./sentry-scrub";
 
 type Options = NonNullable<Parameters<typeof init>[0]>;
 
@@ -30,7 +30,8 @@ export function sentryOptions() {
       queues: false,
     },
     beforeSend: (event) => scrubEvent(event),
-    beforeSendTransaction: (event) => scrubEvent(event),
+    // 性能の計測は span ごとに送られる（v11 の既定）。beforeSendTransaction はもう呼ばれないので、span の側で伏せる
+    beforeSendSpan: (span) => scrubSpan(span),
     beforeSendLog: (log) => ({ ...log, message: scrubText(String(log.message)) }),
     beforeBreadcrumb: (crumb) => {
       if (crumb.message) crumb.message = scrubText(crumb.message);

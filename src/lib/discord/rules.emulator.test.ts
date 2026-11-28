@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { collection, deleteDoc, doc, getDoc, getDocs, setDoc } from "firebase/firestore";
 import { getTakufuAuth } from "../auth";
-import { getTakufuFirestore } from "../firebase";
+import { getTakufuFirestore } from "../firestore";
 
 /**
  * Discord 連携の文書はサーバー（ボットの利用者。firestore.rules の isBot()）だけが読み書きする。

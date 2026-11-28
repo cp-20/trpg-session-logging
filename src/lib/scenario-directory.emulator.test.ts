@@ -3,7 +3,7 @@ import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } f
 import { deleteDoc, doc, serverTimestamp, setDoc, updateDoc, collection, getDocs } from "firebase/firestore";
 import { doc as liteDoc, setDoc as liteSetDoc } from "firebase/firestore/lite";
 import { getTakufuAuth } from "./auth";
-import { getTakufuFirestore } from "./firebase";
+import { getTakufuFirestore } from "./firestore";
 import { SYSTEMS } from "../data/systems";
 import {
   docFields,

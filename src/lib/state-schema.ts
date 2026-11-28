@@ -16,18 +16,34 @@ const user = z.looseObject({
   accounts: z.array(account).default([]),
   profilePublic: z.boolean().optional(),
 });
-const message = z
-  .looseObject({
-    id: z.string(),
-    ts: z.number().finite(),
-    sp: z.string(),
-    kind: z.enum(["PC", "NPC", "ENEMY", "KP", "PL", "GM", "NARRATION", "SYSTEM"]),
-    type: z.enum(["text", "note", "roll"]),
-    roll: z
-      .looseObject({ cmd: z.string(), skill: z.string(), dice: z.string(), result: z.string() })
-      .nullish(),
-  })
-  .refine((m) => m.type !== "roll" || Boolean(m.roll));
+const MESSAGE_KINDS = new Set(["PC", "NPC", "ENEMY", "KP", "PL", "GM", "NARRATION", "SYSTEM"]);
+const MESSAGE_TYPES = new Set(["text", "note", "roll"]);
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+/**
+ * 発言 1 件の形。ログは数万件になり、起動のたびにすべてを確かめるので、zod の looseObject ではなく手で確かめる
+ * （zod は 1 件ずつ写しを作るため、6 万件で JSON.parse と同じくらいの時間がかかっていた）。
+ * 確かめる中身は looseObject と同じ: id・ts（有限の数）・sp・kind・type、roll は null か 4 つの文字列、type が roll なら roll が要る
+ */
+function isMessage(m: unknown): boolean {
+  if (!isRecord(m)) return false;
+  if (typeof m.id !== "string" || typeof m.sp !== "string") return false;
+  if (typeof m.ts !== "number" || !Number.isFinite(m.ts)) return false;
+  if (!MESSAGE_KINDS.has(m.kind as string) || !MESSAGE_TYPES.has(m.type as string)) return false;
+  const roll = m.roll;
+  if (roll !== undefined && roll !== null) {
+    if (!isRecord(roll)) return false;
+    if (
+      typeof roll.cmd !== "string" ||
+      typeof roll.skill !== "string" ||
+      typeof roll.dice !== "string" ||
+      typeof roll.result !== "string"
+    )
+      return false;
+  }
+  return m.type !== "roll" || Boolean(roll);
+}
+const messages = z.custom<unknown[]>((v) => Array.isArray(v) && v.every(isMessage));
 const link = z.looseObject({
   linked: z.boolean(),
   hidden: z.boolean().default(false),
@@ -147,7 +163,7 @@ export const RestoredStateSchema = z
         sittings: z.array(z.object({ start: z.number().finite(), end: z.number().finite() })),
         slug: z.string().min(1),
         channels: z.array(
-          z.looseObject({ id: z.string(), name: z.string(), secret: z.boolean(), msgs: z.array(message) }),
+          z.looseObject({ id: z.string(), name: z.string(), secret: z.boolean(), msgs: messages }),
         ),
         players: z.record(z.string(), link),
       }),

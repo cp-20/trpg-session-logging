@@ -15,14 +15,14 @@ import {
   cx,
   useVisibleCount,
 } from "../components/ui";
-import { CharAvatar } from "../components/identity";
+import { CharAvatar, CharacterCard } from "../components/identity";
 import { SheetView } from "../components/sheet";
 import { SYSTEMS, SYSTEM_LIST } from "../data/systems";
 import { fmtDateShort, uid, todayStr } from "../lib/time";
 import { recentSystemIds, systemOptions } from "../lib/system-options";
 import { cleanTags, tagOptions } from "../lib/tags";
-import { toCharacterFields, type ParsedCharacter } from "../lib/importers";
-import { carriedValues, currentCarriedValue } from "../lib/character-growth";
+import { toCharacterFields, type ParsedCharacter } from "../lib/ccfolia-character";
+import { lastPlayed } from "../lib/character-growth";
 import {
   EXTERNAL_PROVIDER_LABELS,
   SHEET_SITES,
@@ -32,21 +32,6 @@ import {
 } from "../lib/external-sync";
 import type { Character, ExternalSyncConfig, ExternalSyncProvider } from "../types";
 import { IconLink, IconPlus, IconSearch } from "../components/icons";
-
-const lastPlayedCache = new WeakMap<Character, string | undefined>();
-
-/** 卓をまたいで続く値（SAN など）の今の値。セッションの記録とキャラシのうち新しいほう */
-export function currentStat(c: Character, key: string): number | undefined {
-  return currentCarriedValue(c, key);
-}
-
-export function lastPlayed(c: Character): string | undefined {
-  if (lastPlayedCache.has(c)) return lastPlayedCache.get(c);
-  let last: string | undefined;
-  for (const s of c.sessions) if (!last || s.date > last) last = s.date;
-  lastPlayedCache.set(c, last);
-  return last;
-}
 
 export type ExternalSheetResponse = {
   ok: boolean;
@@ -77,36 +62,6 @@ export async function requestExternalSheet(url: string): Promise<ExternalSheetRe
     return { ok: false, error: "キャラシのサイトと通信できませんでした。通信状態をお確かめください。" };
   }
 }
-
-/** 顔を主役にしたキャラクターカード。一覧とユーザーページで共通に使う */
-export const CharacterCard = memo(function CharacterCard({ c }: { c: Character }) {
-  const sys = SYSTEMS[c.systemId];
-  const last = lastPlayed(c);
-  /* カードには卓をまたいで続く値（SAN など）だけを出す。続かない値（HP・幸運・共鳴など）は出さない */
-  const stats = carriedValues(c);
-  return (
-    <Link to={`/characters/${c.id}`} className="card-interactive overflow-hidden p-0">
-      <div className="flex items-start gap-4 p-4">
-        <CharAvatar c={c} size={72} />
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-base font-bold leading-snug">{c.name}</h3>
-          {c.archetype && <p className="truncate text-sm text-ink2">{c.archetype}</p>}
-          <div className="meta mt-2 text-xs">
-            <SysBadge sys={sys} />
-          </div>
-          <div className="meta mt-1 text-xs tabular-nums">
-            {stats.map((st) => (
-              <span key={st.key}>
-                {st.label} <b className="text-base-content">{st.value}</b>
-              </span>
-            ))}
-            <span>{last ? `${fmtDateShort(last)} に遊んだ` : "まだ遊んでいない"}</span>
-          </div>
-        </div>
-      </div>
-    </Link>
-  );
-});
 
 const CHAR_PAGE_SIZE = 24;
 
